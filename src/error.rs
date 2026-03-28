@@ -1,52 +1,35 @@
 //! Error types for tanmatra.
 
-extern crate alloc;
-
 /// Errors that can occur in tanmatra computations.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, thiserror::Error)]
 #[non_exhaustive]
 pub enum TanmatraError {
-    /// Invalid element: atomic number out of range (1-118).
-    #[error("invalid element: Z={z} is out of range 1-118")]
-    InvalidElement {
-        /// The invalid atomic number.
-        z: u16,
-    },
+    /// Invalid atomic number (Z must be >= 1).
+    #[error("invalid atomic number Z={0}: must be >= 1")]
+    InvalidAtomicNumber(u32),
 
-    /// Invalid isotope: mass number inconsistent with atomic number.
-    #[error("invalid isotope: Z={z}, A={a} (A must be >= Z and > 0)")]
-    InvalidIsotope {
+    /// Invalid mass number (A must be >= Z).
+    #[error("invalid mass number A={a} for Z={z}: A must be >= Z")]
+    InvalidMassNumber {
         /// Atomic number.
-        z: u16,
+        z: u32,
         /// Mass number.
-        a: u16,
+        a: u32,
     },
 
-    /// Invalid particle specification.
-    #[error("invalid particle: {reason}")]
-    InvalidParticle {
-        /// Description of why the particle is invalid.
-        reason: alloc::string::String,
-    },
+    /// Invalid quantum numbers.
+    #[error("invalid quantum numbers: {0}")]
+    InvalidQuantumNumbers(alloc::string::String),
 
-    /// Decay operation failed.
-    #[error("decay failed: {reason}")]
-    DecayFailed {
-        /// Description of why the decay failed.
-        reason: alloc::string::String,
-    },
+    /// Invalid half-life (must be positive and finite).
+    #[error("invalid half-life: {0}")]
+    InvalidHalfLife(alloc::string::String),
 
-    /// Invalid energy value.
-    #[error("invalid energy: {reason}")]
-    InvalidEnergy {
-        /// Description of the energy error.
-        reason: alloc::string::String,
-    },
+    /// Decay not possible for the given nucleus.
+    #[error("decay not possible: {0}")]
+    DecayNotPossible(alloc::string::String),
 
-    /// General computation error.
-    #[error("computation error: {reason}")]
-    ComputationError {
-        /// Description of the computation error.
-        reason: alloc::string::String,
-    },
+    /// Invalid reaction parameters.
+    #[error("invalid reaction: {0}")]
+    InvalidReaction(alloc::string::String),
 }

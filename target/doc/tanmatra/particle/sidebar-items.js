@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["Boson","FundamentalForce","Lepton","Quark"],"fn":["boson_properties","force_properties","lepton_properties","quark_properties"],"struct":["BosonProperties","ForceProperties","LeptonProperties","QuarkProperties"]};

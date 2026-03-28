@@ -1,258 +1,224 @@
-//! Standard Model particles: quarks, leptons, bosons, and fundamental forces.
+//! Standard Model particles and fundamental forces.
+//!
+//! Contains the three families of fundamental particles (quarks, leptons, bosons)
+//! and the four fundamental forces with their relative strengths and ranges.
+//!
+//! All masses are from the Particle Data Group (PDG) 2024 Review.
 
-extern crate alloc;
-use alloc::borrow::Cow;
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Quarks
-// ---------------------------------------------------------------------------
-
-/// The six quark flavors of the Standard Model.
+/// Quark flavors of the Standard Model.
+///
+/// Masses are current quark masses (MSbar scheme) from PDG 2024,
+/// except top which is the pole mass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Quark {
-    /// Up quark.
+    /// Up quark (charge +2/3, mass ~2.16 MeV).
     Up,
-    /// Down quark.
+    /// Down quark (charge -1/3, mass ~4.67 MeV).
     Down,
-    /// Charm quark.
+    /// Charm quark (charge +2/3, mass ~1270 MeV).
     Charm,
-    /// Strange quark.
+    /// Strange quark (charge -1/3, mass ~93.4 MeV).
     Strange,
-    /// Top quark.
+    /// Top quark (charge +2/3, mass ~172570 MeV).
     Top,
-    /// Bottom quark.
+    /// Bottom quark (charge -1/3, mass ~4180 MeV).
     Bottom,
 }
 
-/// Physical properties of a quark.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct QuarkProperties {
-    /// Electric charge in thirds of e (+2 means +2/3 e, -1 means -1/3 e).
-    pub charge_thirds: i8,
-    /// Rest mass in MeV/c^2.
-    pub mass_mev: f64,
-    /// Whether the quark carries color charge.
-    pub color: bool,
-}
+impl Quark {
+    /// Returns the quark mass in MeV/c^2 (PDG 2024).
+    #[must_use]
+    pub const fn mass_mev(self) -> f64 {
+        match self {
+            Self::Up => 2.16,
+            Self::Down => 4.67,
+            Self::Charm => 1_270.0,
+            Self::Strange => 93.4,
+            Self::Top => 172_570.0,
+            Self::Bottom => 4_180.0,
+        }
+    }
 
-/// Returns the physical properties of a quark flavor.
-///
-/// Mass values from PDG 2024 review (MS-bar scheme at 2 `GeV` for light quarks).
-#[must_use]
-#[inline]
-pub fn quark_properties(quark: Quark) -> QuarkProperties {
-    match quark {
-        Quark::Up => QuarkProperties {
-            charge_thirds: 2,
-            mass_mev: 2.16,
-            color: true,
-        },
-        Quark::Down => QuarkProperties {
-            charge_thirds: -1,
-            mass_mev: 4.67,
-            color: true,
-        },
-        Quark::Charm => QuarkProperties {
-            charge_thirds: 2,
-            mass_mev: 1270.0,
-            color: true,
-        },
-        Quark::Strange => QuarkProperties {
-            charge_thirds: -1,
-            mass_mev: 93.4,
-            color: true,
-        },
-        Quark::Top => QuarkProperties {
-            charge_thirds: 2,
-            mass_mev: 172_760.0,
-            color: true,
-        },
-        Quark::Bottom => QuarkProperties {
-            charge_thirds: -1,
-            mass_mev: 4180.0,
-            color: true,
-        },
+    /// Returns the electric charge in units of elementary charge.
+    #[must_use]
+    pub const fn charge(self) -> f64 {
+        match self {
+            Self::Up | Self::Charm | Self::Top => 2.0 / 3.0,
+            Self::Down | Self::Strange | Self::Bottom => -1.0 / 3.0,
+        }
+    }
+
+    /// Returns the generation (1, 2, or 3).
+    #[must_use]
+    pub const fn generation(self) -> u8 {
+        match self {
+            Self::Up | Self::Down => 1,
+            Self::Charm | Self::Strange => 2,
+            Self::Top | Self::Bottom => 3,
+        }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Leptons
-// ---------------------------------------------------------------------------
-
-/// The six leptons of the Standard Model.
+/// Lepton flavors of the Standard Model.
+///
+/// Masses from CODATA 2022 / PDG 2024.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Lepton {
-    /// Electron (e-).
+    /// Electron (charge -1, mass 0.51099895 MeV).
     Electron,
-    /// Muon (mu-).
-    Muon,
-    /// Tau (tau-).
-    Tau,
-    /// Electron neutrino.
+    /// Electron neutrino (charge 0, mass < 0.8 eV).
     ElectronNeutrino,
-    /// Muon neutrino.
+    /// Muon (charge -1, mass 105.6583755 MeV).
+    Muon,
+    /// Muon neutrino (charge 0, mass < 0.19 MeV).
     MuonNeutrino,
-    /// Tau neutrino.
+    /// Tau (charge -1, mass 1776.93 MeV).
+    Tau,
+    /// Tau neutrino (charge 0, mass < 18.2 MeV).
     TauNeutrino,
 }
 
-/// Physical properties of a lepton.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct LeptonProperties {
-    /// Electric charge in units of e (-1, 0).
-    pub charge: i8,
-    /// Rest mass in MeV/c^2.
-    pub mass_mev: f64,
-}
+impl Lepton {
+    /// Returns the lepton mass in MeV/c^2.
+    ///
+    /// Neutrino masses are upper bounds; we return 0.0 for computations.
+    #[must_use]
+    pub const fn mass_mev(self) -> f64 {
+        match self {
+            Self::Electron => 0.510_998_950,
+            Self::ElectronNeutrino => 0.0,
+            Self::Muon => 105.658_375_5,
+            Self::MuonNeutrino => 0.0,
+            Self::Tau => 1_776.93,
+            Self::TauNeutrino => 0.0,
+        }
+    }
 
-/// Returns the physical properties of a lepton.
-///
-/// Neutrino masses are listed as upper bounds; effectively zero for computation.
-#[must_use]
-#[inline]
-pub fn lepton_properties(lepton: Lepton) -> LeptonProperties {
-    match lepton {
-        Lepton::Electron => LeptonProperties {
-            charge: -1,
-            mass_mev: 0.510_998_95,
-        },
-        Lepton::Muon => LeptonProperties {
-            charge: -1,
-            mass_mev: 105.658_375_5,
-        },
-        Lepton::Tau => LeptonProperties {
-            charge: -1,
-            mass_mev: 1776.86,
-        },
-        Lepton::ElectronNeutrino | Lepton::MuonNeutrino | Lepton::TauNeutrino => LeptonProperties {
-            charge: 0,
-            mass_mev: 0.0,
-        },
+    /// Returns the electric charge in units of elementary charge.
+    #[must_use]
+    pub const fn charge(self) -> f64 {
+        match self {
+            Self::Electron | Self::Muon | Self::Tau => -1.0,
+            Self::ElectronNeutrino | Self::MuonNeutrino | Self::TauNeutrino => 0.0,
+        }
+    }
+
+    /// Returns the generation (1, 2, or 3).
+    #[must_use]
+    pub const fn generation(self) -> u8 {
+        match self {
+            Self::Electron | Self::ElectronNeutrino => 1,
+            Self::Muon | Self::MuonNeutrino => 2,
+            Self::Tau | Self::TauNeutrino => 3,
+        }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Bosons
-// ---------------------------------------------------------------------------
-
-/// Gauge bosons and the Higgs boson.
+/// Gauge bosons and the Higgs boson of the Standard Model.
+///
+/// Masses from PDG 2024.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Boson {
-    /// Photon -- electromagnetic force carrier.
+    /// Photon (massless, mediates electromagnetic force).
     Photon,
-    /// Gluon -- strong force carrier.
+    /// Gluon (massless, mediates strong force).
     Gluon,
-    /// W+ boson -- weak force carrier (positive).
+    /// W+ boson (mass 80369 MeV).
     WPlus,
-    /// W- boson -- weak force carrier (negative).
+    /// W- boson (mass 80369 MeV).
     WMinus,
-    /// Z boson -- weak force carrier (neutral).
+    /// Z boson (mass 91188 MeV).
     Z,
-    /// Higgs boson -- mass generation.
+    /// Higgs boson (mass 125250 MeV).
     Higgs,
 }
 
-/// Physical properties of a boson.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct BosonProperties {
-    /// Rest mass in MeV/c^2 (0 for massless bosons).
-    pub mass_mev: f64,
-    /// Spin quantum number.
-    pub spin: f64,
-    /// Electric charge in units of e.
-    pub charge: i8,
-}
+impl Boson {
+    /// Returns the boson mass in MeV/c^2 (PDG 2024).
+    #[must_use]
+    pub const fn mass_mev(self) -> f64 {
+        match self {
+            Self::Photon | Self::Gluon => 0.0,
+            Self::WPlus | Self::WMinus => 80_369.0,
+            Self::Z => 91_188.0,
+            Self::Higgs => 125_250.0,
+        }
+    }
 
-/// Returns the physical properties of a boson.
-#[must_use]
-#[inline]
-pub fn boson_properties(boson: Boson) -> BosonProperties {
-    match boson {
-        Boson::Photon | Boson::Gluon => BosonProperties {
-            mass_mev: 0.0,
-            spin: 1.0,
-            charge: 0,
-        },
-        Boson::WPlus => BosonProperties {
-            mass_mev: 80_377.0,
-            spin: 1.0,
-            charge: 1,
-        },
-        Boson::WMinus => BosonProperties {
-            mass_mev: 80_377.0,
-            spin: 1.0,
-            charge: -1,
-        },
-        Boson::Z => BosonProperties {
-            mass_mev: 91_187.6,
-            spin: 1.0,
-            charge: 0,
-        },
-        Boson::Higgs => BosonProperties {
-            mass_mev: 125_250.0,
-            spin: 0.0,
-            charge: 0,
-        },
+    /// Returns the spin quantum number.
+    #[must_use]
+    pub const fn spin(self) -> u8 {
+        match self {
+            Self::Higgs => 0,
+            Self::Photon | Self::Gluon | Self::WPlus | Self::WMinus | Self::Z => 1,
+        }
+    }
+
+    /// Returns the electric charge in units of elementary charge.
+    #[must_use]
+    pub const fn charge(self) -> f64 {
+        match self {
+            Self::Photon | Self::Gluon | Self::Z | Self::Higgs => 0.0,
+            Self::WPlus => 1.0,
+            Self::WMinus => -1.0,
+        }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Fundamental Forces
-// ---------------------------------------------------------------------------
 
 /// The four fundamental forces of nature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum FundamentalForce {
-    /// Strong nuclear force.
+    /// Strong nuclear force (relative strength ~1, range ~1e-15 m).
     Strong,
-    /// Electromagnetic force.
+    /// Electromagnetic force (relative strength ~1/137, infinite range).
     Electromagnetic,
-    /// Weak nuclear force.
+    /// Weak nuclear force (relative strength ~1e-6, range ~1e-18 m).
     Weak,
-    /// Gravitational force.
-    Gravitational,
+    /// Gravitational force (relative strength ~6e-39, infinite range).
+    Gravity,
 }
 
-/// Properties of a fundamental force.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ForceProperties<'a> {
-    /// Relative strength (normalized to strong = 1).
-    pub relative_strength: f64,
-    /// Description of the force's range.
-    pub range_description: Cow<'a, str>,
-    /// Name of the mediator particle.
-    pub mediator: Cow<'a, str>,
-}
+impl FundamentalForce {
+    /// Returns the approximate relative coupling strength compared to the
+    /// strong force (which is normalized to 1).
+    #[must_use]
+    pub const fn relative_strength(self) -> f64 {
+        match self {
+            Self::Strong => 1.0,
+            Self::Electromagnetic => 7.297_353e-3, // ~1/137
+            Self::Weak => 1.0e-6,
+            Self::Gravity => 6.0e-39,
+        }
+    }
 
-/// Returns the properties of a fundamental force.
-#[must_use]
-pub fn force_properties(force: FundamentalForce) -> ForceProperties<'static> {
-    match force {
-        FundamentalForce::Strong => ForceProperties {
-            relative_strength: 1.0,
-            range_description: Cow::Borrowed("~1 fm (confined to nucleus)"),
-            mediator: Cow::Borrowed("gluon"),
-        },
-        FundamentalForce::Electromagnetic => ForceProperties {
-            relative_strength: 1.0 / 137.0,
-            range_description: Cow::Borrowed("infinite (1/r^2)"),
-            mediator: Cow::Borrowed("photon"),
-        },
-        FundamentalForce::Weak => ForceProperties {
-            relative_strength: 1e-6,
-            range_description: Cow::Borrowed("~0.001 fm (W/Z boson range)"),
-            mediator: Cow::Borrowed("W+, W-, Z bosons"),
-        },
-        FundamentalForce::Gravitational => ForceProperties {
-            relative_strength: 6e-39,
-            range_description: Cow::Borrowed("infinite (1/r^2)"),
-            mediator: Cow::Borrowed("graviton (hypothetical)"),
-        },
+    /// Returns the approximate range of the force in meters.
+    ///
+    /// Returns [`f64::INFINITY`] for infinite-range forces.
+    #[must_use]
+    pub const fn range_meters(self) -> f64 {
+        match self {
+            Self::Strong => 1.0e-15,
+            Self::Electromagnetic => f64::INFINITY,
+            Self::Weak => 1.0e-18,
+            Self::Gravity => f64::INFINITY,
+        }
+    }
+
+    /// Returns the mediating boson(s) for this force.
+    #[must_use]
+    pub fn mediator(self) -> &'static [Boson] {
+        match self {
+            Self::Strong => &[Boson::Gluon],
+            Self::Electromagnetic => &[Boson::Photon],
+            Self::Weak => &[Boson::WPlus, Boson::WMinus, Boson::Z],
+            Self::Gravity => &[], // graviton not yet observed
+        }
     }
 }
 
@@ -261,96 +227,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn quark_charges_sum_to_proton() {
-        let u = quark_properties(Quark::Up);
-        let d = quark_properties(Quark::Down);
-        let total = u.charge_thirds + u.charge_thirds + d.charge_thirds;
-        assert_eq!(total, 3);
+    fn quark_masses_ordered() {
+        assert!(Quark::Up.mass_mev() < Quark::Down.mass_mev());
+        assert!(Quark::Down.mass_mev() < Quark::Strange.mass_mev());
+        assert!(Quark::Strange.mass_mev() < Quark::Charm.mass_mev());
+        assert!(Quark::Charm.mass_mev() < Quark::Bottom.mass_mev());
+        assert!(Quark::Bottom.mass_mev() < Quark::Top.mass_mev());
     }
 
     #[test]
-    fn quark_charges_sum_to_neutron() {
-        let u = quark_properties(Quark::Up);
-        let d = quark_properties(Quark::Down);
-        let total = u.charge_thirds + d.charge_thirds + d.charge_thirds;
-        assert_eq!(total, 0);
+    fn lepton_masses_ordered() {
+        assert!(Lepton::Electron.mass_mev() < Lepton::Muon.mass_mev());
+        assert!(Lepton::Muon.mass_mev() < Lepton::Tau.mass_mev());
     }
 
     #[test]
-    fn all_quarks_have_color() {
-        let quarks = [
-            Quark::Up,
-            Quark::Down,
-            Quark::Charm,
-            Quark::Strange,
-            Quark::Top,
-            Quark::Bottom,
-        ];
-        for q in &quarks {
-            assert!(quark_properties(*q).color);
-        }
+    fn force_strengths_ordered() {
+        assert!(
+            FundamentalForce::Strong.relative_strength()
+                > FundamentalForce::Electromagnetic.relative_strength()
+        );
+        assert!(
+            FundamentalForce::Electromagnetic.relative_strength()
+                > FundamentalForce::Weak.relative_strength()
+        );
+        assert!(
+            FundamentalForce::Weak.relative_strength()
+                > FundamentalForce::Gravity.relative_strength()
+        );
     }
 
     #[test]
-    fn top_quark_heaviest() {
-        let top = quark_properties(Quark::Top);
-        let quarks = [
-            Quark::Up,
-            Quark::Down,
-            Quark::Charm,
-            Quark::Strange,
-            Quark::Bottom,
-        ];
-        for q in &quarks {
-            assert!(top.mass_mev > quark_properties(*q).mass_mev);
-        }
+    fn quark_charges() {
+        let eps = 1e-10;
+        assert!((Quark::Up.charge() - 2.0 / 3.0).abs() < eps);
+        assert!((Quark::Down.charge() - (-1.0 / 3.0)).abs() < eps);
     }
 
     #[test]
-    fn electron_mass_matches_constant() {
-        let e = lepton_properties(Lepton::Electron);
-        let diff = libm::fabs(e.mass_mev - crate::constants::ELECTRON_MASS_MEV);
-        assert!(diff < 1e-6);
-    }
-
-    #[test]
-    fn neutrinos_neutral() {
-        let neutrinos = [
-            Lepton::ElectronNeutrino,
-            Lepton::MuonNeutrino,
-            Lepton::TauNeutrino,
-        ];
-        for n in &neutrinos {
-            assert_eq!(lepton_properties(*n).charge, 0);
-        }
-    }
-
-    #[test]
-    fn photon_massless() {
-        let p = boson_properties(Boson::Photon);
-        assert!((p.mass_mev - 0.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn w_boson_pair_charges() {
-        let wp = boson_properties(Boson::WPlus);
-        let wm = boson_properties(Boson::WMinus);
-        assert_eq!(wp.charge, 1);
-        assert_eq!(wm.charge, -1);
-    }
-
-    #[test]
-    fn strong_force_strongest() {
-        let forces = [
-            FundamentalForce::Strong,
-            FundamentalForce::Electromagnetic,
-            FundamentalForce::Weak,
-            FundamentalForce::Gravitational,
-        ];
-        let strong = force_properties(FundamentalForce::Strong);
-        for f in &forces[1..] {
-            assert!(strong.relative_strength > force_properties(*f).relative_strength);
-        }
+    fn boson_higgs_mass() {
+        assert!((Boson::Higgs.mass_mev() - 125_250.0).abs() < 1.0);
     }
 
     #[test]
@@ -363,7 +279,7 @@ mod tests {
 
     #[test]
     fn serde_roundtrip_lepton() {
-        let l = Lepton::Muon;
+        let l = Lepton::Tau;
         let json = serde_json::to_string(&l).unwrap();
         let back: Lepton = serde_json::from_str(&json).unwrap();
         assert_eq!(l, back);
@@ -371,7 +287,7 @@ mod tests {
 
     #[test]
     fn serde_roundtrip_boson() {
-        let b = Boson::Higgs;
+        let b = Boson::Z;
         let json = serde_json::to_string(&b).unwrap();
         let back: Boson = serde_json::from_str(&json).unwrap();
         assert_eq!(b, back);
@@ -379,9 +295,17 @@ mod tests {
 
     #[test]
     fn serde_roundtrip_force() {
-        let f = FundamentalForce::Weak;
+        let f = FundamentalForce::Strong;
         let json = serde_json::to_string(&f).unwrap();
         let back: FundamentalForce = serde_json::from_str(&json).unwrap();
         assert_eq!(f, back);
+    }
+
+    #[test]
+    fn em_mediator_is_photon() {
+        assert_eq!(
+            FundamentalForce::Electromagnetic.mediator(),
+            &[Boson::Photon]
+        );
     }
 }

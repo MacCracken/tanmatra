@@ -1,37 +1,68 @@
-//! # tanmatra
+//! # tanmatra — Atomic and Subatomic Physics
 //!
-//! Atomic and subatomic physics: Standard Model particles, nuclear structure,
-//! radioactive decay, spectral lines, electron configurations, and nuclear reactions.
+//! **tanmatra** (Sanskrit: तन्मात्र — subtle element) provides atomic and
+//! subatomic physics computations: Standard Model particles, nuclear structure,
+//! radioactive decay, spectral lines, and nuclear reactions.
 //!
-//! All physical constants are from CODATA 2022. All ionization energies are from NIST.
-//! The Bethe-Weizsacker semi-empirical mass formula is used for nuclear binding energies.
-//! The Rydberg formula is used for spectral line wavelengths.
+//! ## Architecture
 //!
-//! ## Features
-//!
-//! - `std` (default) -- enables `std` support in serde and thiserror
-//! - `logging` -- enables `tracing` instrumentation
-//! - `full` -- enables all features
-//!
-//! ## Example
-//!
+//! ```text
+//! Fundamental ─── particle.rs ─── Standard Model (quarks, leptons, bosons, forces)
+//!      |
+//!      v
+//! Nuclear ──────── nucleus.rs ─── Bethe-Weizsacker binding energy, nuclear radii
+//!      |            decay.rs ──── Radioactive decay, half-lives, decay chains
+//!      |            reaction.rs ─ Nuclear reactions, Q-values, Coulomb barriers
+//!      v
+//! Atomic ────────── atomic.rs ─── Electron configurations, spectral lines, ionization
 //! ```
-//! use tanmatra::nucleus::{binding_energy_per_nucleon, IRON56};
-//! use tanmatra::atomic::balmer_series;
 //!
-//! // Iron-56: peak of binding energy curve
-//! let bea = binding_energy_per_nucleon(IRON56.z, IRON56.a).unwrap();
-//! assert!(bea > 8.5);
+//! ## Quick Start
 //!
-//! // Hydrogen Balmer H-alpha line
-//! let h_alpha = balmer_series(3).unwrap();
-//! assert!((h_alpha - 656.3).abs() < 0.5);
+//! ```rust
+//! use tanmatra::prelude::*;
+//!
+//! // Iron-56 binding energy per nucleon
+//! let fe56 = Nucleus::iron_56();
+//! let bea = fe56.binding_energy_per_nucleon();
+//! assert!(bea > 8.4 && bea < 9.2); // ~8.8 MeV
+//!
+//! // H-alpha spectral line
+//! let h_alpha = spectral_line_nm(1, 2, 3).unwrap();
+//! assert!((h_alpha - 656.3).abs() < 1.0);
+//!
+//! // Electron configuration of iron
+//! let config = electron_configuration(26).unwrap();
+//! let short = format_configuration_short(&config, 26);
+//! assert_eq!(short, "[Ar] 4s2 3d6");
 //! ```
+//!
+//! ## Feature Flags
+//!
+//! | Feature | Default | Description |
+//! |---------|---------|-------------|
+//! | `std` | Yes | Standard library support. Disable for `no_std` + `alloc` |
+//! | `logging` | No | Structured tracing via the `tracing` crate |
+//! | `full` | No | Enables all optional features |
+//!
+//! ## Data Sources
+//!
+//! - **CODATA 2022**: Fundamental physical constants (NIST)
+//! - **PDG 2024**: Particle masses (Particle Data Group)
+//! - **NNDC/NUBASE**: Nuclear half-lives (National Nuclear Data Center)
+//! - **NIST ASD**: Ionization energies (Atomic Spectra Database)
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![warn(missing_docs)]
-#![warn(clippy::pedantic)]
+#![forbid(unsafe_code)]
+#![warn(missing_docs, clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::similar_names)]
+#![allow(clippy::unreadable_literal)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::cast_lossless)]
+#![allow(clippy::match_same_arms)]
 
 extern crate alloc;
 
@@ -43,50 +74,36 @@ pub mod nucleus;
 pub mod particle;
 pub mod reaction;
 
-/// Prelude: re-exports of the most commonly used types and functions.
+/// Prelude module — import everything commonly needed.
 pub mod prelude {
     pub use crate::atomic::{
-        OrbitalType, QuantumNumbers, balmer_series, electron_configuration, ionization_energy_ev,
-        max_electrons_in_shell, max_electrons_in_subshell, spectral_line_nm,
+        OrbitalFilling, OrbitalType, QuantumNumbers, electron_configuration, format_configuration,
+        format_configuration_short, ionization_energy_ev, spectral_line_nm,
     };
     pub use crate::constants::*;
     pub use crate::decay::{
-        DecayMode, KnownIsotope, activity_bq, alpha_decay, beta_minus_decay, beta_plus_decay,
-        decay_chain, decay_constant, remaining_fraction,
+        DecayMode, Isotope, activity_bq, alpha_decay, beta_minus_decay, beta_plus_decay,
+        decay_chain, decay_constant, known_isotopes, remaining_fraction,
     };
     pub use crate::error::TanmatraError;
-    pub use crate::nucleus::{
-        CARBON12, HELIUM4, HYDROGEN, IRON56, Nucleus, OXYGEN16, URANIUM235, URANIUM238,
-        binding_energy_mev, binding_energy_per_nucleon, is_magic_number, mass_defect_mev,
-        nuclear_radius_fm,
-    };
-    pub use crate::particle::{
-        Boson, BosonProperties, ForceProperties, FundamentalForce, Lepton, LeptonProperties, Quark,
-        QuarkProperties, boson_properties, force_properties, lepton_properties, quark_properties,
-    };
+    pub use crate::nucleus::{Nucleus, is_magic_number};
+    pub use crate::particle::{Boson, FundamentalForce, Lepton, Quark};
     pub use crate::reaction::{
-        NuclearReaction, coulomb_barrier_mev, dd_fusion, dt_fusion, is_exothermic, pp_chain_step1,
-        q_value, u235_fission_approx,
+        NuclearReaction, cno_cycle, coulomb_barrier, dd_fusion_he3, dd_fusion_t, dt_fusion,
+        pp_chain_step1, q_value, triple_alpha, u235_fission,
     };
 }
 
 // Static assertions: all key types are Send + Sync.
-#[cfg(test)]
-const _: () = {
-    #[allow(dead_code)]
-    fn assert_send_sync<T: Send + Sync>() {}
-    #[allow(dead_code)]
-    fn _assertions() {
-        assert_send_sync::<nucleus::Nucleus>();
-        assert_send_sync::<particle::Quark>();
-        assert_send_sync::<particle::Lepton>();
-        assert_send_sync::<particle::Boson>();
-        assert_send_sync::<particle::FundamentalForce>();
-        assert_send_sync::<decay::DecayMode>();
-        assert_send_sync::<decay::KnownIsotope>();
-        assert_send_sync::<atomic::OrbitalType>();
-        assert_send_sync::<atomic::QuantumNumbers>();
-        assert_send_sync::<reaction::NuclearReaction>();
-        assert_send_sync::<error::TanmatraError>();
-    }
-};
+#[allow(dead_code)]
+trait AssertSendSync: Send + Sync {}
+impl AssertSendSync for nucleus::Nucleus {}
+impl AssertSendSync for particle::Quark {}
+impl AssertSendSync for particle::Lepton {}
+impl AssertSendSync for particle::Boson {}
+impl AssertSendSync for particle::FundamentalForce {}
+impl AssertSendSync for decay::DecayMode {}
+impl AssertSendSync for atomic::OrbitalType {}
+impl AssertSendSync for atomic::QuantumNumbers {}
+impl AssertSendSync for atomic::OrbitalFilling {}
+impl AssertSendSync for error::TanmatraError {}

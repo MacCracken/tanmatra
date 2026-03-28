@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["CARBON12","HELIUM4","HYDROGEN","IRON56","OXYGEN16","URANIUM235","URANIUM238"],"fn":["binding_energy_mev","binding_energy_per_nucleon","is_magic_number","mass_defect_mev","nuclear_radius_fm"],"struct":["Nucleus"]};

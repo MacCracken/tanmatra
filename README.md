@@ -1,59 +1,55 @@
 # tanmatra
 
-**tanmatra** (Sanskrit: subtle element) -- Atomic and subatomic physics library for the AGNOS project.
+**tanmatra** (Sanskrit: तन्मात्र — subtle element) — Atomic and subatomic physics for [AGNOS](https://github.com/MacCracken/agnosticos).
 
-Standard Model particles, nuclear structure, radioactive decay, spectral lines, electron configurations, and nuclear reactions.
+Standard Model particles, nuclear structure (Bethe-Weizsacker), radioactive decay with real half-lives, spectral lines (Rydberg), electron configurations (Aufbau + exceptions), nuclear reactions, and ionization energies.
 
 ## Features
 
-- **Standard Model**: All quarks, leptons, gauge bosons, and fundamental forces with real PDG masses
-- **Nuclear Structure**: Bethe-Weizsacker binding energy, mass defect, nuclear radius, magic numbers
-- **Radioactive Decay**: Alpha/beta/gamma decay, half-lives, activity, decay chains with 10 real isotopes
-- **Atomic Structure**: Electron configurations (Aufbau + Cr/Cu exceptions), quantum number validation
-- **Spectral Lines**: Rydberg formula, Balmer series for hydrogen
-- **Ionization Energies**: NIST values for Z=1-36
-- **Nuclear Reactions**: D-T/D-D fusion, p-p chain, U-235 fission, Coulomb barrier
-- **Constants**: All CODATA 2022 fundamental constants
+- **Standard Model**: Quarks, leptons, bosons with PDG 2024 masses; four fundamental forces with coupling strengths
+- **Nuclear structure**: Binding energy (semi-empirical mass formula), nuclear radii, magic numbers
+- **Radioactive decay**: Decay modes, decay constants, activity, 17 known isotopes with NNDC half-lives, decay chains
+- **Atomic physics**: Quantum number validation, electron configurations with Cr/Cu/Mo/Ag/Au exceptions, Rydberg spectral lines
+- **Nuclear reactions**: Q-values, Coulomb barriers, preset fusion (DT, DD, pp, CNO, triple-alpha) and fission (U-235)
+- **Ionization energies**: NIST values for Z=1-36
+- **`no_std` compatible**: Works with `alloc` only, no standard library required
+- **Serde support**: All types serialize/deserialize
 
-## Usage
+## Quick Start
 
 ```rust
 use tanmatra::prelude::*;
 
-// Iron-56: peak of binding energy curve
-let bea = binding_energy_per_nucleon(IRON56.z, IRON56.a).unwrap();
-assert!(bea > 8.5); // ~8.8 MeV/nucleon
+// Iron-56 binding energy per nucleon (~8.8 MeV)
+let fe56 = Nucleus::iron_56();
+println!("B/A = {:.2} MeV", fe56.binding_energy_per_nucleon());
 
-// Hydrogen H-alpha spectral line
-let h_alpha = balmer_series(3).unwrap();
-assert!((h_alpha - 656.3).abs() < 0.5); // ~656.3 nm
+// H-alpha spectral line (~656.3 nm)
+let h_alpha = spectral_line_nm(1, 2, 3).unwrap();
+println!("H-alpha = {:.1} nm", h_alpha);
 
-// C-14 radioactive decay
-let c14 = tanmatra::decay::carbon14();
-let lambda = decay_constant(c14.half_life_s).unwrap();
-// lambda ~ 3.836e-12 /s
-
-// Electron configuration of chromium (exception)
-let config = electron_configuration(24).unwrap();
-// [Ar] 3d5 4s1
+// Electron configuration of iron: [Ar] 4s2 3d6
+let config = electron_configuration(26).unwrap();
+println!("{}", format_configuration_short(&config, 26));
 ```
 
-## Accuracy
+## Data Sources
 
-- Physical constants: CODATA 2022 recommended values
-- Ionization energies: NIST Atomic Spectra Database
-- Quark/lepton masses: PDG 2024 review
-- Nuclear half-lives: evaluated nuclear data (NNDC/ENSDF)
-- Binding energies: Bethe-Weizsacker semi-empirical mass formula (approximate)
+| Source | Used For |
+|--------|----------|
+| [CODATA 2022](https://physics.nist.gov/cuu/Constants/) | Fundamental constants |
+| [PDG 2024](https://pdg.lbl.gov/) | Particle masses |
+| [NNDC/NUBASE](https://www.nndc.bnl.gov/) | Nuclear half-lives |
+| [NIST ASD](https://physics.nist.gov/PhysRefData/ASD/ionEnergy.html) | Ionization energies |
 
-## Features
+## Feature Flags
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `std` | yes | Standard library support |
-| `logging` | no | `tracing` instrumentation |
-| `full` | no | All features enabled |
+| `std` | Yes | Standard library support |
+| `logging` | No | Structured tracing |
+| `full` | No | All optional features |
 
 ## License
 
-GPL-3.0-only
+GPL-3.0-only. See [LICENSE](LICENSE).

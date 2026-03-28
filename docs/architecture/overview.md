@@ -3,58 +3,47 @@
 ## Module Map
 
 ```
-tanmatra (lib.rs)
-  |-- constants.rs    CODATA 2022 fundamental constants
-  |-- error.rs        TanmatraError enum
-  |-- particle.rs     Standard Model: quarks, leptons, bosons, forces
-  |-- nucleus.rs      Nuclear structure: binding energy, radius, magic numbers
-  |-- decay.rs        Radioactive decay: modes, half-lives, chains
-  |-- atomic.rs       Electron structure: configs, spectral lines, ionization
-  |-- reaction.rs     Nuclear reactions: fusion, fission, Coulomb barrier
+tanmatra/
+  src/
+    lib.rs          — crate root, prelude, feature flags
+    error.rs        — TanmatraError (6 variants, thiserror)
+    constants.rs    — CODATA 2022 physical constants
+    particle.rs     — Standard Model: quarks, leptons, bosons, forces
+    nucleus.rs      — Nuclear structure, Bethe-Weizsacker binding energy
+    decay.rs        — Radioactive decay, half-lives, decay chains
+    atomic.rs       — Electron configuration, spectral lines, ionization
+    reaction.rs     — Nuclear reactions, Q-values, Coulomb barriers
+  benches/
+    benchmarks.rs   — Criterion benchmarks (4 suites)
+  examples/
+    basic.rs        — Demonstrates all modules
 ```
 
 ## Data Flow
 
 ```
-Constants (CODATA 2022)
-    |
-    +-> Particle properties (masses, charges, spins)
-    |
-    +-> Nucleus (Z, A)
-    |     |
-    |     +-> Binding energy (Bethe-Weizsacker)
-    |     +-> Nuclear radius
-    |     +-> Mass defect
-    |
-    +-> Decay
-    |     |
-    |     +-> Decay constant (from half-life)
-    |     +-> Activity (Bq)
-    |     +-> Decay chains
-    |
-    +-> Atomic
-    |     |
-    |     +-> Electron configuration (Aufbau)
-    |     +-> Spectral lines (Rydberg)
-    |     +-> Ionization energies (NIST)
-    |
-    +-> Reactions
-          |
-          +-> Q-values
-          +-> Coulomb barrier
+constants.rs ──> All modules (physical constants)
+      |
+particle.rs     (standalone — Standard Model catalog)
+      |
+nucleus.rs ───> decay.rs ───> decay chains
+      |              |
+      +──────> reaction.rs ──> Q-values, barriers
+      |
+atomic.rs       (standalone — electron structure)
 ```
 
-## Consumers
+## Dependencies
 
-- **prakash**: Optics and light simulation (spectral data)
-- **kiran**: Game engine (physics simulation)
-- **joshua**: Game manager (nuclear simulation scenarios)
-- Any AGNOS component needing atomic/nuclear physics
+- **libm**: `no_std` math functions (cbrt, pow, log)
+- **serde**: Serialization for all public types
+- **thiserror**: Error derive macro
+- **tracing** (optional): Structured logging
 
 ## Design Decisions
 
-- **Flat crate**: No workspace, single `src/` directory
-- **`no_std` by default**: Core computations work without standard library
-- **Real data only**: All constants from CODATA 2022, masses from PDG, ionization energies from NIST
-- **Semi-empirical models**: Bethe-Weizsacker for binding energy (approximate but fast), Rydberg for spectral lines (exact for hydrogen-like)
-- **Error handling**: All fallible operations return `Result<T, TanmatraError>`
+1. **Flat crate**: Single-level modules, no nested crate hierarchy
+2. **Real data only**: All constants from CODATA 2022, masses from PDG 2024, half-lives from NNDC
+3. **`no_std` first**: Core functionality works without `std`
+4. **Semi-empirical formulas**: Bethe-Weizsacker for binding energy (accurate to ~1% for A > 20)
+5. **Known exceptions**: Electron configuration handles Cr, Cu, Mo, Ag, Au anomalies

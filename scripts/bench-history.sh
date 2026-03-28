@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Run criterion benchmarks, append results to CSV history, and generate benchmarks.md
-# with a 3-point trend table (baseline -> previous -> current).
+# with a 3-point trend table (baseline → previous → current).
 #
 # Usage:
 #   ./scripts/bench-history.sh              # defaults to bench-history.csv
@@ -118,7 +118,7 @@ for i, ts in enumerate(pick):
 
 def fmt_ns(ns):
     if ns >= 1_000_000:
-        return f"{ns/1000:.1f} us"
+        return f"{ns/1000:.1f} µs"
     elif ns >= 100:
         return f"{ns:.1f} ns"
     else:
@@ -137,9 +137,9 @@ def delta(old, new):
 with open(md_file, "w") as f:
     f.write("# Benchmarks\n\n")
     ts_last = pick[-1]
-    f.write(f"Latest: **{ts_last}** -- commit `{commits[ts_last]}`\n\n")
+    f.write(f"Latest: **{ts_last}** — commit `{commits[ts_last]}`\n\n")
     if len(pick) >= 3:
-        f.write(f"Tracking: `{commits[pick[0]]}` (baseline) -> `{commits[pick[1]]}` (optimized) -> `{commits[pick[-1]]}` (current)\n\n")
+        f.write(f"Tracking: `{commits[pick[0]]}` (baseline) → `{commits[pick[1]]}` (optimized) → `{commits[pick[-1]]}` (current)\n\n")
 
     # Group by prefix
     groups = OrderedDict()
@@ -161,7 +161,7 @@ with open(md_file, "w") as f:
             for ts in pick:
                 ns = vals.get(ts)
                 if ns is None:
-                    cells.append("--")
+                    cells.append("—")
                 else:
                     cell = fmt_ns(ns)
                     # Add delta vs baseline if not the first column

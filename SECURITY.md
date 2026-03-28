@@ -8,11 +8,11 @@ tanmatra is a pure physics computation library. It performs no I/O, no network a
 
 | Area | Risk | Mitigation |
 |------|------|------------|
-| Binding energy formula | NaN/Infinity on edge inputs | Validated Z and A ranges |
-| Spectral line computation | Division by zero on equal quantum numbers | Returns error for n_upper <= n_lower |
-| Decay chain computation | Infinite loop on stable isotope | Step limit parameter required |
-| Electron configuration | Stack overflow on extreme Z | Z limited to valid range (1-118) |
-| Serde deserialization | Crafted JSON with extreme values | Enum validation via serde derive; parameters validated on use |
+| Binding energy formula | Division by zero for A=0 | Validated in constructor, returns error |
+| Decay calculations | Division by zero for zero half-life | Half-life validated > 0 |
+| Quantum numbers | Invalid combinations | Validated in constructor |
+| Serde deserialization | Crafted JSON with extreme values | Enum validation via serde derive; parameters validated on construction |
+| Nuclear radius | Negative mass number | Validated in constructor |
 
 ## Reporting Vulnerabilities
 
