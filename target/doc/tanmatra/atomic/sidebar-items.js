@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["OrbitalType"],"fn":["balmer_series","electron_configuration","ionization_energy_ev","max_electrons_in_shell","max_electrons_in_subshell","spectral_line_nm"],"struct":["QuantumNumbers"]};

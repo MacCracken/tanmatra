@@ -1,0 +1,12 @@
+/home/macro/Repos/tanmatra/target/debug/deps/tracing-e86fc2965db48ea2.d: /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/lib.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/macros.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/dispatcher.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/field.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/instrument.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/level_filters.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/span.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/subscriber.rs
+
+/home/macro/Repos/tanmatra/target/debug/deps/libtracing-e86fc2965db48ea2.rmeta: /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/lib.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/macros.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/dispatcher.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/field.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/instrument.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/level_filters.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/span.rs /home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/subscriber.rs
+
+/home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/lib.rs:
+/home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/macros.rs:
+/home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/dispatcher.rs:
+/home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/field.rs:
+/home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/instrument.rs:
+/home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/level_filters.rs:
+/home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/span.rs:
+/home/macro/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-0.1.44/src/subscriber.rs:

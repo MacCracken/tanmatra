@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["coulomb_barrier_mev","dd_fusion","dt_fusion","is_exothermic","pp_chain_step1","q_value","u235_fission_approx"],"struct":["NuclearReaction"]};
