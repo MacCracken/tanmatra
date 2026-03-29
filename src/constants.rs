@@ -51,6 +51,14 @@ pub const BOLTZMANN_EV: f64 = 8.617_333_262e-5;
 /// Planck constant in eV*s (CODATA 2022, exact).
 pub const H_EV_S: f64 = 4.135_667_696e-15;
 
+/// Reduced Planck constant in MeV*s (CODATA 2022).
+///
+/// Used for decay width ↔ lifetime conversion: Γ·τ = ħ.
+pub const HBAR_MEV_S: f64 = 6.582_119_514e-22;
+
+/// Bohr magneton in eV/T (CODATA 2022).
+pub const BOHR_MAGNETON_EV_T: f64 = 5.788_381_806_0e-5;
+
 /// Coulomb constant k_e in MeV*fm / e^2.
 ///
 /// k_e = e^2 / (4 * pi * epsilon_0) expressed in nuclear units.

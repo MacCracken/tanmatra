@@ -116,6 +116,43 @@ impl Lepton {
             Self::Tau | Self::TauNeutrino => 3,
         }
     }
+
+    /// Returns the mean lifetime in seconds (PDG 2024).
+    ///
+    /// Returns [`f64::INFINITY`] for stable particles (electron, neutrinos).
+    #[must_use]
+    #[inline]
+    pub const fn lifetime_seconds(self) -> f64 {
+        match self {
+            Self::Muon => 2.196_981_1e-6, // PDG 2024
+            Self::Tau => 2.903e-13,       // PDG 2024
+            Self::Electron | Self::ElectronNeutrino | Self::MuonNeutrino | Self::TauNeutrino => {
+                f64::INFINITY
+            }
+        }
+    }
+
+    /// Returns the total decay width in MeV (PDG 2024).
+    ///
+    /// Derived from Γ = ħ / τ. Returns 0.0 for stable particles.
+    #[must_use]
+    #[inline]
+    pub fn decay_width_mev(self) -> f64 {
+        let tau = self.lifetime_seconds();
+        if tau.is_infinite() {
+            return 0.0;
+        }
+        crate::constants::HBAR_MEV_S / tau
+    }
+
+    /// Returns `true` if this lepton is stable (infinite lifetime).
+    #[must_use]
+    pub const fn is_stable(self) -> bool {
+        matches!(
+            self,
+            Self::Electron | Self::ElectronNeutrino | Self::MuonNeutrino | Self::TauNeutrino
+        )
+    }
 }
 
 /// Gauge bosons and the Higgs boson of the Standard Model.
@@ -167,6 +204,39 @@ impl Boson {
             Self::WPlus => 1.0,
             Self::WMinus => -1.0,
         }
+    }
+
+    /// Returns the total decay width in MeV (PDG 2024).
+    ///
+    /// Returns 0.0 for stable particles (photon) and confined particles (gluon).
+    #[must_use]
+    #[inline]
+    pub const fn decay_width_mev(self) -> f64 {
+        match self {
+            Self::Photon | Self::Gluon => 0.0,
+            Self::WPlus | Self::WMinus => 2_085.0, // 2.085 GeV
+            Self::Z => 2_495.5,                    // 2.4955 GeV
+            Self::Higgs => 3.7,                    // 3.7 MeV (CMS off-shell)
+        }
+    }
+
+    /// Returns the mean lifetime in seconds (PDG 2024).
+    ///
+    /// Returns [`f64::INFINITY`] for stable (photon) or confined (gluon) particles.
+    #[must_use]
+    #[inline]
+    pub fn lifetime_seconds(self) -> f64 {
+        let width = self.decay_width_mev();
+        if width <= 0.0 {
+            return f64::INFINITY;
+        }
+        crate::constants::HBAR_MEV_S / width
+    }
+
+    /// Returns `true` if this boson is stable (infinite lifetime).
+    #[must_use]
+    pub const fn is_stable(self) -> bool {
+        matches!(self, Self::Photon | Self::Gluon)
     }
 }
 
@@ -307,5 +377,62 @@ mod tests {
             FundamentalForce::Electromagnetic.mediator(),
             &[Boson::Photon]
         );
+    }
+
+    #[test]
+    fn muon_lifetime() {
+        let tau = Lepton::Muon.lifetime_seconds();
+        assert!((tau - 2.197e-6).abs() < 1e-8, "muon lifetime={tau}");
+    }
+
+    #[test]
+    fn tau_lifetime() {
+        let tau = Lepton::Tau.lifetime_seconds();
+        assert!((tau - 2.903e-13).abs() < 1e-15, "tau lifetime={tau}");
+    }
+
+    #[test]
+    fn electron_is_stable() {
+        assert!(Lepton::Electron.is_stable());
+        assert!(Lepton::Electron.lifetime_seconds().is_infinite());
+        assert!((Lepton::Electron.decay_width_mev()).abs() < 1e-30);
+    }
+
+    #[test]
+    fn neutrinos_stable() {
+        assert!(Lepton::ElectronNeutrino.is_stable());
+        assert!(Lepton::MuonNeutrino.is_stable());
+        assert!(Lepton::TauNeutrino.is_stable());
+    }
+
+    #[test]
+    fn w_boson_decay_width() {
+        let gamma = Boson::WPlus.decay_width_mev();
+        // W width ≈ 2085 MeV (2.085 GeV)
+        assert!((gamma - 2085.0).abs() < 50.0, "W width={gamma} MeV");
+    }
+
+    #[test]
+    fn z_boson_decay_width() {
+        let gamma = Boson::Z.decay_width_mev();
+        // Z width ≈ 2495.5 MeV (2.4955 GeV)
+        assert!((gamma - 2495.5).abs() < 5.0, "Z width={gamma} MeV");
+    }
+
+    #[test]
+    fn photon_is_stable() {
+        assert!(Boson::Photon.is_stable());
+        assert!(Boson::Photon.lifetime_seconds().is_infinite());
+    }
+
+    #[test]
+    fn width_lifetime_consistency() {
+        // Verify Γ·τ = ħ for the muon
+        let gamma = Lepton::Muon.decay_width_mev();
+        let tau = Lepton::Muon.lifetime_seconds();
+        let hbar = crate::constants::HBAR_MEV_S;
+        let product = gamma * tau;
+        let rel_err = (product - hbar).abs() / hbar;
+        assert!(rel_err < 1e-6, "Γ·τ={product}, ħ={hbar}");
     }
 }

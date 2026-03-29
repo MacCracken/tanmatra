@@ -32,6 +32,8 @@ pub enum DecayMode {
     ProtonEmission,
     /// Neutron emission (Z, A-1).
     NeutronEmission,
+    /// Isomeric transition: excited state -> lower state via gamma emission.
+    IsomericTransition,
 }
 
 /// A known radioactive isotope with its half-life and primary decay mode.
@@ -45,6 +47,10 @@ pub struct Isotope {
     pub half_life_seconds: f64,
     /// Primary decay mode.
     pub primary_decay: DecayMode,
+    /// Whether this is an isomeric (metastable) state.
+    pub is_isomer: bool,
+    /// Excitation energy above ground state in keV (0.0 for ground state).
+    pub excitation_energy_kev: f64,
 }
 
 /// Returns the decay constant lambda = ln(2) / t_half.
@@ -166,7 +172,11 @@ pub fn decay_chain(start: &Nucleus, max_steps: usize) -> Vec<(Nucleus, DecayMode
                     DecayMode::Alpha => alpha_decay(&current),
                     DecayMode::BetaMinus => beta_minus_decay(&current),
                     DecayMode::BetaPlus | DecayMode::ElectronCapture => beta_plus_decay(&current),
-                    _ => break, // Gamma, fission, etc. -- stop chain
+                    DecayMode::IsomericTransition | DecayMode::Gamma => {
+                        // IT/gamma: nucleus unchanged, transition to ground state
+                        Ok(current)
+                    }
+                    _ => break, // Fission, proton/neutron emission -- stop chain
                 };
 
                 match daughter {
@@ -194,126 +204,94 @@ pub fn known_isotopes() -> Vec<Isotope> {
     let seconds_per_day = 24.0 * 3600.0;
     let seconds_per_minute = 60.0;
 
+    // Helper to create a ground-state isotope
+    let gs = |z: u32, a: u32, name: &str, half_life: f64, mode: DecayMode| Isotope {
+        nucleus: Nucleus::new(z, a).unwrap_or_else(|_| Nucleus::hydrogen_1()),
+        name: String::from(name),
+        half_life_seconds: half_life,
+        primary_decay: mode,
+        is_isomer: false,
+        excitation_energy_kev: 0.0,
+    };
+    let iso = |z: u32, a: u32, name: &str, half_life: f64, mode: DecayMode, exc_kev: f64| Isotope {
+        nucleus: Nucleus::new(z, a).unwrap_or_else(|_| Nucleus::hydrogen_1()),
+        name: String::from(name),
+        half_life_seconds: half_life,
+        primary_decay: mode,
+        is_isomer: true,
+        excitation_energy_kev: exc_kev,
+    };
+
+    let y = seconds_per_year;
+    let d = seconds_per_day;
+    let m = seconds_per_minute;
+
     alloc::vec![
-        // Tritium: H-3, t½ = 12.32 years
-        Isotope {
-            nucleus: Nucleus::new(1, 3).unwrap_or_else(|_| Nucleus::hydrogen_1()),
-            name: String::from("H-3"),
-            half_life_seconds: 12.32 * seconds_per_year,
-            primary_decay: DecayMode::BetaMinus,
-        },
-        // Carbon-14: t½ = 5730 years (NNDC)
-        Isotope {
-            nucleus: Nucleus::new(6, 14).unwrap_or_else(|_| Nucleus::carbon_12()),
-            name: String::from("C-14"),
-            half_life_seconds: 5730.0 * seconds_per_year,
-            primary_decay: DecayMode::BetaMinus,
-        },
-        // Potassium-40: t½ = 1.248e9 years
-        Isotope {
-            nucleus: Nucleus::new(19, 40).unwrap_or_else(|_| Nucleus::hydrogen_1()),
-            name: String::from("K-40"),
-            half_life_seconds: 1.248e9 * seconds_per_year,
-            primary_decay: DecayMode::BetaMinus,
-        },
-        // Cobalt-60: t½ = 5.2714 years
-        Isotope {
-            nucleus: Nucleus::new(27, 60).unwrap_or_else(|_| Nucleus::iron_56()),
-            name: String::from("Co-60"),
-            half_life_seconds: 5.2714 * seconds_per_year,
-            primary_decay: DecayMode::BetaMinus,
-        },
-        // Strontium-90: t½ = 28.79 years
-        Isotope {
-            nucleus: Nucleus::new(38, 90).unwrap_or_else(|_| Nucleus::iron_56()),
-            name: String::from("Sr-90"),
-            half_life_seconds: 28.79 * seconds_per_year,
-            primary_decay: DecayMode::BetaMinus,
-        },
-        // Iodine-131: t½ = 8.0197 days
-        Isotope {
-            nucleus: Nucleus::new(53, 131).unwrap_or_else(|_| Nucleus::iron_56()),
-            name: String::from("I-131"),
-            half_life_seconds: 8.0252 * seconds_per_day,
-            primary_decay: DecayMode::BetaMinus,
-        },
-        // Cesium-137: t½ = 30.17 years
-        Isotope {
-            nucleus: Nucleus::new(55, 137).unwrap_or_else(|_| Nucleus::iron_56()),
-            name: String::from("Cs-137"),
-            half_life_seconds: 30.05 * seconds_per_year,
-            primary_decay: DecayMode::BetaMinus,
-        },
-        // Radon-222: t½ = 3.8235 days
-        Isotope {
-            nucleus: Nucleus::new(86, 222).unwrap_or_else(|_| Nucleus::uranium_238()),
-            name: String::from("Rn-222"),
-            half_life_seconds: 3.8222 * seconds_per_day,
-            primary_decay: DecayMode::Alpha,
-        },
-        // Radium-226: t½ = 1600 years
-        Isotope {
-            nucleus: Nucleus::new(88, 226).unwrap_or_else(|_| Nucleus::uranium_238()),
-            name: String::from("Ra-226"),
-            half_life_seconds: 1600.0 * seconds_per_year,
-            primary_decay: DecayMode::Alpha,
-        },
-        // Thorium-230: t½ = 75380 years
-        Isotope {
-            nucleus: Nucleus::new(90, 230).unwrap_or_else(|_| Nucleus::uranium_238()),
-            name: String::from("Th-230"),
-            half_life_seconds: 75_380.0 * seconds_per_year,
-            primary_decay: DecayMode::Alpha,
-        },
-        // Thorium-234: t½ = 24.10 days
-        Isotope {
-            nucleus: Nucleus::new(90, 234).unwrap_or_else(|_| Nucleus::uranium_238()),
-            name: String::from("Th-234"),
-            half_life_seconds: 24.10 * seconds_per_day,
-            primary_decay: DecayMode::BetaMinus,
-        },
-        // Protactinium-234m: t½ = 1.17 minutes
-        Isotope {
-            nucleus: Nucleus::new(91, 234).unwrap_or_else(|_| Nucleus::uranium_238()),
-            name: String::from("Pa-234m"),
-            half_life_seconds: 1.17 * seconds_per_minute,
-            primary_decay: DecayMode::BetaMinus,
-        },
-        // Uranium-234: t½ = 245500 years
-        Isotope {
-            nucleus: Nucleus::new(92, 234).unwrap_or_else(|_| Nucleus::uranium_235()),
-            name: String::from("U-234"),
-            half_life_seconds: 245_250.0 * seconds_per_year,
-            primary_decay: DecayMode::Alpha,
-        },
-        // Uranium-235: t½ = 7.04e8 years
-        Isotope {
-            nucleus: Nucleus::uranium_235(),
-            name: String::from("U-235"),
-            half_life_seconds: 7.04e8 * seconds_per_year,
-            primary_decay: DecayMode::Alpha,
-        },
-        // Uranium-238: t½ = 4.468e9 years (NNDC)
-        Isotope {
-            nucleus: Nucleus::uranium_238(),
-            name: String::from("U-238"),
-            half_life_seconds: 4.468e9 * seconds_per_year,
-            primary_decay: DecayMode::Alpha,
-        },
-        // Plutonium-239: t½ = 24110 years
-        Isotope {
-            nucleus: Nucleus::new(94, 239).unwrap_or_else(|_| Nucleus::uranium_238()),
-            name: String::from("Pu-239"),
-            half_life_seconds: 24_110.0 * seconds_per_year,
-            primary_decay: DecayMode::Alpha,
-        },
-        // Americium-241: t½ = 432.2 years
-        Isotope {
-            nucleus: Nucleus::new(95, 241).unwrap_or_else(|_| Nucleus::uranium_238()),
-            name: String::from("Am-241"),
-            half_life_seconds: 432.6 * seconds_per_year,
-            primary_decay: DecayMode::Alpha,
-        },
+        gs(1, 3, "H-3", 12.32 * y, DecayMode::BetaMinus),
+        gs(6, 14, "C-14", 5730.0 * y, DecayMode::BetaMinus),
+        gs(19, 40, "K-40", 1.248e9 * y, DecayMode::BetaMinus),
+        gs(27, 60, "Co-60", 5.2714 * y, DecayMode::BetaMinus),
+        gs(38, 90, "Sr-90", 28.79 * y, DecayMode::BetaMinus),
+        gs(53, 131, "I-131", 8.0252 * d, DecayMode::BetaMinus),
+        gs(55, 137, "Cs-137", 30.05 * y, DecayMode::BetaMinus),
+        gs(86, 222, "Rn-222", 3.8222 * d, DecayMode::Alpha),
+        gs(88, 226, "Ra-226", 1600.0 * y, DecayMode::Alpha),
+        gs(90, 230, "Th-230", 75_380.0 * y, DecayMode::Alpha),
+        gs(90, 234, "Th-234", 24.10 * d, DecayMode::BetaMinus),
+        // Pa-234m: isomeric state, excitation energy 73.92 keV (NNDC)
+        iso(91, 234, "Pa-234m", 1.17 * m, DecayMode::BetaMinus, 73.92),
+        gs(92, 234, "U-234", 245_250.0 * y, DecayMode::Alpha),
+        gs(92, 235, "U-235", 7.04e8 * y, DecayMode::Alpha),
+        gs(92, 238, "U-238", 4.468e9 * y, DecayMode::Alpha),
+        // --- Full U-238 decay chain intermediates (NNDC) ---
+        gs(84, 218, "Po-218", 3.098 * m, DecayMode::Alpha),
+        gs(82, 214, "Pb-214", 26.8 * m, DecayMode::BetaMinus),
+        gs(83, 214, "Bi-214", 19.9 * m, DecayMode::BetaMinus),
+        gs(84, 214, "Po-214", 164.3e-6, DecayMode::Alpha), // 164.3 µs
+        gs(82, 210, "Pb-210", 22.2 * y, DecayMode::BetaMinus),
+        gs(83, 210, "Bi-210", 5.012 * d, DecayMode::BetaMinus),
+        gs(84, 210, "Po-210", 138.376 * d, DecayMode::Alpha),
+        // Pb-206 is stable (end of U-238 chain) — not included
+        // --- Other notable isotopes ---
+        gs(94, 239, "Pu-239", 24_110.0 * y, DecayMode::Alpha),
+        gs(95, 241, "Am-241", 432.6 * y, DecayMode::Alpha),
+        // Notable isomers
+        // Ta-180m: longest-lived nuclear isomer (>1.2e15 years, effectively stable)
+        iso(
+            73,
+            180,
+            "Ta-180m",
+            1.2e15 * y,
+            DecayMode::IsomericTransition,
+            77.1
+        ),
+        // Hf-178m2: high-spin isomer
+        iso(
+            72,
+            178,
+            "Hf-178m2",
+            31.0 * y,
+            DecayMode::IsomericTransition,
+            2446.1
+        ),
+        // Tc-99m: medical imaging isotope
+        iso(
+            43,
+            99,
+            "Tc-99m",
+            6.006 * 3600.0,
+            DecayMode::IsomericTransition,
+            142.68
+        ),
+        // Am-242m: used in nuclear reactors
+        iso(
+            95,
+            242,
+            "Am-242m",
+            141.0 * y,
+            DecayMode::IsomericTransition,
+            48.6
+        ),
     ]
 }
 
@@ -434,5 +412,49 @@ mod tests {
         let back: Isotope = serde_json::from_str(&json).unwrap();
         assert_eq!(iso.name, back.name);
         assert!((iso.half_life_seconds - back.half_life_seconds).abs() < 1.0);
+    }
+
+    #[test]
+    fn full_u238_chain_to_pb206() {
+        let u238 = Nucleus::uranium_238();
+        let chain = decay_chain(&u238, 20);
+        // Full chain: U-238 -> Th-234 -> Pa-234m -> U-234 -> Th-230 -> Ra-226
+        // -> Rn-222 -> Po-218 -> Pb-214 -> Bi-214 -> Po-214 -> Pb-210
+        // -> Bi-210 -> Po-210 -> Pb-206 (stable, not in chain)
+        // That's 14 steps
+        assert!(
+            chain.len() >= 14,
+            "U-238 chain should have at least 14 steps, got {}",
+            chain.len()
+        );
+        // Last nucleus in chain should decay to Pb-206
+        if let Some(last) = chain.last() {
+            let daughter = match last.1 {
+                DecayMode::Alpha => alpha_decay(&last.0).ok(),
+                DecayMode::BetaMinus => beta_minus_decay(&last.0).ok(),
+                _ => None,
+            };
+            if let Some(d) = daughter {
+                assert_eq!(d.z(), 82, "Chain should end at Pb (Z=82)");
+                assert_eq!(d.a(), 206, "Chain should end at A=206");
+            }
+        }
+    }
+
+    #[test]
+    fn tc99m_is_isomer() {
+        let isotopes = known_isotopes();
+        let tc99m = isotopes.iter().find(|i| i.name == "Tc-99m").unwrap();
+        assert!(tc99m.is_isomer);
+        assert!(tc99m.excitation_energy_kev > 140.0);
+        assert_eq!(tc99m.primary_decay, DecayMode::IsomericTransition);
+    }
+
+    #[test]
+    fn serde_roundtrip_isomeric_transition() {
+        let mode = DecayMode::IsomericTransition;
+        let json = serde_json::to_string(&mode).unwrap();
+        let back: DecayMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(mode, back);
     }
 }

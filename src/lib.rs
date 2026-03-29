@@ -78,7 +78,8 @@ pub mod reaction;
 pub mod prelude {
     pub use crate::atomic::{
         OrbitalFilling, OrbitalType, QuantumNumbers, electron_configuration, format_configuration,
-        format_configuration_short, ionization_energy_ev, spectral_line_nm,
+        format_configuration_short, hydrogen_level_energy_ev, ionization_energy_ev, lande_g_factor,
+        spectral_line_fine_nm, spectral_line_nm, stark_shift_hydrogen_ev, zeeman_splitting_ev,
     };
     pub use crate::constants::*;
     pub use crate::decay::{
@@ -86,11 +87,16 @@ pub mod prelude {
         decay_chain, decay_constant, known_isotopes, remaining_fraction,
     };
     pub use crate::error::TanmatraError;
-    pub use crate::nucleus::{Nucleus, is_magic_number};
+    pub use crate::nucleus::{
+        Nucleus, ShellLevel, ground_state_spin_parity, is_magic_number, next_shell_closure,
+        shell_closure_below, shell_model_levels, shell_occupation,
+    };
     pub use crate::particle::{Boson, FundamentalForce, Lepton, Quark};
     pub use crate::reaction::{
-        NuclearReaction, cno_cycle, coulomb_barrier, dd_fusion_he3, dd_fusion_t, dt_fusion,
-        pp_chain_step1, q_value, triple_alpha, u235_fission,
+        NuclearReaction, NucleosynthesisPathway, NucleosynthesisProcess, NucleosynthesisStep,
+        ThermalCrossSection, breit_wigner_cross_section, cno_cycle, coulomb_barrier, dd_fusion_he3,
+        dd_fusion_t, dt_fusion, geometric_cross_section_barns, pp_chain_step1, q_value,
+        r_process_main, s_process_main, thermal_neutron_cross_sections, triple_alpha, u235_fission,
     };
 }
 

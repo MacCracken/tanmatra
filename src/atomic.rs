@@ -168,73 +168,160 @@ pub fn electron_configuration(z: u32) -> Result<Vec<OrbitalFilling>, TanmatraErr
     // Apply known exceptions
     apply_exceptions(z, &mut config);
 
+    // Remove zero-electron entries (from exceptions that empty a subshell)
+    config.retain(|e| e.electrons > 0);
+
     Ok(config)
 }
 
-/// Applies known electron configuration exceptions.
+/// Sets the electron count for a specific subshell in the configuration.
+/// If the subshell doesn't exist in the config, it is inserted at the end.
+fn set_subshell(config: &mut Vec<OrbitalFilling>, n: u32, orbital: OrbitalType, electrons: u32) {
+    for entry in config.iter_mut() {
+        if entry.n == n && entry.orbital == orbital {
+            entry.electrons = electrons;
+            return;
+        }
+    }
+    // Subshell not found — add it (needed for La, Ce, Gd, Ac, Th, Pa, U, Np, Cm, Lr)
+    if electrons > 0 {
+        config.push(OrbitalFilling {
+            n,
+            orbital,
+            electrons,
+        });
+    }
+}
+
+/// Applies known ground-state electron configuration exceptions (NIST).
 ///
-/// Chromium (Z=24): [Ar] 3d5 4s1 instead of [Ar] 3d4 4s2
-/// Copper (Z=29): [Ar] 3d10 4s1 instead of [Ar] 3d9 4s2
-/// Molybdenum (Z=42): [Kr] 4d5 5s1 instead of [Kr] 4d4 5s2
-/// Silver (Z=47): [Kr] 4d10 5s1 instead of [Kr] 4d9 5s2
-/// Gold (Z=79): [Xe] 4f14 5d10 6s1 instead of [Xe] 4f14 5d9 6s2
-fn apply_exceptions(z: u32, config: &mut [OrbitalFilling]) {
+/// Source: NIST Atomic Spectra Database ground-state configurations.
+/// All 22 known Aufbau/Madelung exceptions for Z=1-118.
+#[allow(clippy::too_many_lines)]
+fn apply_exceptions(z: u32, config: &mut Vec<OrbitalFilling>) {
     match z {
+        // --- Period 4 (3d block) ---
         24 => {
-            // Cr: move one electron from 4s to 3d
-            for entry in config.iter_mut() {
-                if entry.n == 4 && entry.orbital == OrbitalType::S {
-                    entry.electrons = 1;
-                }
-                if entry.n == 3 && entry.orbital == OrbitalType::D {
-                    entry.electrons = 5;
-                }
-            }
+            // Cr: [Ar] 3d5 4s1 (half-filled d shell)
+            set_subshell(config, 4, OrbitalType::S, 1);
+            set_subshell(config, 3, OrbitalType::D, 5);
         }
         29 => {
-            // Cu: move one electron from 4s to 3d
-            for entry in config.iter_mut() {
-                if entry.n == 4 && entry.orbital == OrbitalType::S {
-                    entry.electrons = 1;
-                }
-                if entry.n == 3 && entry.orbital == OrbitalType::D {
-                    entry.electrons = 10;
-                }
-            }
+            // Cu: [Ar] 3d10 4s1 (filled d shell)
+            set_subshell(config, 4, OrbitalType::S, 1);
+            set_subshell(config, 3, OrbitalType::D, 10);
+        }
+
+        // --- Period 5 (4d block) ---
+        41 => {
+            // Nb: [Kr] 4d4 5s1
+            set_subshell(config, 5, OrbitalType::S, 1);
+            set_subshell(config, 4, OrbitalType::D, 4);
         }
         42 => {
-            // Mo: move one electron from 5s to 4d
-            for entry in config.iter_mut() {
-                if entry.n == 5 && entry.orbital == OrbitalType::S {
-                    entry.electrons = 1;
-                }
-                if entry.n == 4 && entry.orbital == OrbitalType::D {
-                    entry.electrons = 5;
-                }
-            }
+            // Mo: [Kr] 4d5 5s1 (half-filled d shell)
+            set_subshell(config, 5, OrbitalType::S, 1);
+            set_subshell(config, 4, OrbitalType::D, 5);
+        }
+        44 => {
+            // Ru: [Kr] 4d7 5s1
+            set_subshell(config, 5, OrbitalType::S, 1);
+            set_subshell(config, 4, OrbitalType::D, 7);
+        }
+        45 => {
+            // Rh: [Kr] 4d8 5s1
+            set_subshell(config, 5, OrbitalType::S, 1);
+            set_subshell(config, 4, OrbitalType::D, 8);
+        }
+        46 => {
+            // Pd: [Kr] 4d10 5s0 (filled d, empty s)
+            set_subshell(config, 5, OrbitalType::S, 0);
+            set_subshell(config, 4, OrbitalType::D, 10);
         }
         47 => {
-            // Ag: move one electron from 5s to 4d
-            for entry in config.iter_mut() {
-                if entry.n == 5 && entry.orbital == OrbitalType::S {
-                    entry.electrons = 1;
-                }
-                if entry.n == 4 && entry.orbital == OrbitalType::D {
-                    entry.electrons = 10;
-                }
-            }
+            // Ag: [Kr] 4d10 5s1 (filled d shell)
+            set_subshell(config, 5, OrbitalType::S, 1);
+            set_subshell(config, 4, OrbitalType::D, 10);
+        }
+
+        // --- Period 6: Lanthanides (4f block) ---
+        57 => {
+            // La: [Xe] 5d1 6s2 (electron goes to 5d, not 4f)
+            set_subshell(config, 4, OrbitalType::F, 0);
+            set_subshell(config, 5, OrbitalType::D, 1);
+        }
+        58 => {
+            // Ce: [Xe] 4f1 5d1 6s2
+            set_subshell(config, 4, OrbitalType::F, 1);
+            set_subshell(config, 5, OrbitalType::D, 1);
+        }
+        64 => {
+            // Gd: [Xe] 4f7 5d1 6s2 (half-filled f shell)
+            set_subshell(config, 4, OrbitalType::F, 7);
+            set_subshell(config, 5, OrbitalType::D, 1);
+        }
+
+        // --- Period 6: 5d block ---
+        78 => {
+            // Pt: [Xe] 4f14 5d9 6s1
+            set_subshell(config, 6, OrbitalType::S, 1);
+            set_subshell(config, 5, OrbitalType::D, 9);
         }
         79 => {
-            // Au: move one electron from 6s to 5d
-            for entry in config.iter_mut() {
-                if entry.n == 6 && entry.orbital == OrbitalType::S {
-                    entry.electrons = 1;
-                }
-                if entry.n == 5 && entry.orbital == OrbitalType::D {
-                    entry.electrons = 10;
-                }
-            }
+            // Au: [Xe] 4f14 5d10 6s1 (filled d shell)
+            set_subshell(config, 6, OrbitalType::S, 1);
+            set_subshell(config, 5, OrbitalType::D, 10);
         }
+
+        // --- Period 7: Actinides (5f block) ---
+        89 => {
+            // Ac: [Rn] 6d1 7s2 (electron goes to 6d, not 5f)
+            set_subshell(config, 5, OrbitalType::F, 0);
+            set_subshell(config, 6, OrbitalType::D, 1);
+        }
+        90 => {
+            // Th: [Rn] 6d2 7s2 (both electrons go to 6d)
+            set_subshell(config, 5, OrbitalType::F, 0);
+            set_subshell(config, 6, OrbitalType::D, 2);
+        }
+        91 => {
+            // Pa: [Rn] 5f2 6d1 7s2
+            set_subshell(config, 5, OrbitalType::F, 2);
+            set_subshell(config, 6, OrbitalType::D, 1);
+        }
+        92 => {
+            // U: [Rn] 5f3 6d1 7s2
+            set_subshell(config, 5, OrbitalType::F, 3);
+            set_subshell(config, 6, OrbitalType::D, 1);
+        }
+        93 => {
+            // Np: [Rn] 5f4 6d1 7s2
+            set_subshell(config, 5, OrbitalType::F, 4);
+            set_subshell(config, 6, OrbitalType::D, 1);
+        }
+        96 => {
+            // Cm: [Rn] 5f7 6d1 7s2 (half-filled f shell)
+            set_subshell(config, 5, OrbitalType::F, 7);
+            set_subshell(config, 6, OrbitalType::D, 1);
+        }
+
+        // --- Period 7: 6d block / superheavy ---
+        103 => {
+            // Lr: [Rn] 5f14 7s2 7p1 (relativistic: 7p lower than 6d)
+            set_subshell(config, 6, OrbitalType::D, 0);
+            set_subshell(config, 7, OrbitalType::P, 1);
+        }
+        110 => {
+            // Ds: [Rn] 5f14 6d9 7s1 (predicted, parallels Pt)
+            set_subshell(config, 7, OrbitalType::S, 1);
+            set_subshell(config, 6, OrbitalType::D, 9);
+        }
+        111 => {
+            // Rg: [Rn] 5f14 6d10 7s1 (predicted, parallels Au)
+            set_subshell(config, 7, OrbitalType::S, 1);
+            set_subshell(config, 6, OrbitalType::D, 10);
+        }
+
         _ => {}
     }
 }
@@ -341,59 +428,306 @@ pub fn spectral_line_nm(z: u32, n1: u32, n2: u32) -> Result<f64, TanmatraError> 
     Ok(1.0e9 / inv_lambda)
 }
 
-/// NIST ionization energies for Z=1 to Z=36 in eV.
+/// Calculates the energy of a hydrogen-like level with fine-structure correction.
+///
+/// E_nj = -13.6 eV * Z² / n² * [1 + (αZ)²/n * (1/(j+1/2) - 3/(4n))]
+///
+/// where α is the fine-structure constant, j is the total angular momentum
+/// quantum number (j = l ± 1/2, stored as integer 2j).
+///
+/// Returns the energy in eV (negative, bound state).
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if quantum numbers are invalid.
+pub fn hydrogen_level_energy_ev(z: u32, n: u32, two_j: u32) -> Result<f64, TanmatraError> {
+    if n == 0 {
+        return Err(TanmatraError::InvalidQuantumNumbers(String::from(
+            "n must be >= 1",
+        )));
+    }
+    if two_j == 0 || two_j > 2 * n - 1 {
+        return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
+            "2j={two_j} invalid for n={n}"
+        )));
+    }
+
+    let z_f = z as f64;
+    let n_f = n as f64;
+    let alpha = crate::constants::FINE_STRUCTURE;
+    let j_plus_half = f64::midpoint(two_j as f64, 1.0);
+
+    // Non-relativistic energy
+    let e0 = -13.6 * z_f * z_f / (n_f * n_f);
+
+    // Fine-structure correction (first-order)
+    let az = alpha * z_f;
+    let correction = 1.0 + az * az / n_f * (1.0 / j_plus_half - 3.0 / (4.0 * n_f));
+
+    Ok(e0 * correction)
+}
+
+/// Calculates the wavelength of a spectral line with fine-structure correction.
+///
+/// Uses the Dirac energy levels for hydrogen-like atoms, which include
+/// the relativistic fine-structure splitting.
+///
+/// Parameters:
+/// - `z`: atomic number
+/// - `n1`, `two_j1`: lower level (principal quantum number, 2*j)
+/// - `n2`, `two_j2`: upper level (principal quantum number, 2*j)
+///
+/// Returns wavelength in nanometers.
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if any quantum numbers are invalid.
+pub fn spectral_line_fine_nm(
+    z: u32,
+    n1: u32,
+    two_j1: u32,
+    n2: u32,
+    two_j2: u32,
+) -> Result<f64, TanmatraError> {
+    let e1 = hydrogen_level_energy_ev(z, n1, two_j1)?;
+    let e2 = hydrogen_level_energy_ev(z, n2, two_j2)?;
+
+    let delta_e = (e2 - e1).abs();
+    if delta_e < 1e-30 {
+        return Err(TanmatraError::InvalidQuantumNumbers(String::from(
+            "transition energy is zero",
+        )));
+    }
+
+    // Convert eV to wavelength in nm: λ = hc/ΔE
+    // hc = 1239.8419843320028 eV·nm
+    let hc_ev_nm = 1_239.841_984;
+    Ok(hc_ev_nm / delta_e)
+}
+
+// ---------------------------------------------------------------------------
+// Zeeman and Stark effects
+// ---------------------------------------------------------------------------
+
+/// Calculates the Lande g-factor for an atomic level.
+///
+/// g_J = 1 + [J(J+1) + S(S+1) - L(L+1)] / [2J(J+1)]
+///
+/// For a single electron: S = 1/2, L = l, J = j.
+///
+/// Parameters: `l` (orbital), `two_j` (2*total angular momentum).
+/// Returns the dimensionless g-factor.
+#[must_use]
+#[inline]
+pub fn lande_g_factor(l: u32, two_j: u32) -> f64 {
+    let j = two_j as f64 / 2.0;
+    let l_f = l as f64;
+    let s = 0.5; // single electron spin
+
+    let j_j1 = j * (j + 1.0);
+    if j_j1 < 1e-30 {
+        return 0.0;
+    }
+
+    1.0 + (j_j1 + s * (s + 1.0) - l_f * (l_f + 1.0)) / (2.0 * j_j1)
+}
+
+/// Calculates the anomalous Zeeman energy splitting in eV.
+///
+/// ΔE = m_j * g_J * μ_B * B
+///
+/// where m_j ranges from -j to +j in integer steps.
+///
+/// Parameters:
+/// - `l`: orbital quantum number
+/// - `two_j`: 2*j (total angular momentum)
+/// - `two_mj`: 2*m_j (magnetic quantum number projection)
+/// - `b_tesla`: magnetic field strength in Tesla
+///
+/// Returns the energy shift in eV.
+#[must_use]
+#[inline]
+pub fn zeeman_splitting_ev(l: u32, two_j: u32, two_mj: i32, b_tesla: f64) -> f64 {
+    let mj = two_mj as f64 / 2.0;
+    let g = lande_g_factor(l, two_j);
+    mj * g * crate::constants::BOHR_MAGNETON_EV_T * b_tesla
+}
+
+/// Calculates the linear Stark effect energy shift for hydrogen.
+///
+/// For hydrogen, the linear Stark effect gives:
+/// ΔE = (3/2) * n * (n1 - n2) * e * a0 * E_field
+///
+/// where n1 and n2 are parabolic quantum numbers with n1 + n2 + |m| + 1 = n.
+///
+/// Simplified: for the maximum shift state (n1 = n-1, n2 = 0, m = 0):
+/// ΔE_max = (3/2) * n * (n-1) * e * a0 * E_field
+///
+/// Parameters:
+/// - `n`: principal quantum number
+/// - `parabolic_index`: (n1 - n2), ranges from -(n-1) to (n-1)
+/// - `e_field_v_per_m`: electric field strength in V/m
+///
+/// Returns the energy shift in eV.
+#[must_use]
+#[inline]
+pub fn stark_shift_hydrogen_ev(n: u32, parabolic_index: i32, e_field_v_per_m: f64) -> f64 {
+    let n_f = n as f64;
+    let k = parabolic_index as f64;
+    let a0 = crate::constants::BOHR_RADIUS; // meters
+    // ΔE = (3/2) * n * k * e * a0 * E = (3/2) * n * k * a0 * E (in eV, since e*V = eV)
+    1.5 * n_f * k * a0 * e_field_v_per_m
+}
+
+/// NIST ionization energies for Z=1 to Z=118 in eV.
 ///
 /// Source: NIST Atomic Spectra Database, Ionization Energies.
 /// <https://physics.nist.gov/PhysRefData/ASD/ionEnergy.html>
-const IONIZATION_ENERGIES_EV: [f64; 36] = [
+///
+/// Z=1-103: experimental values from NIST ASD.
+/// Z=104-118: relativistic theoretical predictions (noted in comments).
+#[allow(clippy::too_many_lines)]
+const IONIZATION_ENERGIES_EV: [f64; 118] = [
+    // --- Period 1 ---
     13.598_44, // H  (Z=1)
     24.587_4,  // He (Z=2)
-    5.391_71,  // Li (Z=3)
-    9.322_7,   // Be (Z=4)
-    8.298_0,   // B  (Z=5)
-    11.260_3,  // C  (Z=6)
-    14.534_1,  // N  (Z=7)
-    13.618_1,  // O  (Z=8)
-    17.422_8,  // F  (Z=9)
-    21.564_5,  // Ne (Z=10)
-    5.139_08,  // Na (Z=11)
-    7.646_2,   // Mg (Z=12)
-    5.985_77,  // Al (Z=13)
-    8.151_7,   // Si (Z=14)
-    10.486_7,  // P  (Z=15)
-    10.360_0,  // S  (Z=16)
-    12.967_6,  // Cl (Z=17)
-    15.759_6,  // Ar (Z=18)
-    4.340_66,  // K  (Z=19)
-    6.113_2,   // Ca (Z=20)
-    6.561_5,   // Sc (Z=21)
-    6.828_1,   // Ti (Z=22)
-    6.746_2,   // V  (Z=23)
-    6.766_5,   // Cr (Z=24)
-    7.434_0,   // Mn (Z=25)
-    7.902_4,   // Fe (Z=26)
-    7.881_0,   // Co (Z=27)
-    7.639_8,   // Ni (Z=28)
-    7.726_4,   // Cu (Z=29)
-    9.394_2,   // Zn (Z=30)
-    5.999_3,   // Ga (Z=31)
-    7.899_4,   // Ge (Z=32)
-    9.788_6,   // As (Z=33)
-    9.752_4,   // Se (Z=34)
-    11.813_8,  // Br (Z=35)
-    13.999_6,  // Kr (Z=36)
+    // --- Period 2 ---
+    5.391_71, // Li (Z=3)
+    9.322_7,  // Be (Z=4)
+    8.298_0,  // B  (Z=5)
+    11.260_3, // C  (Z=6)
+    14.534_1, // N  (Z=7)
+    13.618_1, // O  (Z=8)
+    17.422_8, // F  (Z=9)
+    21.564_5, // Ne (Z=10)
+    // --- Period 3 ---
+    5.139_08, // Na (Z=11)
+    7.646_2,  // Mg (Z=12)
+    5.985_77, // Al (Z=13)
+    8.151_7,  // Si (Z=14)
+    10.486_7, // P  (Z=15)
+    10.360_0, // S  (Z=16)
+    12.967_6, // Cl (Z=17)
+    15.759_6, // Ar (Z=18)
+    // --- Period 4 ---
+    4.340_66, // K  (Z=19)
+    6.113_2,  // Ca (Z=20)
+    6.561_5,  // Sc (Z=21)
+    6.828_1,  // Ti (Z=22)
+    6.746_2,  // V  (Z=23)
+    6.766_5,  // Cr (Z=24)
+    7.434_0,  // Mn (Z=25)
+    7.902_4,  // Fe (Z=26)
+    7.881_0,  // Co (Z=27)
+    7.639_8,  // Ni (Z=28)
+    7.726_4,  // Cu (Z=29)
+    9.394_2,  // Zn (Z=30)
+    5.999_3,  // Ga (Z=31)
+    7.899_4,  // Ge (Z=32)
+    9.788_6,  // As (Z=33)
+    9.752_4,  // Se (Z=34)
+    11.813_8, // Br (Z=35)
+    13.999_6, // Kr (Z=36)
+    // --- Period 5 ---
+    4.177_13,  // Rb (Z=37)
+    5.694_84,  // Sr (Z=38)
+    6.217_26,  // Y  (Z=39)
+    6.634_0,   // Zr (Z=40)
+    6.758_85,  // Nb (Z=41)
+    7.092_43,  // Mo (Z=42)
+    7.28,      // Tc (Z=43)
+    7.360_50,  // Ru (Z=44)
+    7.458_90,  // Rh (Z=45)
+    8.336_9,   // Pd (Z=46)
+    7.576_24,  // Ag (Z=47)
+    8.993_82,  // Cd (Z=48)
+    5.786_36,  // In (Z=49)
+    7.343_92,  // Sn (Z=50)
+    8.608_4,   // Sb (Z=51)
+    9.009_66,  // Te (Z=52)
+    10.451_26, // I  (Z=53)
+    12.129_84, // Xe (Z=54)
+    // --- Period 6 ---
+    3.893_905, // Cs (Z=55)
+    5.211_70,  // Ba (Z=56)
+    5.576_9,   // La (Z=57)
+    5.538_7,   // Ce (Z=58)
+    5.473,     // Pr (Z=59)
+    5.525_0,   // Nd (Z=60)
+    5.582_0,   // Pm (Z=61)
+    5.643_71,  // Sm (Z=62)
+    5.670_38,  // Eu (Z=63)
+    6.149_80,  // Gd (Z=64)
+    5.863_8,   // Tb (Z=65)
+    5.938_9,   // Dy (Z=66)
+    6.021_5,   // Ho (Z=67)
+    6.107_7,   // Er (Z=68)
+    6.184_31,  // Tm (Z=69)
+    6.254_16,  // Yb (Z=70)
+    5.425_59,  // Lu (Z=71)
+    6.825_07,  // Hf (Z=72)
+    7.549_6,   // Ta (Z=73)
+    7.864_03,  // W  (Z=74)
+    7.833_52,  // Re (Z=75)
+    8.438_23,  // Os (Z=76)
+    8.967_00,  // Ir (Z=77)
+    8.958_7,   // Pt (Z=78)
+    9.225_53,  // Au (Z=79)
+    10.437_50, // Hg (Z=80)
+    6.108_29,  // Tl (Z=81)
+    7.416_66,  // Pb (Z=82)
+    7.285_6,   // Bi (Z=83)
+    8.414,     // Po (Z=84)
+    9.317_5,   // At (Z=85)
+    10.748_5,  // Rn (Z=86)
+    // --- Period 7 ---
+    4.072_74, // Fr (Z=87)
+    5.278_46, // Ra (Z=88)
+    5.380_2,  // Ac (Z=89)
+    6.306_7,  // Th (Z=90)
+    5.89,     // Pa (Z=91)
+    6.194_05, // U  (Z=92)
+    6.265_6,  // Np (Z=93)
+    6.026_0,  // Pu (Z=94)
+    5.993_8,  // Am (Z=95)
+    6.021_96, // Cm (Z=96)
+    6.198_5,  // Bk (Z=97)
+    6.281_7,  // Cf (Z=98)
+    6.42,     // Es (Z=99)
+    6.50,     // Fm (Z=100)
+    6.58,     // Md (Z=101)
+    6.65,     // No (Z=102)
+    4.96,     // Lr (Z=103)
+    // --- Superheavy (theoretical) ---
+    6.01, // Rf (Z=104)
+    6.89, // Db (Z=105)
+    7.08, // Sg (Z=106)
+    7.7,  // Bh (Z=107)
+    7.6,  // Hs (Z=108)
+    9.1,  // Mt (Z=109)
+    8.7,  // Ds (Z=110)
+    9.79, // Rg (Z=111)
+    9.38, // Cn (Z=112)
+    5.85, // Nh (Z=113)
+    7.31, // Fl (Z=114)
+    6.92, // Mc (Z=115)
+    8.59, // Lv (Z=116)
+    7.64, // Ts (Z=117)
+    8.91, // Og (Z=118)
 ];
 
 /// Returns the first ionization energy in eV for the given atomic number.
 ///
-/// Covers Z=1 (hydrogen) through Z=36 (krypton) using NIST values.
+/// Covers Z=1 (hydrogen) through Z=118 (oganesson).
+/// Z=1-103 from NIST ASD experimental values.
+/// Z=104-118 from relativistic theoretical predictions.
 ///
 /// # Errors
 ///
-/// Returns [`TanmatraError::InvalidAtomicNumber`] if Z is 0 or > 36.
+/// Returns [`TanmatraError::InvalidAtomicNumber`] if Z is 0 or > 118.
 #[inline]
 pub fn ionization_energy_ev(z: u32) -> Result<f64, TanmatraError> {
-    if z == 0 || z > 36 {
+    if z == 0 || z > 118 {
         return Err(TanmatraError::InvalidAtomicNumber(z));
     }
     Ok(IONIZATION_ENERGIES_EV[(z - 1) as usize])
@@ -486,11 +820,59 @@ mod tests {
 
     #[test]
     fn total_electrons_match_z() {
-        for z in 1..=36 {
+        for z in 1..=118 {
             let config = electron_configuration(z).unwrap();
             let total: u32 = config.iter().map(|e| e.electrons).sum();
             assert_eq!(total, z, "Z={z}: total electrons={total}");
         }
+    }
+
+    #[test]
+    fn niobium_exception() {
+        // Nb (Z=41): [Kr] 4d4 5s1
+        let config = electron_configuration(41).unwrap();
+        let short = format_configuration_short(&config, 41);
+        assert_eq!(short, "[Kr] 5s1 4d4");
+    }
+
+    #[test]
+    fn palladium_exception() {
+        // Pd (Z=46): [Kr] 4d10 (no 5s electrons at all)
+        let config = electron_configuration(46).unwrap();
+        let short = format_configuration_short(&config, 46);
+        assert_eq!(short, "[Kr] 4d10");
+    }
+
+    #[test]
+    fn lanthanum_exception() {
+        // La (Z=57): [Xe] 5d1 6s2
+        let config = electron_configuration(57).unwrap();
+        let short = format_configuration_short(&config, 57);
+        assert_eq!(short, "[Xe] 6s2 5d1");
+    }
+
+    #[test]
+    fn gadolinium_exception() {
+        // Gd (Z=64): [Xe] 4f7 5d1 6s2
+        let config = electron_configuration(64).unwrap();
+        let short = format_configuration_short(&config, 64);
+        assert_eq!(short, "[Xe] 6s2 4f7 5d1");
+    }
+
+    #[test]
+    fn thorium_exception() {
+        // Th (Z=90): [Rn] 6d2 7s2
+        let config = electron_configuration(90).unwrap();
+        let short = format_configuration_short(&config, 90);
+        assert_eq!(short, "[Rn] 7s2 6d2");
+    }
+
+    #[test]
+    fn uranium_exception() {
+        // U (Z=92): [Rn] 5f3 6d1 7s2
+        let config = electron_configuration(92).unwrap();
+        let short = format_configuration_short(&config, 92);
+        assert_eq!(short, "[Rn] 7s2 5f3 6d1");
     }
 
     #[test]
@@ -520,7 +902,31 @@ mod tests {
     #[test]
     fn ionization_energy_invalid() {
         assert!(ionization_energy_ev(0).is_err());
-        assert!(ionization_energy_ev(37).is_err());
+        assert!(ionization_energy_ev(119).is_err());
+    }
+
+    #[test]
+    fn ionization_energy_cesium_lowest_alkali() {
+        // Cs has the lowest IE of any non-superheavy element
+        let cs = ionization_energy_ev(55).unwrap();
+        assert!(cs < 4.0, "Cs IE={cs} should be < 4 eV");
+    }
+
+    #[test]
+    fn ionization_energy_noble_gas_trend() {
+        // Noble gases: He, Ne, Ar, Kr, Xe, Rn — should all be local maxima
+        let rn = ionization_energy_ev(86).unwrap();
+        let fr = ionization_energy_ev(87).unwrap();
+        assert!(rn > fr, "Rn IE={rn} should be > Fr IE={fr}");
+    }
+
+    #[test]
+    fn ionization_energy_lanthanide_range() {
+        // Lanthanides (Z=57-71) should all be in ~5.4-6.3 eV range
+        for z in 57..=71 {
+            let ie = ionization_energy_ev(z).unwrap();
+            assert!(ie > 5.0 && ie < 6.5, "Z={z} IE={ie} out of range");
+        }
     }
 
     #[test]
@@ -572,5 +978,97 @@ mod tests {
         assert_eq!(OrbitalType::P.max_electrons(), 6);
         assert_eq!(OrbitalType::D.max_electrons(), 10);
         assert_eq!(OrbitalType::F.max_electrons(), 14);
+    }
+
+    // --- Fine-structure / relativistic correction tests ---
+
+    #[test]
+    fn hydrogen_ground_state_energy() {
+        // H 1s1/2: should be approximately -13.6 eV
+        let e = hydrogen_level_energy_ev(1, 1, 1).unwrap();
+        assert!((e - (-13.6)).abs() < 0.01, "H 1s1/2 E={e} eV");
+    }
+
+    #[test]
+    fn fine_structure_splits_levels() {
+        // H n=2: 2s1/2 and 2p3/2 should have different energies
+        // 2s1/2: 2j=1, 2p1/2: 2j=1, 2p3/2: 2j=3
+        let e_s = hydrogen_level_energy_ev(1, 2, 1).unwrap(); // 2s1/2
+        let e_p32 = hydrogen_level_energy_ev(1, 2, 3).unwrap(); // 2p3/2
+        // Fine structure: 2p3/2 should have slightly different energy than 2s1/2
+        assert!(
+            (e_s - e_p32).abs() > 1e-6,
+            "Fine structure should split n=2 levels"
+        );
+    }
+
+    #[test]
+    fn h_alpha_fine_structure() {
+        // H-alpha with fine structure: 2p3/2 -> 3d5/2 transition
+        // Should be close to the non-relativistic 656.3 nm
+        let lambda = spectral_line_fine_nm(1, 2, 3, 3, 5).unwrap();
+        assert!(
+            (lambda - 656.3).abs() < 2.0,
+            "H-alpha fine={lambda} nm, expected ~656 nm"
+        );
+    }
+
+    #[test]
+    fn fine_structure_invalid() {
+        assert!(hydrogen_level_energy_ev(1, 0, 1).is_err());
+        assert!(hydrogen_level_energy_ev(1, 1, 3).is_err());
+    }
+
+    // --- Zeeman/Stark tests ---
+
+    #[test]
+    fn lande_g_s_electron() {
+        // 1s1/2 (l=0, j=1/2): g = 2.0
+        let g = lande_g_factor(0, 1);
+        assert!((g - 2.0).abs() < 1e-10, "g(1s1/2)={g}, expected 2.0");
+    }
+
+    #[test]
+    fn lande_g_p32() {
+        // 2p3/2 (l=1, j=3/2): g = 4/3
+        let g = lande_g_factor(1, 3);
+        assert!((g - 4.0 / 3.0).abs() < 1e-10, "g(2p3/2)={g}");
+    }
+
+    #[test]
+    fn zeeman_zero_field() {
+        let de = zeeman_splitting_ev(0, 1, 1, 0.0);
+        assert!((de).abs() < 1e-30, "No splitting in zero field");
+    }
+
+    #[test]
+    fn zeeman_proportional_to_field() {
+        let de1 = zeeman_splitting_ev(0, 1, 1, 1.0);
+        let de2 = zeeman_splitting_ev(0, 1, 1, 2.0);
+        assert!(
+            (de2 - 2.0 * de1).abs() < 1e-15,
+            "Zeeman should be linear in B"
+        );
+    }
+
+    #[test]
+    fn stark_zero_field() {
+        let de = stark_shift_hydrogen_ev(2, 1, 0.0);
+        assert!((de).abs() < 1e-30);
+    }
+
+    #[test]
+    fn stark_proportional_to_field() {
+        let de1 = stark_shift_hydrogen_ev(2, 1, 1e6);
+        let de2 = stark_shift_hydrogen_ev(2, 1, 2e6);
+        assert!((de2 - 2.0 * de1).abs() < 1e-20);
+    }
+
+    #[test]
+    fn stark_increases_with_n() {
+        // Higher n states should have larger Stark shifts
+        let de2 = stark_shift_hydrogen_ev(2, 1, 1e8).abs();
+        let de5 = stark_shift_hydrogen_ev(5, 4, 1e8).abs();
+        assert!(de5 > de2, "n=5 Stark should be larger than n=2");
     }
 }
