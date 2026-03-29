@@ -325,4 +325,42 @@ mod tests {
         let back: FourMomentum = serde_json::from_str(&json).unwrap();
         assert_eq!(p, back);
     }
+
+    #[test]
+    fn from_mass_and_momentum() {
+        let p = FourMomentum::from_mass_and_momentum(938.272, 500.0);
+        assert!(p.energy > 938.272); // E > m for nonzero p
+        assert!((p.pz - 500.0).abs() < 1e-10);
+        assert!((p.invariant_mass() - 938.272).abs() < 0.01);
+    }
+
+    #[test]
+    fn massless_gamma_infinite() {
+        let photon = FourMomentum::new(100.0, 0.0, 0.0, 100.0);
+        assert!(photon.gamma().is_infinite());
+    }
+
+    #[test]
+    fn gamma_to_beta_at_rest() {
+        assert!((gamma_to_beta(1.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn velocity_conversions() {
+        let v = 1.5e8; // m/s
+        let beta = velocity_to_beta(v);
+        let v_back = beta_to_velocity(beta);
+        assert!((v - v_back).abs() < 1.0);
+    }
+
+    #[test]
+    fn de_broglie_zero_momentum() {
+        assert!(de_broglie_wavelength_fm(0.0).is_infinite());
+    }
+
+    #[test]
+    fn zero_energy_beta() {
+        let p = FourMomentum::new(0.0, 0.0, 0.0, 0.0);
+        assert!((p.beta()).abs() < 1e-10);
+    }
 }

@@ -85,12 +85,13 @@ pub mod optics;
 /// Prelude module — import everything commonly needed.
 pub mod prelude {
     pub use crate::atomic::{
-        OrbitalFilling, OrbitalType, QuantumNumbers, TransitionType, check_selection_rules,
-        check_selection_rules_full, einstein_a_coefficient, einstein_b_coefficient,
-        electron_affinity_ev, electron_configuration, format_configuration,
-        format_configuration_short, hydrogen_level_energy_ev, ionization_energy_ev, lande_g_factor,
-        radial_probability_density, radial_wavefunction, spectral_line_fine_nm, spectral_line_nm,
-        stark_shift_hydrogen_ev, vacuum_polarization_ev, zeeman_splitting_ev,
+        OrbitalFilling, OrbitalType, QuantumNumbers, TransitionType, balmer_series,
+        brackett_series, check_selection_rules, check_selection_rules_full, einstein_a_coefficient,
+        einstein_b_coefficient, electron_affinity_ev, electron_configuration, format_configuration,
+        format_configuration_short, hydrogen_level_energy_ev, ionization_energy_ev, lamb_shift_ev,
+        lande_g_factor, lyman_series, paschen_series, pfund_series, radial_probability_density,
+        radial_wavefunction, spectral_line_fine_nm, spectral_line_nm, stark_shift_hydrogen_ev,
+        vacuum_polarization_ev, zeeman_splitting_ev,
     };
     pub use crate::constants::*;
     pub use crate::decay::{

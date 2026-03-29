@@ -506,6 +506,115 @@ pub fn spectral_line_fine_nm(
 }
 
 // ---------------------------------------------------------------------------
+// Named spectral series
+// ---------------------------------------------------------------------------
+
+/// Returns the Lyman series wavelengths (n_upper -> n=1) in nanometers.
+///
+/// The Lyman series lies in the ultraviolet (91.2 - 121.6 nm).
+/// Returns lines for n_upper = 2 through `n_max`.
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if `n_max` < 2.
+pub fn lyman_series(z: u32, n_max: u32) -> Result<Vec<(u32, f64)>, TanmatraError> {
+    if n_max < 2 {
+        return Err(TanmatraError::InvalidQuantumNumbers(String::from(
+            "Lyman series requires n_max >= 2",
+        )));
+    }
+    let mut lines = Vec::new();
+    for n in 2..=n_max {
+        lines.push((n, spectral_line_nm(z, 1, n)?));
+    }
+    Ok(lines)
+}
+
+/// Returns the Balmer series wavelengths (n_upper -> n=2) in nanometers.
+///
+/// The Balmer series spans the visible and near-UV (364.6 - 656.3 nm).
+/// Returns lines for n_upper = 3 through `n_max`.
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if `n_max` < 3.
+pub fn balmer_series(z: u32, n_max: u32) -> Result<Vec<(u32, f64)>, TanmatraError> {
+    if n_max < 3 {
+        return Err(TanmatraError::InvalidQuantumNumbers(String::from(
+            "Balmer series requires n_max >= 3",
+        )));
+    }
+    let mut lines = Vec::new();
+    for n in 3..=n_max {
+        lines.push((n, spectral_line_nm(z, 2, n)?));
+    }
+    Ok(lines)
+}
+
+/// Returns the Paschen series wavelengths (n_upper -> n=3) in nanometers.
+///
+/// The Paschen series lies in the near-infrared (820.4 - 1875 nm).
+/// Returns lines for n_upper = 4 through `n_max`.
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if `n_max` < 4.
+pub fn paschen_series(z: u32, n_max: u32) -> Result<Vec<(u32, f64)>, TanmatraError> {
+    if n_max < 4 {
+        return Err(TanmatraError::InvalidQuantumNumbers(String::from(
+            "Paschen series requires n_max >= 4",
+        )));
+    }
+    let mut lines = Vec::new();
+    for n in 4..=n_max {
+        lines.push((n, spectral_line_nm(z, 3, n)?));
+    }
+    Ok(lines)
+}
+
+/// Returns the Brackett series wavelengths (n_upper -> n=4) in nanometers.
+///
+/// The Brackett series lies in the infrared (1458 - 4051 nm).
+/// Returns lines for n_upper = 5 through `n_max`.
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if `n_max` < 5.
+pub fn brackett_series(z: u32, n_max: u32) -> Result<Vec<(u32, f64)>, TanmatraError> {
+    if n_max < 5 {
+        return Err(TanmatraError::InvalidQuantumNumbers(String::from(
+            "Brackett series requires n_max >= 5",
+        )));
+    }
+    let mut lines = Vec::new();
+    for n in 5..=n_max {
+        lines.push((n, spectral_line_nm(z, 4, n)?));
+    }
+    Ok(lines)
+}
+
+/// Returns the Pfund series wavelengths (n_upper -> n=5) in nanometers.
+///
+/// The Pfund series lies in the far-infrared (2279 - 7460 nm).
+/// Returns lines for n_upper = 6 through `n_max`.
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if `n_max` < 6.
+pub fn pfund_series(z: u32, n_max: u32) -> Result<Vec<(u32, f64)>, TanmatraError> {
+    if n_max < 6 {
+        return Err(TanmatraError::InvalidQuantumNumbers(String::from(
+            "Pfund series requires n_max >= 6",
+        )));
+    }
+    let mut lines = Vec::new();
+    for n in 6..=n_max {
+        lines.push((n, spectral_line_nm(z, 5, n)?));
+    }
+    Ok(lines)
+}
+
+// ---------------------------------------------------------------------------
 // Zeeman and Stark effects
 // ---------------------------------------------------------------------------
 
@@ -1719,9 +1828,77 @@ mod tests {
 
     #[test]
     fn vacuum_polarization_small_vs_lamb() {
-        // VP is typically ~2% of total Lamb shift
         let lamb = lamb_shift_ev(1, 2, 0);
         let vp = vacuum_polarization_ev(1, 2, 0).abs();
         assert!(vp < lamb, "VP should be smaller than Lamb shift");
+    }
+
+    // --- Named spectral series tests ---
+
+    #[test]
+    fn lyman_series_hydrogen() {
+        let lines = lyman_series(1, 6).unwrap();
+        assert_eq!(lines.len(), 5); // n=2..=6
+        // Lyman-alpha: ~121.6 nm
+        assert!((lines[0].1 - 121.6).abs() < 0.5, "Ly-α={}", lines[0].1);
+        // Series limit: should converge toward 91.2 nm
+        assert!(lines.last().unwrap().1 > 91.0);
+    }
+
+    #[test]
+    fn balmer_series_hydrogen() {
+        let lines = balmer_series(1, 8).unwrap();
+        assert_eq!(lines.len(), 6); // n=3..=8
+        // H-alpha: ~656.3 nm
+        assert!((lines[0].1 - 656.3).abs() < 1.0, "Hα={}", lines[0].1);
+        // H-beta: ~486.1 nm
+        assert!((lines[1].1 - 486.1).abs() < 1.0, "Hβ={}", lines[1].1);
+    }
+
+    #[test]
+    fn paschen_series_hydrogen() {
+        let lines = paschen_series(1, 7).unwrap();
+        assert_eq!(lines.len(), 4); // n=4..=7
+        // Paschen-alpha: ~1875 nm
+        assert!((lines[0].1 - 1875.0).abs() < 10.0, "Pa-α={}", lines[0].1);
+    }
+
+    #[test]
+    fn brackett_series_hydrogen() {
+        let lines = brackett_series(1, 8).unwrap();
+        assert_eq!(lines.len(), 4); // n=5..=8
+        // Brackett-alpha: ~4051 nm
+        assert!((lines[0].1 - 4051.0).abs() < 20.0, "Br-α={}", lines[0].1);
+    }
+
+    #[test]
+    fn pfund_series_hydrogen() {
+        let lines = pfund_series(1, 9).unwrap();
+        assert_eq!(lines.len(), 4); // n=6..=9
+        // Pfund-alpha: ~7460 nm
+        assert!((lines[0].1 - 7460.0).abs() < 50.0, "Pf-α={}", lines[0].1);
+    }
+
+    #[test]
+    fn series_wavelengths_decrease_with_n() {
+        // Within any series, wavelengths should decrease with increasing n
+        let lines = balmer_series(1, 10).unwrap();
+        for i in 1..lines.len() {
+            assert!(
+                lines[i].1 < lines[i - 1].1,
+                "Wavelength should decrease: {} vs {}",
+                lines[i].1,
+                lines[i - 1].1
+            );
+        }
+    }
+
+    #[test]
+    fn series_invalid_n_max() {
+        assert!(lyman_series(1, 1).is_err());
+        assert!(balmer_series(1, 2).is_err());
+        assert!(paschen_series(1, 3).is_err());
+        assert!(brackett_series(1, 4).is_err());
+        assert!(pfund_series(1, 5).is_err());
     }
 }

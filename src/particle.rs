@@ -435,4 +435,97 @@ mod tests {
         let rel_err = (product - hbar).abs() / hbar;
         assert!(rel_err < 1e-6, "Γ·τ={product}, ħ={hbar}");
     }
+
+    // --- Coverage: exercise all enum variants ---
+
+    #[test]
+    fn quark_generations() {
+        assert_eq!(Quark::Up.generation(), 1);
+        assert_eq!(Quark::Down.generation(), 1);
+        assert_eq!(Quark::Charm.generation(), 2);
+        assert_eq!(Quark::Strange.generation(), 2);
+        assert_eq!(Quark::Top.generation(), 3);
+        assert_eq!(Quark::Bottom.generation(), 3);
+    }
+
+    #[test]
+    fn lepton_all_masses() {
+        assert!(Lepton::Electron.mass_mev() > 0.0);
+        assert!((Lepton::ElectronNeutrino.mass_mev()).abs() < 1e-10);
+        assert!(Lepton::Muon.mass_mev() > 100.0);
+        assert!((Lepton::MuonNeutrino.mass_mev()).abs() < 1e-10);
+        assert!(Lepton::Tau.mass_mev() > 1700.0);
+        assert!((Lepton::TauNeutrino.mass_mev()).abs() < 1e-10);
+    }
+
+    #[test]
+    fn lepton_all_charges() {
+        assert!((Lepton::Electron.charge() - (-1.0)).abs() < 1e-10);
+        assert!((Lepton::Muon.charge() - (-1.0)).abs() < 1e-10);
+        assert!((Lepton::Tau.charge() - (-1.0)).abs() < 1e-10);
+        assert!((Lepton::ElectronNeutrino.charge()).abs() < 1e-10);
+        assert!((Lepton::MuonNeutrino.charge()).abs() < 1e-10);
+        assert!((Lepton::TauNeutrino.charge()).abs() < 1e-10);
+    }
+
+    #[test]
+    fn lepton_all_generations() {
+        assert_eq!(Lepton::Electron.generation(), 1);
+        assert_eq!(Lepton::ElectronNeutrino.generation(), 1);
+        assert_eq!(Lepton::Muon.generation(), 2);
+        assert_eq!(Lepton::MuonNeutrino.generation(), 2);
+        assert_eq!(Lepton::Tau.generation(), 3);
+        assert_eq!(Lepton::TauNeutrino.generation(), 3);
+    }
+
+    #[test]
+    fn boson_all_properties() {
+        assert!((Boson::Photon.mass_mev()).abs() < 1e-10);
+        assert!((Boson::Gluon.mass_mev()).abs() < 1e-10);
+        assert!(Boson::WPlus.mass_mev() > 80_000.0);
+        assert!(Boson::WMinus.mass_mev() > 80_000.0);
+        assert!(Boson::Z.mass_mev() > 91_000.0);
+        assert_eq!(Boson::Higgs.spin(), 0);
+        assert_eq!(Boson::Photon.spin(), 1);
+        assert!((Boson::WPlus.charge() - 1.0).abs() < 1e-10);
+        assert!((Boson::WMinus.charge() - (-1.0)).abs() < 1e-10);
+        assert!((Boson::Z.charge()).abs() < 1e-10);
+        assert!((Boson::Higgs.charge()).abs() < 1e-10);
+    }
+
+    #[test]
+    fn force_all_ranges() {
+        assert!(FundamentalForce::Strong.range_meters() < 1e-14);
+        assert!(
+            FundamentalForce::Electromagnetic
+                .range_meters()
+                .is_infinite()
+        );
+        assert!(FundamentalForce::Weak.range_meters() < 1e-17);
+        assert!(FundamentalForce::Gravity.range_meters().is_infinite());
+    }
+
+    #[test]
+    fn force_all_mediators() {
+        assert!(!FundamentalForce::Strong.mediator().is_empty());
+        assert!(!FundamentalForce::Electromagnetic.mediator().is_empty());
+        assert!(!FundamentalForce::Weak.mediator().is_empty());
+        assert!(FundamentalForce::Gravity.mediator().is_empty());
+    }
+
+    #[test]
+    fn boson_gluon_is_stable() {
+        assert!(Boson::Gluon.is_stable());
+    }
+
+    #[test]
+    fn tau_not_stable() {
+        assert!(!Lepton::Tau.is_stable());
+        assert!(!Lepton::Muon.is_stable());
+    }
+
+    #[test]
+    fn higgs_decay_width() {
+        assert!((Boson::Higgs.decay_width_mev() - 3.7).abs() < 0.1);
+    }
 }

@@ -51,11 +51,90 @@ fn decay_chain_10(c: &mut Criterion) {
     });
 }
 
+fn shell_occupation_126(c: &mut Criterion) {
+    c.bench_function("nucleus/shell_occupation_126", |b| {
+        b.iter(|| {
+            for n in 1..=126 {
+                black_box(tanmatra::nucleus::shell_occupation(n));
+            }
+        });
+    });
+}
+
+fn ionization_energy_118(c: &mut Criterion) {
+    c.bench_function("atomic/ionization_energy_118", |b| {
+        b.iter(|| {
+            for z in 1..=118 {
+                black_box(ionization_energy_ev(z).ok());
+            }
+        });
+    });
+}
+
+fn lorentz_gamma_1000(c: &mut Criterion) {
+    c.bench_function("relativity/lorentz_gamma_1000", |b| {
+        b.iter(|| {
+            for i in 1..=1000 {
+                let beta = i as f64 / 1001.0;
+                black_box(tanmatra::relativity::lorentz_gamma(beta));
+            }
+        });
+    });
+}
+
+fn rutherford_scattering_1000(c: &mut Criterion) {
+    c.bench_function("scattering/rutherford_1000", |b| {
+        b.iter(|| {
+            for i in 1..=1000 {
+                let theta = i as f64 * core::f64::consts::PI / 1001.0;
+                black_box(tanmatra::scattering::rutherford_differential(
+                    2, 79, 5.0, theta,
+                ));
+            }
+        });
+    });
+}
+
+fn bateman_chain_3(c: &mut Criterion) {
+    c.bench_function("decay/bateman_chain_3", |b| {
+        let lambdas = [0.1, 0.05, 0.0];
+        b.iter(|| {
+            black_box(tanmatra::decay::bateman_chain(&lambdas, 1e6, 100.0));
+        });
+    });
+}
+
+fn radial_wavefunction_100(c: &mut Criterion) {
+    c.bench_function("atomic/radial_wavefunction_100", |b| {
+        b.iter(|| {
+            for i in 0..100 {
+                let r = i as f64 * 0.1;
+                black_box(tanmatra::atomic::radial_wavefunction(1, 3, 2, r).ok());
+            }
+        });
+    });
+}
+
+fn known_isotopes_alloc(c: &mut Criterion) {
+    c.bench_function("decay/known_isotopes_alloc", |b| {
+        b.iter(|| {
+            black_box(tanmatra::decay::known_isotopes());
+        });
+    });
+}
+
 criterion_group!(
     benches,
     binding_energy_1000,
     spectral_line_1000,
     electron_config_36,
     decay_chain_10,
+    shell_occupation_126,
+    ionization_energy_118,
+    lorentz_gamma_1000,
+    rutherford_scattering_1000,
+    bateman_chain_3,
+    radial_wavefunction_100,
+    known_isotopes_alloc,
 );
 criterion_main!(benches);

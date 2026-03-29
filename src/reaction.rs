@@ -929,4 +929,60 @@ mod tests {
         let back: FissionYield = serde_json::from_str(&json).unwrap();
         assert_eq!(fy.mass_number, back.mass_number);
     }
+
+    // --- Coverage: edge cases ---
+
+    #[test]
+    fn breit_wigner_at_resonance() {
+        // On resonance (E = E_r), the BW should peak
+        let sigma_on = breit_wigner_cross_section(1.0, 1.0, 0.1, 0.05, 0.05, 1.0, 500.0);
+        let sigma_off = breit_wigner_cross_section(2.0, 1.0, 0.1, 0.05, 0.05, 1.0, 500.0);
+        assert!(sigma_on > sigma_off, "On-resonance should be larger");
+    }
+
+    #[test]
+    fn breit_wigner_zero_energy() {
+        let sigma = breit_wigner_cross_section(0.0, 1.0, 0.1, 0.05, 0.05, 1.0, 500.0);
+        assert!((sigma).abs() < 1e-30);
+    }
+
+    #[test]
+    fn coulomb_barrier_invalid_radii() {
+        // Both valid nuclei, barrier should be positive
+        let h = Nucleus::hydrogen_1();
+        let v = coulomb_barrier(&h, &h).unwrap();
+        assert!(v > 0.0);
+    }
+
+    #[test]
+    fn moderating_ratio_zero_absorb() {
+        let mr = moderating_ratio(1.0, 10.0, 0.0);
+        assert!(mr.is_infinite());
+    }
+
+    #[test]
+    fn collisions_zero_energy() {
+        let nc = collisions_to_thermalize(1, 0.0, 0.025);
+        assert!((nc).abs() < 1e-10);
+    }
+
+    #[test]
+    fn all_preset_reactions_have_positive_q() {
+        assert!(dt_fusion().q_value_mev > 0.0);
+        assert!(dd_fusion_he3().q_value_mev > 0.0);
+        assert!(dd_fusion_t().q_value_mev > 0.0);
+        assert!(pp_chain_step1().q_value_mev > 0.0);
+        assert!(cno_cycle().q_value_mev > 0.0);
+        assert!(triple_alpha().q_value_mev > 0.0);
+        assert!(u235_fission().q_value_mev > 0.0);
+    }
+
+    #[test]
+    fn thermal_cross_sections_all_positive() {
+        for xs in &thermal_neutron_cross_sections() {
+            assert!(xs.absorption_barns >= 0.0);
+            assert!(xs.fission_barns >= 0.0);
+            assert!(xs.scattering_barns >= 0.0);
+        }
+    }
 }

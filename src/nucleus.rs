@@ -730,9 +730,68 @@ mod tests {
 
     #[test]
     fn shell_correction_reasonable_magnitude() {
-        // Shell correction should be a few MeV, not hundreds
         let fe56 = Nucleus::iron_56();
         let diff = (fe56.binding_energy_shell_corrected() - fe56.binding_energy()).abs();
         assert!(diff < 10.0, "Shell correction {diff} MeV too large");
+    }
+
+    // --- Coverage: additional paths ---
+
+    #[test]
+    fn atomic_mass_amu_fe56() {
+        let fe56 = Nucleus::iron_56();
+        let amu = fe56.atomic_mass_amu();
+        // Fe-56 atomic mass ≈ 55.9 u
+        assert!(amu > 55.0 && amu < 57.0, "Fe-56 AMU={amu}");
+    }
+
+    #[test]
+    fn is_magic_not_doubly() {
+        // O-17: Z=8 (magic), N=9 (not magic)
+        let o17 = Nucleus::new(8, 17).unwrap();
+        assert!(o17.is_magic());
+        assert!(!o17.is_doubly_magic());
+    }
+
+    #[test]
+    fn shell_level_degeneracy() {
+        let level = ShellLevel {
+            n_shell: 1,
+            l: 0,
+            two_j: 1,
+        };
+        assert_eq!(level.degeneracy(), 2);
+        assert!((level.j() - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn shell_level_label_g_orbital() {
+        let level = ShellLevel {
+            n_shell: 1,
+            l: 4,
+            two_j: 9,
+        };
+        assert_eq!(level.label(), "1g9/2");
+    }
+
+    #[test]
+    fn odd_odd_spin_parity() {
+        // N-14: Z=7, N=7 (odd-odd)
+        let n14 = Nucleus::new(7, 14).unwrap();
+        let (two_j, _parity) = ground_state_spin_parity(&n14);
+        assert!(two_j > 0, "Odd-odd should have nonzero spin");
+    }
+
+    #[test]
+    fn shell_closure_below_zero() {
+        assert_eq!(shell_closure_below(0), 0);
+    }
+
+    #[test]
+    fn carbon_presets() {
+        let c12 = Nucleus::carbon_12();
+        assert_eq!(c12.z(), 6);
+        assert_eq!(c12.a(), 12);
+        assert_eq!(c12.n(), 6);
     }
 }
