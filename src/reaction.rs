@@ -444,6 +444,236 @@ pub fn r_process_main() -> NucleosynthesisPathway {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Neutron moderation and thermalization
+// ---------------------------------------------------------------------------
+
+/// Calculates the maximum fractional energy loss per elastic collision.
+///
+/// For a neutron (mass 1) scattering off a nucleus of mass number A:
+/// α = ((A-1)/(A+1))², and the maximum fractional loss = 1 - α.
+///
+/// Returns the fraction of energy lost in a single head-on collision.
+#[must_use]
+#[inline]
+pub fn max_energy_loss_fraction(target_a: u32) -> f64 {
+    let a = target_a as f64;
+    let alpha = ((a - 1.0) / (a + 1.0)) * ((a - 1.0) / (a + 1.0));
+    1.0 - alpha
+}
+
+/// Calculates the average logarithmic energy decrement per collision (ξ).
+///
+/// ξ = 1 + ((A-1)²/(2A)) * ln((A-1)/(A+1))
+///
+/// For hydrogen (A=1), ξ = 1.0 exactly.
+/// This is the average lethargy gain per collision.
+#[must_use]
+#[inline]
+pub fn average_lethargy_gain(target_a: u32) -> f64 {
+    if target_a <= 1 {
+        return 1.0; // hydrogen: ξ = 1
+    }
+    let a = target_a as f64;
+    // ξ = 1 + ((A-1)²/(2A)) * ln((A-1)/(A+1))
+    let am1 = a - 1.0;
+    let ap1 = a + 1.0;
+    1.0 + (am1 * am1 / (2.0 * a)) * libm::log(am1 / ap1)
+}
+
+/// Calculates the number of collisions needed to thermalize a neutron.
+///
+/// n = ln(E_initial / E_final) / ξ
+///
+/// Typical: E_initial = 2 MeV (fission neutron), E_final = 0.0253 eV (thermal).
+///
+/// Returns the number of collisions (as f64 since it's an average).
+#[must_use]
+#[inline]
+pub fn collisions_to_thermalize(target_a: u32, e_initial_ev: f64, e_final_ev: f64) -> f64 {
+    let xi = average_lethargy_gain(target_a);
+    if xi <= 0.0 || e_initial_ev <= 0.0 || e_final_ev <= 0.0 {
+        return 0.0;
+    }
+    libm::log(e_initial_ev / e_final_ev) / xi
+}
+
+/// Calculates the moderating ratio (ξ Σ_s / Σ_a).
+///
+/// A higher moderating ratio means better moderator performance.
+/// Typical values: H₂O ≈ 72, D₂O ≈ 5670, graphite ≈ 192.
+///
+/// Parameters:
+/// - `lethargy_gain`: ξ value
+/// - `scatter_xs`: macroscopic scattering cross-section (cm⁻¹)
+/// - `absorb_xs`: macroscopic absorption cross-section (cm⁻¹)
+#[must_use]
+#[inline]
+pub fn moderating_ratio(lethargy_gain: f64, scatter_xs: f64, absorb_xs: f64) -> f64 {
+    if absorb_xs <= 0.0 {
+        return f64::INFINITY;
+    }
+    lethargy_gain * scatter_xs / absorb_xs
+}
+
+// ---------------------------------------------------------------------------
+// Fission product yields
+// ---------------------------------------------------------------------------
+
+/// A fission product yield data point.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FissionYield {
+    /// Mass number A of the fission product.
+    pub mass_number: u32,
+    /// Cumulative fission yield (fraction per fission).
+    pub yield_fraction: f64,
+}
+
+/// Returns thermal neutron fission yield distribution for U-235.
+///
+/// These are cumulative yields at key mass numbers showing the
+/// characteristic double-humped distribution.
+///
+/// Source: ENDF/B-VIII.0 fission yield data.
+#[must_use]
+pub fn u235_fission_yields() -> alloc::vec::Vec<FissionYield> {
+    alloc::vec![
+        FissionYield {
+            mass_number: 85,
+            yield_fraction: 0.0131
+        },
+        FissionYield {
+            mass_number: 90,
+            yield_fraction: 0.0580
+        },
+        FissionYield {
+            mass_number: 95,
+            yield_fraction: 0.0650
+        },
+        FissionYield {
+            mass_number: 99,
+            yield_fraction: 0.0611
+        },
+        FissionYield {
+            mass_number: 101,
+            yield_fraction: 0.0514
+        },
+        FissionYield {
+            mass_number: 105,
+            yield_fraction: 0.0093
+        },
+        FissionYield {
+            mass_number: 110,
+            yield_fraction: 0.0002
+        },
+        FissionYield {
+            mass_number: 115,
+            yield_fraction: 0.0001
+        },
+        FissionYield {
+            mass_number: 120,
+            yield_fraction: 0.0001
+        },
+        FissionYield {
+            mass_number: 131,
+            yield_fraction: 0.0290
+        },
+        FissionYield {
+            mass_number: 133,
+            yield_fraction: 0.0670
+        },
+        FissionYield {
+            mass_number: 135,
+            yield_fraction: 0.0650
+        },
+        FissionYield {
+            mass_number: 137,
+            yield_fraction: 0.0630
+        },
+        FissionYield {
+            mass_number: 140,
+            yield_fraction: 0.0620
+        },
+        FissionYield {
+            mass_number: 144,
+            yield_fraction: 0.0540
+        },
+        FissionYield {
+            mass_number: 147,
+            yield_fraction: 0.0224
+        },
+        FissionYield {
+            mass_number: 151,
+            yield_fraction: 0.0042
+        },
+        FissionYield {
+            mass_number: 155,
+            yield_fraction: 0.0003
+        },
+    ]
+}
+
+/// Returns thermal neutron fission yield distribution for Pu-239.
+///
+/// Source: ENDF/B-VIII.0 fission yield data.
+#[must_use]
+pub fn pu239_fission_yields() -> alloc::vec::Vec<FissionYield> {
+    alloc::vec![
+        FissionYield {
+            mass_number: 85,
+            yield_fraction: 0.0054
+        },
+        FissionYield {
+            mass_number: 90,
+            yield_fraction: 0.0211
+        },
+        FissionYield {
+            mass_number: 95,
+            yield_fraction: 0.0484
+        },
+        FissionYield {
+            mass_number: 99,
+            yield_fraction: 0.0620
+        },
+        FissionYield {
+            mass_number: 103,
+            yield_fraction: 0.0700
+        },
+        FissionYield {
+            mass_number: 106,
+            yield_fraction: 0.0425
+        },
+        FissionYield {
+            mass_number: 110,
+            yield_fraction: 0.0040
+        },
+        FissionYield {
+            mass_number: 131,
+            yield_fraction: 0.0385
+        },
+        FissionYield {
+            mass_number: 134,
+            yield_fraction: 0.0708
+        },
+        FissionYield {
+            mass_number: 137,
+            yield_fraction: 0.0666
+        },
+        FissionYield {
+            mass_number: 140,
+            yield_fraction: 0.0538
+        },
+        FissionYield {
+            mass_number: 144,
+            yield_fraction: 0.0375
+        },
+        FissionYield {
+            mass_number: 147,
+            yield_fraction: 0.0210
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -634,5 +864,69 @@ mod tests {
         let back: NucleosynthesisPathway = serde_json::from_str(&json).unwrap();
         assert_eq!(pathway.name, back.name);
         assert_eq!(pathway.steps.len(), back.steps.len());
+    }
+
+    // --- Neutron moderation tests ---
+
+    #[test]
+    fn hydrogen_max_energy_loss() {
+        // Hydrogen (A=1): max energy loss = 100% (head-on billiard)
+        let frac = max_energy_loss_fraction(1);
+        assert!((frac - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn heavy_nucleus_small_energy_loss() {
+        // U-238: max loss ≈ 4/A ≈ 1.7%
+        let frac = max_energy_loss_fraction(238);
+        assert!(frac < 0.02, "U-238 max loss={frac}");
+        assert!(frac > 0.01, "U-238 max loss={frac}");
+    }
+
+    #[test]
+    fn hydrogen_lethargy_gain() {
+        let xi = average_lethargy_gain(1);
+        assert!((xi - 1.0).abs() < 1e-10, "H ξ={xi}");
+    }
+
+    #[test]
+    fn collisions_hydrogen_thermalize() {
+        // 2 MeV -> 0.0253 eV in hydrogen: ~18 collisions
+        let nc = collisions_to_thermalize(1, 2e6, 0.0253);
+        assert!(nc > 15.0 && nc < 25.0, "H collisions={nc}");
+    }
+
+    #[test]
+    fn collisions_graphite_more_than_hydrogen() {
+        let nc_h = collisions_to_thermalize(1, 2e6, 0.0253);
+        let nc_c = collisions_to_thermalize(12, 2e6, 0.0253);
+        assert!(nc_c > nc_h, "C-12 needs more collisions than H");
+    }
+
+    // --- Fission yield tests ---
+
+    #[test]
+    fn u235_fission_yield_double_hump() {
+        let yields = u235_fission_yields();
+        // Light peak around A=95, heavy peak around A=137
+        let light_peak = yields.iter().find(|y| y.mass_number == 95).unwrap();
+        let valley = yields.iter().find(|y| y.mass_number == 115).unwrap();
+        let heavy_peak = yields.iter().find(|y| y.mass_number == 137).unwrap();
+        assert!(light_peak.yield_fraction > valley.yield_fraction);
+        assert!(heavy_peak.yield_fraction > valley.yield_fraction);
+    }
+
+    #[test]
+    fn pu239_fission_yields_exist() {
+        let yields = pu239_fission_yields();
+        assert!(yields.len() >= 10);
+    }
+
+    #[test]
+    fn serde_roundtrip_fission_yield() {
+        let fy = &u235_fission_yields()[0];
+        let json = serde_json::to_string(fy).unwrap();
+        let back: FissionYield = serde_json::from_str(&json).unwrap();
+        assert_eq!(fy.mass_number, back.mass_number);
     }
 }

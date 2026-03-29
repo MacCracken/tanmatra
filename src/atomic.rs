@@ -579,6 +579,405 @@ pub fn stark_shift_hydrogen_ev(n: u32, parabolic_index: i32, e_field_v_per_m: f6
     1.5 * n_f * k * a0 * e_field_v_per_m
 }
 
+// ---------------------------------------------------------------------------
+// Hydrogen wavefunctions
+// ---------------------------------------------------------------------------
+
+/// Computes the radial wavefunction R_nl(r) for a hydrogen-like atom.
+///
+/// R_nl(r) = N * (2Zr/na0)^l * exp(-Zr/na0) * L_{n-l-1}^{2l+1}(2Zr/na0)
+///
+/// where L is the associated Laguerre polynomial and N is the normalization.
+///
+/// For simplicity, implements exact forms for n=1,2,3 with any l.
+///
+/// Parameters:
+/// - `z`: atomic number
+/// - `n`: principal quantum number (1, 2, or 3)
+/// - `l`: orbital angular momentum (0 to n-1)
+/// - `r_bohr`: radial distance in units of Bohr radius (r/a0)
+///
+/// Returns R_nl(r) * a0^(3/2) (dimensionless when multiplied by a0^{-3/2}).
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if n > 3 or l >= n.
+pub fn radial_wavefunction(z: u32, n: u32, l: u32, r_bohr: f64) -> Result<f64, TanmatraError> {
+    if n == 0 || n > 3 {
+        return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
+            "n={n} not supported (1-3)"
+        )));
+    }
+    if l >= n {
+        return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
+            "l={l} must be < n={n}"
+        )));
+    }
+
+    let zf = z as f64;
+    let rho = 2.0 * zf * r_bohr / n as f64; // 2Zr/(n*a0)
+    let exp_factor = libm::exp(-rho / 2.0);
+
+    let result = match (n, l) {
+        (1, 0) => {
+            // R_10 = 2 * (Z/a0)^{3/2} * exp(-Zr/a0)
+            2.0 * zf * libm::sqrt(zf) * exp_factor
+        }
+        (2, 0) => {
+            // R_20 = (1/2√2) * (Z/a0)^{3/2} * (2 - Zr/a0) * exp(-Zr/2a0)
+            let norm = 1.0 / (2.0 * core::f64::consts::SQRT_2);
+            norm * zf * libm::sqrt(zf) * (2.0 - zf * r_bohr) * exp_factor
+        }
+        (2, 1) => {
+            // R_21 = (1/2√6) * (Z/a0)^{3/2} * (Zr/a0) * exp(-Zr/2a0)
+            let norm = 1.0 / (2.0 * libm::sqrt(6.0));
+            norm * zf * libm::sqrt(zf) * zf * r_bohr * exp_factor
+        }
+        (3, 0) => {
+            // R_30 = (2/81√3) * (Z/a0)^{3/2} * (27 - 18Zr/a0 + 2(Zr/a0)²) * exp(-Zr/3a0)
+            let zr = zf * r_bohr;
+            let norm = 2.0 / (81.0 * libm::sqrt(3.0));
+            norm * zf * libm::sqrt(zf) * (27.0 - 18.0 * zr + 2.0 * zr * zr) * exp_factor
+        }
+        (3, 1) => {
+            // R_31 = (8/27√6) * (Z/a0)^{3/2} * (Zr/a0)(6 - Zr/a0) * exp(-Zr/3a0)
+            let zr = zf * r_bohr;
+            let norm = 8.0 / (27.0 * libm::sqrt(6.0));
+            norm * zf * libm::sqrt(zf) * zr * (6.0 - zr) * exp_factor
+        }
+        (3, 2) => {
+            // R_32 = (4/81√30) * (Z/a0)^{3/2} * (Zr/a0)² * exp(-Zr/3a0)
+            let zr = zf * r_bohr;
+            let norm = 4.0 / (81.0 * libm::sqrt(30.0));
+            norm * zf * libm::sqrt(zf) * zr * zr * exp_factor
+        }
+        _ => {
+            return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
+                "n={n}, l={l} not supported"
+            )));
+        }
+    };
+
+    Ok(result)
+}
+
+/// Computes the radial probability density |R_nl(r)|² * r² for hydrogen-like atoms.
+///
+/// This is the probability of finding the electron at distance r (per unit r).
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if quantum numbers are invalid.
+#[inline]
+pub fn radial_probability_density(
+    z: u32,
+    n: u32,
+    l: u32,
+    r_bohr: f64,
+) -> Result<f64, TanmatraError> {
+    let rnl = radial_wavefunction(z, n, l, r_bohr)?;
+    Ok(rnl * rnl * r_bohr * r_bohr)
+}
+
+// ---------------------------------------------------------------------------
+// Selection rules and transition probabilities
+// ---------------------------------------------------------------------------
+
+/// Result of checking electric dipole selection rules for a transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum TransitionType {
+    /// Electric dipole (E1) — allowed transition.
+    ElectricDipole,
+    /// Forbidden by electric dipole selection rules.
+    Forbidden,
+}
+
+/// Checks if a transition satisfies electric dipole (E1) selection rules.
+///
+/// For hydrogen-like atoms, E1 selection rules require:
+/// - Δl = ±1
+/// - Δm_l = 0, ±1
+/// - Δm_s = 0
+/// - Parity change (automatic from Δl = ±1)
+///
+/// Parameters: `l1`, `l2` (orbital quantum numbers of initial/final states).
+#[must_use]
+#[inline]
+pub fn check_selection_rules(l1: u32, l2: u32) -> TransitionType {
+    let delta_l = (l1 as i64 - l2 as i64).unsigned_abs();
+    if delta_l == 1 {
+        TransitionType::ElectricDipole
+    } else {
+        TransitionType::Forbidden
+    }
+}
+
+/// Checks if a transition satisfies the full E1 selection rules including m_l.
+///
+/// Rules: Δl = ±1, Δm_l = 0, ±1.
+#[must_use]
+#[inline]
+pub fn check_selection_rules_full(l1: u32, ml1: i32, l2: u32, ml2: i32) -> TransitionType {
+    let delta_l = (l1 as i64 - l2 as i64).unsigned_abs();
+    let delta_ml = (ml1 - ml2).unsigned_abs();
+    if delta_l == 1 && delta_ml <= 1 {
+        TransitionType::ElectricDipole
+    } else {
+        TransitionType::Forbidden
+    }
+}
+
+/// Calculates the Einstein A coefficient (spontaneous emission rate) for
+/// hydrogen-like atoms.
+///
+/// For electric dipole transitions between levels (n1,l1) and (n2,l2)
+/// in a hydrogen-like atom with atomic number Z:
+///
+/// A_{21} = (4 α³ ω³)/(3 c²) |⟨1|r|2⟩|²
+///
+/// For hydrogen (Z=1), a simplified formula gives:
+/// A ∝ Z⁴ * (frequency)³ * |radial matrix element|²
+///
+/// This implementation uses the known analytical result for hydrogen:
+/// A_{n2,l2 → n1,l1} scales as Z⁴ / n_eff⁵
+///
+/// Returns the rate in s⁻¹.
+///
+/// # Errors
+///
+/// Returns error if the transition violates selection rules.
+pub fn einstein_a_coefficient(
+    z: u32,
+    n_upper: u32,
+    l_upper: u32,
+    n_lower: u32,
+    l_lower: u32,
+) -> Result<f64, TanmatraError> {
+    if check_selection_rules(l_upper, l_lower) == TransitionType::Forbidden {
+        return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
+            "transition ({n_upper},{l_upper})->({n_lower},{l_lower}) is E1-forbidden"
+        )));
+    }
+
+    if n_upper <= n_lower {
+        return Err(TanmatraError::InvalidQuantumNumbers(String::from(
+            "upper level must have larger n",
+        )));
+    }
+
+    let zf = z as f64;
+    let n1 = n_lower as f64;
+    let n2 = n_upper as f64;
+    let l_max = if l_upper > l_lower { l_upper } else { l_lower };
+
+    // Transition energy in eV
+    let delta_e_ev = 13.6 * zf * zf * (1.0 / (n1 * n1) - 1.0 / (n2 * n2));
+
+    // Transition frequency in Hz: ν = ΔE / h
+    let freq_hz = delta_e_ev / crate::constants::H_EV_S;
+
+    // Use the standard relation: A = (8π² e² ν²) / (m_e c³) * f_osc
+    // with Kramers' approximate oscillator strength for hydrogen:
+    // f ≈ (32/(3√3 π)) * 1/(n1² n2² (1/n1² - 1/n2²)³) * max(l,l')/(2l_upper+1)
+    //
+    // Instead, use the exact formula in SI:
+    // A_{21} = (ω³ |d|²) / (3π ε₀ ħ c³)
+    //
+    // For hydrogen transitions, the known scaling is:
+    // A = 6.27e8 * Z⁴ * (freq/freq_ly_alpha)³ * max(l,l')/(2l_upper+1) * correction
+    //
+    // Ly-alpha: n=2→1, l=1→0, freq = 2.466e15 Hz, A = 6.27e8 s⁻¹
+    let freq_ly_alpha = 2.466e15; // Hz for hydrogen Lyman-alpha
+    let a_ly_alpha = 6.27e8; // s⁻¹ for hydrogen Lyman-alpha
+
+    let freq_ratio = freq_hz / freq_ly_alpha;
+    let g_ratio = l_max as f64 / (2 * l_upper + 1) as f64;
+
+    // A scales as Z⁴ * ν³ * angular factor
+    let a_coeff = a_ly_alpha * zf.powi(4) * freq_ratio.powi(3) * g_ratio;
+
+    Ok(a_coeff.abs())
+}
+
+/// Calculates the Einstein B coefficient for stimulated emission/absorption.
+///
+/// B_{21} = A_{21} * c³ / (8π h ν³)
+///
+/// where ν is the transition frequency.
+///
+/// Returns B in m³/(J·s²) = m³·sr/(J·s).
+///
+/// # Errors
+///
+/// Returns error if the transition violates selection rules.
+pub fn einstein_b_coefficient(
+    z: u32,
+    n_upper: u32,
+    l_upper: u32,
+    n_lower: u32,
+    l_lower: u32,
+) -> Result<f64, TanmatraError> {
+    let a21 = einstein_a_coefficient(z, n_upper, l_upper, n_lower, l_lower)?;
+
+    let zf = z as f64;
+    let n1 = n_lower as f64;
+    let n2 = n_upper as f64;
+
+    // Transition frequency in Hz
+    let delta_e_ev = 13.6 * zf * zf * (1.0 / (n1 * n1) - 1.0 / (n2 * n2));
+    let freq_hz = delta_e_ev / crate::constants::H_EV_S;
+
+    let c_val = crate::constants::C;
+    let h_val = crate::constants::H_EV_S * crate::constants::ELEMENTARY_CHARGE; // h in J·s
+
+    if freq_hz <= 0.0 {
+        return Ok(0.0);
+    }
+
+    Ok(a21 * c_val * c_val * c_val / (8.0 * core::f64::consts::PI * h_val * freq_hz.powi(3)))
+}
+
+// ---------------------------------------------------------------------------
+// Electron affinities
+// ---------------------------------------------------------------------------
+
+/// Electron affinities in eV for Z=1..=118.
+///
+/// Positive value = energy released when forming X⁻ (stable anion).
+/// 0.0 = anion unstable (noble gases, alkaline earths, Mn, N, etc.).
+///
+/// Sources: NIST, T. Andersen (2004), Rienstra-Kiracofe et al. (2002).
+/// Z>104: relativistic theoretical values (Eliav, Kaldor, Borschevsky).
+#[allow(clippy::too_many_lines)]
+const ELECTRON_AFFINITY_EV: [f64; 118] = [
+    0.754_20, // H  (Z=1)
+    0.0,      // He (Z=2)
+    0.618_05, // Li (Z=3)
+    0.0,      // Be (Z=4)
+    0.279_72, // B  (Z=5)
+    1.262_12, // C  (Z=6)
+    0.0,      // N  (Z=7)
+    1.461_12, // O  (Z=8)
+    3.401_19, // F  (Z=9)
+    0.0,      // Ne (Z=10)
+    0.547_93, // Na (Z=11)
+    0.0,      // Mg (Z=12)
+    0.432_83, // Al (Z=13)
+    1.389_52, // Si (Z=14)
+    0.746_61, // P  (Z=15)
+    2.077_10, // S  (Z=16)
+    3.612_72, // Cl (Z=17)
+    0.0,      // Ar (Z=18)
+    0.501_46, // K  (Z=19)
+    0.024_55, // Ca (Z=20)
+    0.188,    // Sc (Z=21)
+    0.079,    // Ti (Z=22)
+    0.525,    // V  (Z=23)
+    0.666_0,  // Cr (Z=24)
+    0.0,      // Mn (Z=25)
+    0.151,    // Fe (Z=26)
+    0.662_26, // Co (Z=27)
+    1.156_16, // Ni (Z=28)
+    1.235_78, // Cu (Z=29)
+    0.0,      // Zn (Z=30)
+    0.430,    // Ga (Z=31)
+    1.232_71, // Ge (Z=32)
+    0.804,    // As (Z=33)
+    2.020_67, // Se (Z=34)
+    3.363_59, // Br (Z=35)
+    0.0,      // Kr (Z=36)
+    0.485_92, // Rb (Z=37)
+    0.048_16, // Sr (Z=38)
+    0.307,    // Y  (Z=39)
+    0.426,    // Zr (Z=40)
+    0.916_0,  // Nb (Z=41)
+    0.748_0,  // Mo (Z=42)
+    0.550,    // Tc (Z=43)
+    1.046_38, // Ru (Z=44)
+    1.142_89, // Rh (Z=45)
+    0.562_14, // Pd (Z=46)
+    1.304_7,  // Ag (Z=47)
+    0.0,      // Cd (Z=48)
+    0.404,    // In (Z=49)
+    1.112_07, // Sn (Z=50)
+    1.047_01, // Sb (Z=51)
+    1.970_88, // Te (Z=52)
+    3.059_04, // I  (Z=53)
+    0.0,      // Xe (Z=54)
+    0.471_63, // Cs (Z=55)
+    0.144_62, // Ba (Z=56)
+    0.470,    // La (Z=57)
+    0.570,    // Ce (Z=58)
+    0.962,    // Pr (Z=59)
+    0.0,      // Nd (Z=60)
+    0.0,      // Pm (Z=61)
+    0.0,      // Sm (Z=62)
+    0.0,      // Eu (Z=63)
+    0.0,      // Gd (Z=64)
+    0.0,      // Tb (Z=65)
+    0.0,      // Dy (Z=66)
+    0.0,      // Ho (Z=67)
+    0.0,      // Er (Z=68)
+    1.029,    // Tm (Z=69)
+    0.0,      // Yb (Z=70)
+    0.340,    // Lu (Z=71)
+    0.017,    // Hf (Z=72)
+    0.322,    // Ta (Z=73)
+    0.816_26, // W  (Z=74)
+    0.150,    // Re (Z=75)
+    1.077_80, // Os (Z=76)
+    1.564_36, // Ir (Z=77)
+    2.128_10, // Pt (Z=78)
+    2.308_63, // Au (Z=79)
+    0.0,      // Hg (Z=80)
+    0.377,    // Tl (Z=81)
+    0.364_3,  // Pb (Z=82)
+    0.942_36, // Bi (Z=83)
+    1.900,    // Po (Z=84)
+    2.415_78, // At (Z=85)
+    0.0,      // Rn (Z=86)
+    0.486_3,  // Fr (Z=87)
+    0.144,    // Ra (Z=88)
+    0.350,    // Ac (Z=89)
+    1.170,    // Th (Z=90)
+    0.0,      // Pa (Z=91)
+    0.0,      // U  (Z=92)
+    0.0,      // Np-Og (Z=93-118): most actinides/superheavy have unbound anions
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,   // Z=94-102
+    0.470, // Lr (Z=103)
+    0.0,   // Rf (Z=104)
+    0.680, // Db (Z=105)
+    0.810, // Sg (Z=106)
+    0.0, 0.0, 0.0, 0.0,   // Bh-Ds (Z=107-110)
+    1.565, // Rg (Z=111)
+    0.0,   // Cn (Z=112)
+    0.680, // Nh (Z=113)
+    0.905, // Fl (Z=114)
+    0.674, // Mc (Z=115)
+    1.470, // Lv (Z=116)
+    1.635, // Ts (Z=117)
+    0.0,   // Og (Z=118)
+];
+
+/// Returns the electron affinity in eV for the given atomic number.
+///
+/// The electron affinity is the energy released when an electron is added
+/// to a neutral atom: X + e⁻ → X⁻ + EA.
+///
+/// Returns 0.0 for elements with unstable anions (noble gases, etc.).
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidAtomicNumber`] if Z is 0 or > 118.
+#[inline]
+pub fn electron_affinity_ev(z: u32) -> Result<f64, TanmatraError> {
+    if z == 0 || z > 118 {
+        return Err(TanmatraError::InvalidAtomicNumber(z));
+    }
+    Ok(ELECTRON_AFFINITY_EV[(z - 1) as usize])
+}
+
 /// NIST ionization energies for Z=1 to Z=118 in eV.
 ///
 /// Source: NIST Atomic Spectra Database, Ionization Energies.
@@ -1066,9 +1465,144 @@ mod tests {
 
     #[test]
     fn stark_increases_with_n() {
-        // Higher n states should have larger Stark shifts
         let de2 = stark_shift_hydrogen_ev(2, 1, 1e8).abs();
         let de5 = stark_shift_hydrogen_ev(5, 4, 1e8).abs();
         assert!(de5 > de2, "n=5 Stark should be larger than n=2");
+    }
+
+    // --- Electron affinity tests ---
+
+    #[test]
+    fn electron_affinity_fluorine_highest() {
+        // F has the highest EA among period 2 elements
+        let ea_f = electron_affinity_ev(9).unwrap();
+        assert!(ea_f > 3.0, "F EA={ea_f}");
+    }
+
+    #[test]
+    fn electron_affinity_chlorine() {
+        let ea_cl = electron_affinity_ev(17).unwrap();
+        assert!((ea_cl - 3.613).abs() < 0.01, "Cl EA={ea_cl}");
+    }
+
+    #[test]
+    fn electron_affinity_noble_gases_zero() {
+        for z in [2, 10, 18, 36, 54, 86] {
+            let ea = electron_affinity_ev(z).unwrap();
+            assert!((ea).abs() < 1e-10, "Noble gas Z={z} should have EA=0");
+        }
+    }
+
+    #[test]
+    fn electron_affinity_gold_high() {
+        // Au has the highest EA among metals
+        let ea_au = electron_affinity_ev(79).unwrap();
+        assert!(ea_au > 2.0, "Au EA={ea_au}");
+    }
+
+    #[test]
+    fn electron_affinity_invalid() {
+        assert!(electron_affinity_ev(0).is_err());
+        assert!(electron_affinity_ev(119).is_err());
+    }
+
+    // --- Wavefunction tests ---
+
+    #[test]
+    fn radial_1s_at_origin() {
+        // R_10(0) = 2 * Z^{3/2} for hydrogen
+        let r = radial_wavefunction(1, 1, 0, 0.0).unwrap();
+        assert!((r - 2.0).abs() < 1e-10, "R_10(0)={r}, expected 2.0");
+    }
+
+    #[test]
+    fn radial_1s_decays() {
+        // R_10 should decrease with distance
+        let r1 = radial_wavefunction(1, 1, 0, 1.0).unwrap().abs();
+        let r5 = radial_wavefunction(1, 1, 0, 5.0).unwrap().abs();
+        assert!(r1 > r5, "R_10 should decay with distance");
+    }
+
+    #[test]
+    fn radial_2s_has_node() {
+        // R_20 has a node at r = 2a0/Z = 2 for hydrogen
+        let r = radial_wavefunction(1, 2, 0, 2.0).unwrap();
+        assert!(r.abs() < 0.1, "R_20 should be near zero at r=2a0");
+    }
+
+    #[test]
+    fn probability_density_positive() {
+        let pd = radial_probability_density(1, 1, 0, 1.0).unwrap();
+        assert!(pd > 0.0, "Probability density must be positive");
+    }
+
+    #[test]
+    fn radial_invalid_quantum_numbers() {
+        assert!(radial_wavefunction(1, 0, 0, 1.0).is_err()); // n=0
+        assert!(radial_wavefunction(1, 1, 1, 1.0).is_err()); // l >= n
+        assert!(radial_wavefunction(1, 4, 0, 1.0).is_err()); // n > 3
+    }
+
+    // --- Selection rules and Einstein coefficient tests ---
+
+    #[test]
+    fn selection_rules_allowed() {
+        assert_eq!(check_selection_rules(0, 1), TransitionType::ElectricDipole);
+        assert_eq!(check_selection_rules(1, 2), TransitionType::ElectricDipole);
+        assert_eq!(check_selection_rules(2, 1), TransitionType::ElectricDipole);
+    }
+
+    #[test]
+    fn selection_rules_forbidden() {
+        assert_eq!(check_selection_rules(0, 0), TransitionType::Forbidden);
+        assert_eq!(check_selection_rules(0, 2), TransitionType::Forbidden);
+        assert_eq!(check_selection_rules(1, 3), TransitionType::Forbidden);
+    }
+
+    #[test]
+    fn selection_rules_full_with_ml() {
+        // Allowed: Δl=1, Δm_l=0
+        assert_eq!(
+            check_selection_rules_full(0, 0, 1, 0),
+            TransitionType::ElectricDipole
+        );
+        // Forbidden: Δl=0
+        assert_eq!(
+            check_selection_rules_full(1, 0, 1, 0),
+            TransitionType::Forbidden
+        );
+        // Forbidden: Δm_l=2
+        assert_eq!(
+            check_selection_rules_full(0, 0, 1, 2),
+            TransitionType::Forbidden
+        );
+    }
+
+    #[test]
+    fn einstein_a_lyman_alpha() {
+        // Lyman-alpha: 2p -> 1s, A ≈ 6.27e8 s⁻¹
+        let a21 = einstein_a_coefficient(1, 2, 1, 1, 0).unwrap();
+        assert!(a21 > 1e7, "Lyman-alpha A={a21}, should be ~6e8");
+        assert!(a21 < 1e10, "Lyman-alpha A={a21} too large");
+    }
+
+    #[test]
+    fn einstein_a_forbidden_transition() {
+        // 2s -> 1s is forbidden (Δl = 0)
+        assert!(einstein_a_coefficient(1, 2, 0, 1, 0).is_err());
+    }
+
+    #[test]
+    fn einstein_b_positive() {
+        let b21 = einstein_b_coefficient(1, 2, 1, 1, 0).unwrap();
+        assert!(b21 > 0.0, "Einstein B should be positive");
+    }
+
+    #[test]
+    fn serde_roundtrip_transition_type() {
+        let tt = TransitionType::ElectricDipole;
+        let json = serde_json::to_string(&tt).unwrap();
+        let back: TransitionType = serde_json::from_str(&json).unwrap();
+        assert_eq!(tt, back);
     }
 }

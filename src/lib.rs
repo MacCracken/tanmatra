@@ -77,14 +77,17 @@ pub mod reaction;
 /// Prelude module — import everything commonly needed.
 pub mod prelude {
     pub use crate::atomic::{
-        OrbitalFilling, OrbitalType, QuantumNumbers, electron_configuration, format_configuration,
+        OrbitalFilling, OrbitalType, QuantumNumbers, TransitionType, check_selection_rules,
+        check_selection_rules_full, einstein_a_coefficient, einstein_b_coefficient,
+        electron_affinity_ev, electron_configuration, format_configuration,
         format_configuration_short, hydrogen_level_energy_ev, ionization_energy_ev, lande_g_factor,
-        spectral_line_fine_nm, spectral_line_nm, stark_shift_hydrogen_ev, zeeman_splitting_ev,
+        radial_probability_density, radial_wavefunction, spectral_line_fine_nm, spectral_line_nm,
+        stark_shift_hydrogen_ev, zeeman_splitting_ev,
     };
     pub use crate::constants::*;
     pub use crate::decay::{
-        DecayMode, Isotope, activity_bq, alpha_decay, beta_minus_decay, beta_plus_decay,
-        decay_chain, decay_constant, known_isotopes, remaining_fraction,
+        DecayMode, Isotope, activity_bq, alpha_decay, bateman_chain, beta_minus_decay,
+        beta_plus_decay, decay_chain, decay_constant, known_isotopes, remaining_fraction,
     };
     pub use crate::error::TanmatraError;
     pub use crate::nucleus::{
@@ -93,10 +96,13 @@ pub mod prelude {
     };
     pub use crate::particle::{Boson, FundamentalForce, Lepton, Quark};
     pub use crate::reaction::{
-        NuclearReaction, NucleosynthesisPathway, NucleosynthesisProcess, NucleosynthesisStep,
-        ThermalCrossSection, breit_wigner_cross_section, cno_cycle, coulomb_barrier, dd_fusion_he3,
-        dd_fusion_t, dt_fusion, geometric_cross_section_barns, pp_chain_step1, q_value,
+        FissionYield, NuclearReaction, NucleosynthesisPathway, NucleosynthesisProcess,
+        NucleosynthesisStep, ThermalCrossSection, average_lethargy_gain,
+        breit_wigner_cross_section, cno_cycle, collisions_to_thermalize, coulomb_barrier,
+        dd_fusion_he3, dd_fusion_t, dt_fusion, geometric_cross_section_barns,
+        max_energy_loss_fraction, moderating_ratio, pp_chain_step1, pu239_fission_yields, q_value,
         r_process_main, s_process_main, thermal_neutron_cross_sections, triple_alpha, u235_fission,
+        u235_fission_yields,
     };
 }
 
