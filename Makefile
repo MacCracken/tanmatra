@@ -1,7 +1,7 @@
-.PHONY: check fmt clippy test audit deny bench coverage build doc clean
+.PHONY: check fmt clippy test audit deny bench coverage build doc clean examples
 
 # Run all CI checks locally
-check: fmt clippy test audit
+check: fmt clippy test audit deny
 
 # Format check
 fmt:
@@ -30,8 +30,7 @@ bench:
 
 # Generate coverage report
 coverage:
-	cargo llvm-cov --all-features --html --output-dir coverage/
-	@echo "Coverage report: coverage/html/index.html"
+	cargo tarpaulin --all-features --skip-clean
 
 # Build release
 build:
@@ -40,6 +39,13 @@ build:
 # Generate documentation
 doc:
 	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
+
+# Run examples
+examples:
+	cargo run --example basic
+	cargo run --example nuclear
+	cargo run --example spectral
+	cargo run --example relativity
 
 # Clean build artifacts
 clean:
