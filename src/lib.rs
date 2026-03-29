@@ -67,9 +67,13 @@
 extern crate alloc;
 
 pub mod atomic;
+/// Cross-crate bridges — primitive-value conversions from other AGNOS science crates.
+pub mod bridge;
 pub mod constants;
 pub mod decay;
 pub mod error;
+/// Integration APIs for downstream consumers (soorat rendering).
+pub mod integration;
 pub mod nucleus;
 pub mod particle;
 pub mod reaction;

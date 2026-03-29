@@ -48,3 +48,18 @@
 - [ ] Particle transport (energy loss, range, straggling)
 - [ ] Detector response functions (Gaussian smearing)
 - [ ] Phase space generators for multi-body decays
+
+## Cross-Crate Bridges
+
+- [ ] `bridge.rs` module — primitive-value conversions for cross-crate atomic/nuclear physics
+- [ ] **bijli bridge**: electron orbital energy (eV) → photon emission wavelength (nm); nuclear charge → Coulomb field strength
+- [ ] **kimiya bridge**: atomic number, electron configuration → valence electrons, electronegativity; isotope mass → molecular weight
+- [ ] **prakash bridge**: energy level transitions → spectral line wavelengths and intensities; nuclear spin → hyperfine splitting
+
+## Soorat Integration
+
+- [ ] `integration/soorat.rs` module — feature-gated `soorat-compat`
+- [ ] **Atomic orbital visualization**: orbital type (s/p/d/f), quantum numbers, probability density grid for volumetric rendering
+- [ ] **Nuclear structure**: nucleon positions (protons/neutrons) for particle rendering
+- [ ] **Spectral line data**: wavelength, intensity, element ID for spectral plot rendering
+- [ ] **Decay chain**: parent/daughter nuclide graph with half-lives for node-link rendering

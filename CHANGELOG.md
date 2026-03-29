@@ -5,6 +5,15 @@ All notable changes to tanmatra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0]
+
+### Added
+- **bridge** — cross-crate primitive-value bridges for bijli (energy to wavelength, nuclear charge field), kimiya (valence electrons, neutron count, binding energy deficit, decay constant), prakash (transition energies to wavelengths, nuclear spin to hyperfine)
+- **integration/soorat** — feature-gated `soorat-compat` module with visualization data structures: `OrbitalVisualization` (hydrogen-like probability density slice), `NuclearStructure` (proton/neutron positions on golden spiral shells), `SpectralLineData` (wavelength/intensity lines), `DecayChainVisualization` (nuclide/transition graph)
+
+### Updated
+- prakash 1.1.0 -> 1.2.0, zerocopy 0.8.47 -> 0.8.48
+
 ## [1.0.0] - 2026-03-28
 
 ### Added

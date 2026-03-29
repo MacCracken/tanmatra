@@ -1,6 +1,6 @@
 [package]
 name = "tanmatra"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.89"
 license = "GPL-3.0-only"
@@ -26,7 +26,8 @@ serde_json = "1"
 
 [features]
 default = ["std"]
-full = ["std", "logging", "optics"]
+soorat-compat = ["std"]
+full = ["std", "logging", "optics", "soorat-compat"]
 optics = ["std", "dep:prakash"]
 std = ["serde/std", "thiserror/std"]
 logging = ["dep:tracing"]

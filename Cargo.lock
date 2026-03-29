@@ -30,19 +30,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
-name = "bijli"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47923a179c3e36432ea17bec0bc30c0f5ac920a952b7e8b5ecf8029e63bba827"
-dependencies = [
- "hisab",
- "impetus",
- "serde",
- "thiserror",
- "tracing",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -224,17 +211,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "impetus"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a5f6c3276498834c3da26b8a7aaabcab7f9ad70c7054fed8df8346c6a941d90"
-dependencies = [
- "hisab",
- "serde",
- "thiserror",
-]
-
-[[package]]
 name = "is-terminal"
 version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -345,11 +321,10 @@ dependencies = [
 
 [[package]]
 name = "prakash"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a0cd46d269812d79cc849d1f5d0283b2acbbc5f4475c5fd6c31667ffd3c830d"
+checksum = "6499e189e6db64a3b74aa2ecc625b2522669d2cc9d0c1998a67bfbe86a8cb274"
 dependencies = [
- "bijli",
  "hisab",
  "serde",
  "thiserror",
@@ -494,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "tanmatra"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "criterion",
  "libm",
@@ -663,18 +638,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.47"
+version = "0.8.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efbb2a062be311f2ba113ce66f697a4dc589f85e78a4aea276200804cea0ed87"
+checksum = "eed437bf9d6692032087e337407a86f04cd8d6a16a37199ed57949d415bd68e9"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.47"
+version = "0.8.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e8bc7269b54418e7aeeef514aa68f8690b8c0489a06b0136e5f57c4c5ccab89"
+checksum = "70e3cd084b1788766f53af483dd21f93881ff30d7320490ec3ef7526d203bad4"
 dependencies = [
  "proc-macro2",
  "quote",
