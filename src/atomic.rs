@@ -580,6 +580,84 @@ pub fn stark_shift_hydrogen_ev(n: u32, parabolic_index: i32, e_field_v_per_m: f6
 }
 
 // ---------------------------------------------------------------------------
+// QED corrections
+// ---------------------------------------------------------------------------
+
+/// Calculates the Lamb shift for hydrogen-like atoms (approximate).
+///
+/// The Lamb shift is the QED correction that lifts the degeneracy between
+/// levels of the same n and j but different l (e.g., 2S₁/₂ vs 2P₁/₂).
+///
+/// For hydrogen, the 2S₁/₂ - 2P₁/₂ splitting is ~1057 MHz (the original
+/// Lamb shift). The shift scales approximately as:
+///
+/// ΔE ∝ α⁵ mc² Z⁴ / (π n³) × [ln(1/(α²Z²)) + corrections]
+///
+/// This implementation uses the known hydrogen 2S Lamb shift (1057.845 MHz)
+/// and scales for other levels and Z values.
+///
+/// Parameters:
+/// - `z`: atomic number
+/// - `n`: principal quantum number
+/// - `l`: orbital angular momentum (shift is largest for s-states, l=0)
+///
+/// Returns the Lamb shift energy in eV.
+#[must_use]
+#[inline]
+pub fn lamb_shift_ev(z: u32, n: u32, l: u32) -> f64 {
+    if n == 0 || l >= n {
+        return 0.0;
+    }
+
+    // Known hydrogen 2S₁/₂ Lamb shift: 1057.845 MHz = 4.3725e-6 eV
+    let lamb_2s_h = 4.372_5e-6; // eV for hydrogen n=2, l=0
+
+    let zf = z as f64;
+    let nf = n as f64;
+
+    // Scale from the known H 2S value:
+    // ΔE ∝ Z⁴ / n³ for s-states
+    // For l > 0, the shift is much smaller (~1/10 for p-states)
+    let z_scale = zf.powi(4);
+    let n_scale = 8.0 / (nf * nf * nf); // normalized to n=2
+
+    let l_factor = if l == 0 {
+        1.0
+    } else {
+        // p-states have ~10x smaller shift, d-states even less
+        0.1 / (l as f64)
+    };
+
+    lamb_2s_h * z_scale * n_scale * l_factor
+}
+
+/// Calculates the vacuum polarization contribution to energy levels.
+///
+/// Vacuum polarization (Uehling potential) shifts s-state energies by:
+///
+/// ΔE_VP ≈ -(α/3π) × (Zα)⁴ mc² / n³ × (for s-states)
+///
+/// This is typically ~2% of the total Lamb shift for hydrogen.
+///
+/// Returns the vacuum polarization energy shift in eV (negative = downward shift).
+#[must_use]
+#[inline]
+pub fn vacuum_polarization_ev(z: u32, n: u32, l: u32) -> f64 {
+    if n == 0 || l >= n || l != 0 {
+        return 0.0; // only affects s-states significantly
+    }
+
+    let alpha = crate::constants::FINE_STRUCTURE;
+    let zf = z as f64;
+    let nf = n as f64;
+    let me_c2 = crate::constants::ELECTRON_MASS_MEV * 1e6; // eV
+
+    // ΔE_VP = -(α/(3π)) × (Zα)⁴ × mc² / n³
+    let za = zf * alpha;
+    -alpha / (3.0 * core::f64::consts::PI) * za.powi(4) * me_c2 / (nf * nf * nf)
+}
+
+// ---------------------------------------------------------------------------
 // Hydrogen wavefunctions
 // ---------------------------------------------------------------------------
 
@@ -1604,5 +1682,46 @@ mod tests {
         let json = serde_json::to_string(&tt).unwrap();
         let back: TransitionType = serde_json::from_str(&json).unwrap();
         assert_eq!(tt, back);
+    }
+
+    // --- QED correction tests ---
+
+    #[test]
+    fn lamb_shift_hydrogen_2s() {
+        // Known: H 2S Lamb shift ≈ 4.37e-6 eV
+        let shift = lamb_shift_ev(1, 2, 0);
+        assert!((shift - 4.37e-6).abs() < 1e-7, "H 2S Lamb shift={shift} eV");
+    }
+
+    #[test]
+    fn lamb_shift_scales_with_z4() {
+        let h = lamb_shift_ev(1, 2, 0);
+        let he = lamb_shift_ev(2, 2, 0);
+        let ratio = he / h;
+        assert!((ratio - 16.0).abs() < 1.0, "Z⁴ scaling: ratio={ratio}");
+    }
+
+    #[test]
+    fn lamb_shift_p_smaller_than_s() {
+        let s_shift = lamb_shift_ev(1, 2, 0);
+        let p_shift = lamb_shift_ev(1, 2, 1);
+        assert!(
+            s_shift > p_shift,
+            "s-state Lamb shift should be larger than p-state"
+        );
+    }
+
+    #[test]
+    fn vacuum_polarization_negative() {
+        let vp = vacuum_polarization_ev(1, 1, 0);
+        assert!(vp < 0.0, "VP should be negative (downward shift)");
+    }
+
+    #[test]
+    fn vacuum_polarization_small_vs_lamb() {
+        // VP is typically ~2% of total Lamb shift
+        let lamb = lamb_shift_ev(1, 2, 0);
+        let vp = vacuum_polarization_ev(1, 2, 0).abs();
+        assert!(vp < lamb, "VP should be smaller than Lamb shift");
     }
 }

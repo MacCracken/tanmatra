@@ -73,6 +73,14 @@ pub mod error;
 pub mod nucleus;
 pub mod particle;
 pub mod reaction;
+pub mod relativity;
+pub mod scattering;
+
+/// Optics integration with the prakash crate.
+///
+/// Requires the `optics` feature flag: `tanmatra = { features = ["optics"] }`.
+#[cfg(feature = "optics")]
+pub mod optics;
 
 /// Prelude module — import everything commonly needed.
 pub mod prelude {
@@ -82,7 +90,7 @@ pub mod prelude {
         electron_affinity_ev, electron_configuration, format_configuration,
         format_configuration_short, hydrogen_level_energy_ev, ionization_energy_ev, lande_g_factor,
         radial_probability_density, radial_wavefunction, spectral_line_fine_nm, spectral_line_nm,
-        stark_shift_hydrogen_ev, zeeman_splitting_ev,
+        stark_shift_hydrogen_ev, vacuum_polarization_ev, zeeman_splitting_ev,
     };
     pub use crate::constants::*;
     pub use crate::decay::{
@@ -104,6 +112,15 @@ pub mod prelude {
         r_process_main, s_process_main, thermal_neutron_cross_sections, triple_alpha, u235_fission,
         u235_fission_yields,
     };
+    pub use crate::relativity::{
+        FourMomentum, de_broglie_wavelength_fm, gamma_to_beta, invariant_mass_two_body,
+        lorentz_gamma, relativistic_energy, relativistic_momentum, velocity_addition,
+        velocity_to_beta,
+    };
+    pub use crate::scattering::{
+        distance_of_closest_approach, mott_correction_factor, rutherford_differential,
+        rutherford_total_above_angle, sommerfeld_parameter,
+    };
 }
 
 // Static assertions: all key types are Send + Sync.
@@ -119,3 +136,6 @@ impl AssertSendSync for atomic::OrbitalType {}
 impl AssertSendSync for atomic::QuantumNumbers {}
 impl AssertSendSync for atomic::OrbitalFilling {}
 impl AssertSendSync for error::TanmatraError {}
+impl AssertSendSync for relativity::FourMomentum {}
+impl AssertSendSync for atomic::TransitionType {}
+impl AssertSendSync for nucleus::ShellLevel {}
