@@ -33,3 +33,24 @@ pub enum TanmatraError {
     #[error("invalid reaction: {0}")]
     InvalidReaction(alloc::string::String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_roundtrip_error() {
+        let err = TanmatraError::InvalidAtomicNumber(42);
+        let json = serde_json::to_string(&err).unwrap();
+        let back: TanmatraError = serde_json::from_str(&json).unwrap();
+        assert_eq!(err, back);
+    }
+
+    #[test]
+    fn serde_roundtrip_error_with_string() {
+        let err = TanmatraError::InvalidQuantumNumbers(alloc::string::String::from("test"));
+        let json = serde_json::to_string(&err).unwrap();
+        let back: TanmatraError = serde_json::from_str(&json).unwrap();
+        assert_eq!(err, back);
+    }
+}
