@@ -5,6 +5,53 @@ All notable changes to tanmatra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0]
+
+### Added
+
+#### Nuclear Data Tables (v1.2)
+- **nucleus**: AME2020 atomic mass evaluation — 32 nuclides with experimental mass excess values (keV), `experimental_mass_excess_kev()`, `experimental_atomic_mass_amu()`
+- **nucleus**: Nuclear charge radii — 12 nuclides from Angeli & Marinova 2013, `charge_radius_fm()`
+- **nucleus**: Nuclear electromagnetic moments — `NuclearMoments` struct, 16 nuclides with magnetic dipole (μ_N) and electric quadrupole (barn) from Stone 2005/2019
+- **nucleus**: Superallowed beta-decay ft values — `SuperallowedDecay` struct, 9 transitions from Hardy & Towner 2020, `corrected_ft_value()` (Ft = 3072.27 s)
+- **reaction**: Resonance integrals — 12 isotopes from ENDF/B-VIII.0, `resonance_integral_barns()`
+
+#### Advanced Scattering (v1.3)
+- **scattering**: Partial-wave analysis — `legendre_polynomial()`, `partial_wave_cross_section()`, `partial_wave_differential()`
+- **scattering**: Born approximation for screened Coulomb — `born_screened_coulomb()`, `thomas_fermi_screening_fm()`
+- **scattering**: Electron-atom elastic scattering — `mott_electron_differential()`, `nuclear_form_factor_uniform()`, `mott_electron_with_form_factor()`
+- **scattering**: Compton scattering — Klein-Nishina formula: `compton_energy_ratio()`, `klein_nishina_differential()`, `klein_nishina_total()`
+- **scattering**: Pair production — Bethe-Heitler: `pair_production_cross_section()`
+
+#### Relativistic Quantum (v1.4)
+- **atomic**: Dirac equation solutions — `dirac_energy_mev()`, `dirac_binding_energy_ev()` for hydrogen-like atoms
+- **atomic**: Relativistic corrections — `relativistic_correction_ev()` captures all orders beyond non-relativistic
+- **atomic**: Hyperfine structure — `hyperfine_splitting_ev()` for s-states with nuclear g-factor
+- **atomic**: Anomalous magnetic moment — `electron_g_factor()`, `bound_electron_g_factor()`, `anomalous_zeeman_splitting_ev()`
+- **atomic**: Breit interaction — `breit_interaction_ev()` for helium-like ion ground states
+
+#### Frequency Standards & Atomic Time (v1.5)
+- **timekeeping** (new module): `FrequencyStandard` enum — Cs-133, Rb-87, H-maser, Sr-87 optical, Yb-171 optical with frequencies, wavelengths, quality factors, Allan deviation
+- **timekeeping**: `TimeScale` enum — TAI, UTC, TT, GPS, TCB, TCG with conversion functions
+- **timekeeping**: Leap second table — 28 entries (1972–2017) from IERS Bulletin C, `leap_seconds_at()`
+- **timekeeping**: `AtomicInstant` — TAI-referenced instant (i64 s + u32 ns, epoch 1958-01-01)
+- **timekeeping**: Relativistic clock corrections — `gravitational_redshift()`, `schwarzschild_clock_correction_us_per_day()`, `second_order_doppler_shift()`, `sagnac_correction_ns()`
+- **bridge**: Jyotish bridge `tai_to_tt()` for exact TAI-TT conversion
+- **bridge**: Chrono bridge — `utc_date_to_tai_offset()`, `tai_to_utc_seconds()`, `utc_to_tai_seconds()` for leap-second-aware TAI↔UTC
+- **bridge**: Hisab-mimamsa bridge — `gravitational_time_dilation()`, `gravitational_time_offset_s()` for Schwarzschild satellite clock corrections
+- **bridge**: Falak bridge — `tai_seconds_to_jd_tt()`, `jd_tt_to_tai_seconds()`, `tai_seconds_to_mjd_tt()` for atomic time ↔ Julian Date
+- **bridge**: Kiran/Joshua bridge — `SimulationClock` type with time-scale multiplier, pause/resume/fast-forward
+- **bridge**: Bhava bridge — `TimeContext` enum (RealTime/Simulated/Paused) for circadian/rhythm time awareness
+
+#### Constants
+- `CLASSICAL_ELECTRON_RADIUS_FM` (CODATA 2022)
+- `PROTON_G_FACTOR` (CODATA 2022)
+- `ELECTRON_ANOMALOUS_MOMENT` (CODATA 2022)
+- `STANDARD_GRAVITY`, `GM_EARTH`, `EARTH_ROTATION_RAD_S`
+
+### Changed
+- Test count: 243 → 429 unit tests + 20 integration + 2 doctests
+
 ## [1.1.0]
 
 ### Added

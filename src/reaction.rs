@@ -214,6 +214,49 @@ pub fn thermal_neutron_cross_sections() -> alloc::vec::Vec<ThermalCrossSection> 
     ]
 }
 
+// ---------------------------------------------------------------------------
+// Resonance integrals
+// ---------------------------------------------------------------------------
+
+/// Epithermal neutron capture resonance integrals (I_gamma) in barns.
+///
+/// Each entry is (Z, A, resonance_integral_barns).
+///
+/// The resonance integral is defined as:
+/// I = ∫(0.5 eV to ∞) σ(E)/E dE
+///
+/// Source: ENDF/B-VIII.0 evaluated nuclear data library.
+const RESONANCE_INTEGRALS: &[(u32, u32, f64)] = &[
+    (1, 1, 0.149),    // H-1
+    (5, 10, 1722.0),  // B-10
+    (6, 12, 0.0016),  // C-12
+    (26, 56, 1.36),   // Fe-56
+    (40, 90, 0.117),  // Zr-90
+    (42, 98, 6.90),   // Mo-98
+    (50, 120, 0.133), // Sn-120
+    (53, 127, 148.0), // I-127
+    (55, 133, 429.0), // Cs-133
+    (92, 235, 275.0), // U-235
+    (92, 238, 277.0), // U-238
+    (94, 239, 200.0), // Pu-239
+];
+
+/// Returns the epithermal neutron capture resonance integral in barns.
+///
+/// The resonance integral I_γ represents the integrated capture cross-section
+/// over the epithermal energy range (above 0.5 eV).
+///
+/// Returns `None` if the nuclide is not in the table.
+///
+/// Source: ENDF/B-VIII.0 evaluated nuclear data library.
+#[must_use]
+pub fn resonance_integral_barns(z: u32, a: u32) -> Option<f64> {
+    RESONANCE_INTEGRALS
+        .iter()
+        .find(|&&(rz, ra, _)| rz == z && ra == a)
+        .map(|&(_, _, ri)| ri)
+}
+
 // --- Preset reactions with real Q-values ---
 
 /// D-T fusion: D + T -> He-4 + n, Q = 17.6 MeV.
@@ -984,5 +1027,48 @@ mod tests {
             assert!(xs.fission_barns >= 0.0);
             assert!(xs.scattering_barns >= 0.0);
         }
+    }
+
+    // --- Resonance integral tests ---
+
+    #[test]
+    fn resonance_integral_u235() {
+        let ri = resonance_integral_barns(92, 235).unwrap();
+        assert!((ri - 275.0).abs() < 1.0, "U-235 resonance integral={ri} b");
+    }
+
+    #[test]
+    fn resonance_integral_b10_large() {
+        let ri = resonance_integral_barns(5, 10).unwrap();
+        assert!(ri > 1000.0, "B-10 resonance integral should be large");
+    }
+
+    #[test]
+    fn resonance_integral_h1_small() {
+        let ri = resonance_integral_barns(1, 1).unwrap();
+        assert!(ri < 1.0, "H-1 resonance integral should be small");
+    }
+
+    #[test]
+    fn resonance_integral_unknown_returns_none() {
+        assert!(resonance_integral_barns(118, 294).is_none());
+    }
+
+    #[test]
+    fn resonance_integral_all_positive() {
+        for &(z, a, _) in RESONANCE_INTEGRALS {
+            let ri = resonance_integral_barns(z, a).unwrap();
+            assert!(
+                ri >= 0.0,
+                "Resonance integral for Z={z} A={a} should be non-negative"
+            );
+        }
+    }
+
+    #[test]
+    fn resonance_integral_cs133_large() {
+        // Cs-133 has a very large resonance integral
+        let ri = resonance_integral_barns(55, 133).unwrap();
+        assert!((ri - 429.0).abs() < 1.0, "Cs-133 resonance integral={ri} b");
     }
 }

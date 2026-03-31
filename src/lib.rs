@@ -79,6 +79,8 @@ pub mod particle;
 pub mod reaction;
 pub mod relativity;
 pub mod scattering;
+/// Frequency standards, atomic time scales, and relativistic clock corrections.
+pub mod timekeeping;
 
 /// Optics integration with the prakash crate.
 ///
@@ -89,14 +91,18 @@ pub mod optics;
 /// Prelude module — import everything commonly needed.
 pub mod prelude {
     pub use crate::atomic::{
-        OrbitalFilling, OrbitalType, QuantumNumbers, TransitionType, balmer_series,
-        brackett_series, check_selection_rules, check_selection_rules_full, einstein_a_coefficient,
-        einstein_b_coefficient, electron_affinity_ev, electron_configuration, format_configuration,
-        format_configuration_short, hydrogen_level_energy_ev, ionization_energy_ev, lamb_shift_ev,
-        lande_g_factor, lyman_series, paschen_series, pfund_series, radial_probability_density,
-        radial_wavefunction, spectral_line_fine_nm, spectral_line_nm, stark_shift_hydrogen_ev,
-        vacuum_polarization_ev, zeeman_splitting_ev,
+        OrbitalFilling, OrbitalType, QuantumNumbers, TransitionType, anomalous_zeeman_splitting_ev,
+        balmer_series, bound_electron_g_factor, brackett_series, breit_interaction_ev,
+        check_selection_rules, check_selection_rules_full, dirac_binding_energy_ev,
+        dirac_energy_mev, einstein_a_coefficient, einstein_b_coefficient, electron_affinity_ev,
+        electron_configuration, electron_g_factor, format_configuration,
+        format_configuration_short, hydrogen_level_energy_ev, hyperfine_splitting_ev,
+        ionization_energy_ev, lamb_shift_ev, lande_g_factor, lyman_series, paschen_series,
+        pfund_series, radial_probability_density, radial_wavefunction, relativistic_correction_ev,
+        spectral_line_fine_nm, spectral_line_nm, stark_shift_hydrogen_ev, vacuum_polarization_ev,
+        zeeman_splitting_ev,
     };
+    pub use crate::bridge::{SimulationClock, TimeContext};
     pub use crate::constants::*;
     pub use crate::decay::{
         DecayMode, Isotope, activity_bq, alpha_decay, bateman_chain, beta_minus_decay,
@@ -104,8 +110,9 @@ pub mod prelude {
     };
     pub use crate::error::TanmatraError;
     pub use crate::nucleus::{
-        Nucleus, ShellLevel, ground_state_spin_parity, is_magic_number, next_shell_closure,
-        shell_closure_below, shell_model_levels, shell_occupation,
+        NuclearMoments, Nucleus, ShellLevel, SuperallowedDecay, corrected_ft_value,
+        ground_state_spin_parity, is_magic_number, next_shell_closure, shell_closure_below,
+        shell_model_levels, shell_occupation, superallowed_ft_values,
     };
     pub use crate::particle::{Boson, FundamentalForce, Lepton, Quark};
     pub use crate::reaction::{
@@ -114,8 +121,8 @@ pub mod prelude {
         breit_wigner_cross_section, cno_cycle, collisions_to_thermalize, coulomb_barrier,
         dd_fusion_he3, dd_fusion_t, dt_fusion, geometric_cross_section_barns,
         max_energy_loss_fraction, moderating_ratio, pp_chain_step1, pu239_fission_yields, q_value,
-        r_process_main, s_process_main, thermal_neutron_cross_sections, triple_alpha, u235_fission,
-        u235_fission_yields,
+        r_process_main, resonance_integral_barns, s_process_main, thermal_neutron_cross_sections,
+        triple_alpha, u235_fission, u235_fission_yields,
     };
     pub use crate::relativity::{
         FourMomentum, de_broglie_wavelength_fm, gamma_to_beta, invariant_mass_two_body,
@@ -123,8 +130,18 @@ pub mod prelude {
         velocity_to_beta,
     };
     pub use crate::scattering::{
-        distance_of_closest_approach, mott_correction_factor, rutherford_differential,
-        rutherford_total_above_angle, sommerfeld_parameter,
+        born_screened_coulomb, compton_energy_ratio, distance_of_closest_approach,
+        klein_nishina_differential, klein_nishina_total, legendre_polynomial,
+        mott_correction_factor, mott_electron_differential, mott_electron_with_form_factor,
+        nuclear_form_factor_uniform, pair_production_cross_section, partial_wave_cross_section,
+        partial_wave_differential, rutherford_differential, rutherford_total_above_angle,
+        sommerfeld_parameter, thomas_fermi_screening_fm,
+    };
+    pub use crate::timekeeping::{
+        AtomicInstant, FrequencyStandard, TimeScale, all_frequency_standards, gps_to_tai,
+        gravitational_redshift, leap_seconds_at, sagnac_correction_ns,
+        schwarzschild_clock_correction_us_per_day, second_order_doppler_shift, tai_to_gps,
+        tai_to_tt, tai_to_utc_offset, tt_to_tai, utc_to_tai_offset,
     };
 }
 
@@ -144,3 +161,10 @@ impl AssertSendSync for error::TanmatraError {}
 impl AssertSendSync for relativity::FourMomentum {}
 impl AssertSendSync for atomic::TransitionType {}
 impl AssertSendSync for nucleus::ShellLevel {}
+impl AssertSendSync for nucleus::NuclearMoments {}
+impl AssertSendSync for nucleus::SuperallowedDecay {}
+impl AssertSendSync for timekeeping::FrequencyStandard {}
+impl AssertSendSync for timekeeping::TimeScale {}
+impl AssertSendSync for timekeeping::AtomicInstant {}
+impl AssertSendSync for bridge::SimulationClock {}
+impl AssertSendSync for bridge::TimeContext {}

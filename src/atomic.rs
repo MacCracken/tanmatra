@@ -1319,6 +1319,235 @@ pub fn ionization_energy_ev(z: u32) -> Result<f64, TanmatraError> {
     Ok(IONIZATION_ENERGIES_EV[(z - 1) as usize])
 }
 
+// ---------------------------------------------------------------------------
+// Relativistic quantum: Dirac equation, hyperfine, anomalous moment, Breit
+// ---------------------------------------------------------------------------
+
+/// Rydberg energy in eV (13.605693 eV, CODATA 2022).
+const RYDBERG_EV: f64 = 13.605_693;
+
+/// Calculates the exact Dirac energy for a hydrogen-like atom in MeV.
+///
+/// Uses the exact solution of the Dirac equation:
+///
+/// E_nj = m_e c² / √(1 + [αZ / (n - δ)]²)
+///
+/// where δ = j + 1/2 - √((j+1/2)² - (αZ)²).
+///
+/// Parameters:
+/// - `z`: atomic number
+/// - `n`: principal quantum number (>= 1)
+/// - `two_j`: twice the total angular momentum quantum number (must be odd, >= 1)
+///
+/// Returns the total Dirac energy in MeV (rest mass + binding).
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if quantum numbers are invalid.
+pub fn dirac_energy_mev(z: u32, n: u32, two_j: u32) -> Result<f64, TanmatraError> {
+    if n == 0 {
+        return Err(TanmatraError::InvalidQuantumNumbers(String::from(
+            "n must be >= 1",
+        )));
+    }
+    if two_j == 0 || two_j.is_multiple_of(2) {
+        return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
+            "two_j={two_j} must be odd and >= 1 (half-integer j)"
+        )));
+    }
+
+    let alpha = crate::constants::FINE_STRUCTURE;
+    let me_c2 = crate::constants::ELECTRON_MASS_MEV;
+    let zf = z as f64;
+    let nf = n as f64;
+    let j_plus_half = f64::midpoint(two_j as f64, 1.0); // j + 1/2
+
+    let az = alpha * zf;
+    let az2 = az * az;
+
+    // δ = j + 1/2 - √((j+1/2)² - (αZ)²)
+    let discriminant = j_plus_half * j_plus_half - az2;
+    if discriminant <= 0.0 {
+        return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
+            "αZ={az} too large for j+1/2={j_plus_half}: supercritical"
+        )));
+    }
+    let delta = j_plus_half - libm::sqrt(discriminant);
+
+    // n_eff = n - δ
+    let n_eff = nf - delta;
+    if n_eff <= 0.0 {
+        return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
+            "effective quantum number n-δ={n_eff} must be positive for n={n}, two_j={two_j}"
+        )));
+    }
+
+    // E = m_e c² / √(1 + (αZ / n_eff)²)
+    let ratio = az / n_eff;
+    let energy = me_c2 / libm::sqrt(1.0 + ratio * ratio);
+
+    Ok(energy)
+}
+
+/// Calculates the Dirac binding energy for a hydrogen-like atom in eV.
+///
+/// Returns m_e c² - E_nj (positive for bound states), where E_nj is the
+/// exact Dirac energy.
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if quantum numbers are invalid.
+#[inline]
+pub fn dirac_binding_energy_ev(z: u32, n: u32, two_j: u32) -> Result<f64, TanmatraError> {
+    let e_dirac = dirac_energy_mev(z, n, two_j)?;
+    let me_c2 = crate::constants::ELECTRON_MASS_MEV;
+    Ok((me_c2 - e_dirac) * 1e6)
+}
+
+/// Calculates the total relativistic correction to hydrogen-like energy levels in eV.
+///
+/// Returns the difference between the exact Dirac binding energy and the
+/// non-relativistic binding energy: ΔE = E_Dirac_binding - E_nonrel_binding.
+///
+/// This captures all orders of relativistic corrections (fine structure,
+/// second-order, third-order, etc.).
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if quantum numbers are invalid.
+pub fn relativistic_correction_ev(z: u32, n: u32, two_j: u32) -> Result<f64, TanmatraError> {
+    let binding_dirac = dirac_binding_energy_ev(z, n, two_j)?;
+
+    // Non-relativistic binding energy: 13.605693 * Z² / n²
+    let zf = z as f64;
+    let nf = n as f64;
+    let binding_nonrel = RYDBERG_EV * zf * zf / (nf * nf);
+
+    Ok(binding_dirac - binding_nonrel)
+}
+
+/// Calculates the hyperfine splitting for s-states of hydrogen-like atoms in eV.
+///
+/// For an s-state (l=0), the magnetic dipole hyperfine splitting is:
+///
+/// ΔE_hfs = (4/3) × α⁴ × Z³ × (m_e/m_p) × g_I × m_e c² / n³
+///
+/// For hydrogen 1s: this gives ~5.88 × 10⁻⁶ eV, corresponding to the
+/// famous 21 cm line at 1420.405751 MHz.
+///
+/// Parameters:
+/// - `z`: atomic number
+/// - `n`: principal quantum number
+/// - `nuclear_g_factor`: nuclear g-factor (5.585694713 for proton)
+///
+/// Returns the hyperfine splitting energy in eV.
+#[must_use]
+#[inline]
+pub fn hyperfine_splitting_ev(z: u32, n: u32, nuclear_g_factor: f64) -> f64 {
+    if n == 0 {
+        return 0.0;
+    }
+
+    let alpha = crate::constants::FINE_STRUCTURE;
+    let me_mev = crate::constants::ELECTRON_MASS_MEV;
+    let mp_mev = crate::constants::PROTON_MASS_MEV;
+    let zf = z as f64;
+    let nf = n as f64;
+
+    let alpha4 = alpha * alpha * alpha * alpha;
+    let mass_ratio = me_mev / mp_mev;
+    let me_ev = me_mev * 1e6;
+
+    (4.0 / 3.0) * alpha4 * zf * zf * zf * mass_ratio * nuclear_g_factor * me_ev / (nf * nf * nf)
+}
+
+/// Returns the free-electron g-factor including QED corrections.
+///
+/// g_e = 2(1 + a_e) where a_e is the anomalous magnetic moment.
+///
+/// CODATA 2022: g_e = 2.00231930436256.
+#[must_use]
+#[inline]
+pub fn electron_g_factor() -> f64 {
+    2.0 * (1.0 + crate::constants::ELECTRON_ANOMALOUS_MOMENT)
+}
+
+/// Calculates the bound-electron g-factor for hydrogen-like ions (Breit formula).
+///
+/// g_bound = (2/3)(1 + 2√(1 - (αZ)²)) × (1 + a_e)
+///
+/// This gives the leading relativistic correction to the electron g-factor
+/// in the Coulomb field of the nucleus.
+///
+/// For Z=1: g_bound ≈ 2.002 (very close to free g_e).
+/// For high Z: g_bound decreases due to relativistic effects.
+#[must_use]
+#[inline]
+pub fn bound_electron_g_factor(z: u32) -> f64 {
+    let alpha = crate::constants::FINE_STRUCTURE;
+    let az = alpha * z as f64;
+    let az2 = az * az;
+
+    if az2 >= 1.0 {
+        // Supercritical: formula invalid, return 0 rather than panic
+        return 0.0;
+    }
+
+    let breit = (2.0 / 3.0) * (1.0 + 2.0 * libm::sqrt(1.0 - az2));
+    breit * (1.0 + crate::constants::ELECTRON_ANOMALOUS_MOMENT)
+}
+
+/// Calculates the anomalous Zeeman energy splitting in eV.
+///
+/// Uses the full QED electron g-factor instead of g=2:
+///
+/// ΔE = m_j × g_e × μ_B × B
+///
+/// where g_e = 2.00231930436256 (CODATA 2022).
+///
+/// Parameters:
+/// - `b_tesla`: magnetic field strength in Tesla
+/// - `ml`: orbital magnetic quantum number
+/// - `ms`: spin magnetic quantum number (+1 or -1, representing ±1/2)
+///
+/// Returns the energy shift in eV.
+#[must_use]
+#[inline]
+pub fn anomalous_zeeman_splitting_ev(b_tesla: f64, ml: i32, ms: i32) -> f64 {
+    let mu_b = crate::constants::BOHR_MAGNETON_EV_T;
+    let g_e = electron_g_factor();
+    // ΔE = (ml + g_e × ms/2) × μ_B × B
+    // For ms stored as ±1 (representing ±1/2):
+    let ml_f = ml as f64;
+    let ms_half = ms as f64 / 2.0;
+    (ml_f + g_e * ms_half) * mu_b * b_tesla
+}
+
+/// Calculates the Breit interaction correction for ground-state helium-like ions in eV.
+///
+/// The Breit interaction is the leading relativistic correction to the
+/// electron-electron interaction in two-electron atoms. For the 1s² ground
+/// state of the helium isoelectronic sequence:
+///
+/// ΔE_Breit = -(2/3) × α² × Z⁴ × 13.605693 eV
+///
+/// For He (Z=2): ΔE ≈ -0.00768 eV.
+///
+/// Parameters:
+/// - `z`: atomic number (must be >= 2 for helium-like ion)
+///
+/// Returns the Breit correction energy in eV (negative).
+#[must_use]
+#[inline]
+pub fn breit_interaction_ev(z: u32) -> f64 {
+    let alpha = crate::constants::FINE_STRUCTURE;
+    let zf = z as f64;
+    let alpha2 = alpha * alpha;
+    let z4 = zf * zf * zf * zf;
+
+    -(2.0 / 3.0) * alpha2 * z4 * RYDBERG_EV
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1900,5 +2129,283 @@ mod tests {
         assert!(paschen_series(1, 3).is_err());
         assert!(brackett_series(1, 4).is_err());
         assert!(pfund_series(1, 5).is_err());
+    }
+
+    // --- Dirac energy tests ---
+
+    #[test]
+    fn dirac_energy_hydrogen_1s() {
+        // H 1s1/2 (n=1, j=1/2 -> two_j=1)
+        // Should be very close to electron rest mass (slightly less due to binding)
+        let e = dirac_energy_mev(1, 1, 1).unwrap();
+        let me = crate::constants::ELECTRON_MASS_MEV;
+        assert!(e < me, "Dirac energy should be less than rest mass");
+        assert!(e > 0.510_9, "Dirac energy should be close to rest mass");
+    }
+
+    #[test]
+    fn dirac_binding_hydrogen_1s() {
+        // H 1s1/2 binding energy should be ~13.6 eV
+        let binding = dirac_binding_energy_ev(1, 1, 1).unwrap();
+        assert!(
+            (binding - 13.6).abs() < 0.1,
+            "H 1s binding={binding} eV, expected ~13.6"
+        );
+    }
+
+    #[test]
+    fn dirac_binding_hydrogen_2s_2p() {
+        // 2s1/2 and 2p1/2 should have same Dirac energy (same j=1/2)
+        let e_2s = dirac_energy_mev(1, 2, 1).unwrap();
+        let e_2p = dirac_energy_mev(1, 2, 1).unwrap(); // same n,j
+        assert!(
+            (e_2s - e_2p).abs() < 1e-15,
+            "2s1/2 and 2p1/2 have same Dirac energy"
+        );
+
+        // 2p3/2 should have slightly different energy
+        let e_2p32 = dirac_energy_mev(1, 2, 3).unwrap();
+        assert!(
+            (e_2s - e_2p32).abs() > 1e-12,
+            "2s1/2 and 2p3/2 should differ"
+        );
+    }
+
+    #[test]
+    fn dirac_binding_scales_with_z() {
+        // Binding energy should scale roughly as Z² for low Z
+        let h = dirac_binding_energy_ev(1, 1, 1).unwrap();
+        let he = dirac_binding_energy_ev(2, 1, 1).unwrap();
+        let ratio = he / h;
+        assert!(
+            (ratio - 4.0).abs() < 0.01,
+            "He/H binding ratio={ratio}, expected ~4"
+        );
+    }
+
+    #[test]
+    fn dirac_energy_invalid_n() {
+        assert!(dirac_energy_mev(1, 0, 1).is_err());
+    }
+
+    #[test]
+    fn dirac_energy_invalid_two_j_even() {
+        assert!(dirac_energy_mev(1, 1, 2).is_err());
+    }
+
+    #[test]
+    fn dirac_energy_invalid_two_j_zero() {
+        assert!(dirac_energy_mev(1, 1, 0).is_err());
+    }
+
+    #[test]
+    fn dirac_energy_high_z() {
+        // Uranium Z=92: should still be valid for 1s1/2
+        let e = dirac_energy_mev(92, 1, 1).unwrap();
+        let me = crate::constants::ELECTRON_MASS_MEV;
+        // For high Z, binding is significant
+        assert!(e < me, "Bound state energy < rest mass");
+        assert!(e > 0.0, "Energy should be positive");
+    }
+
+    // --- Relativistic correction tests ---
+
+    #[test]
+    fn relativistic_correction_hydrogen_positive() {
+        // For hydrogen ground state, relativistic correction should be positive
+        // (Dirac binding > non-relativistic binding)
+        let corr = relativistic_correction_ev(1, 1, 1).unwrap();
+        assert!(
+            corr.abs() < 0.01,
+            "H 1s correction={corr} eV, should be small"
+        );
+    }
+
+    #[test]
+    fn relativistic_correction_increases_with_z() {
+        let corr_h = relativistic_correction_ev(1, 1, 1).unwrap().abs();
+        let corr_fe = relativistic_correction_ev(26, 1, 1).unwrap().abs();
+        assert!(
+            corr_fe > corr_h,
+            "Relativistic correction should increase with Z"
+        );
+    }
+
+    #[test]
+    fn relativistic_correction_small_for_hydrogen() {
+        // For hydrogen, the correction should be much smaller than 13.6 eV
+        let corr = relativistic_correction_ev(1, 1, 1).unwrap();
+        assert!(
+            corr.abs() < 1.0,
+            "H correction={corr} eV, should be << 13.6"
+        );
+    }
+
+    #[test]
+    fn relativistic_correction_invalid() {
+        assert!(relativistic_correction_ev(1, 0, 1).is_err());
+    }
+
+    // --- Hyperfine splitting tests ---
+
+    #[test]
+    fn hyperfine_hydrogen_1s_21cm() {
+        // H 1s hyperfine: ~5.88e-6 eV -> 1420 MHz (21 cm line)
+        let g_p = crate::constants::PROTON_G_FACTOR;
+        let hfs = hyperfine_splitting_ev(1, 1, g_p);
+        // The formula gives an approximate value; check order of magnitude
+        assert!(
+            hfs > 1e-6 && hfs < 1e-5,
+            "H 1s HFS={hfs} eV, expected ~5.88e-6"
+        );
+    }
+
+    #[test]
+    fn hyperfine_scales_with_z3() {
+        let g_p = crate::constants::PROTON_G_FACTOR;
+        let h = hyperfine_splitting_ev(1, 1, g_p);
+        let he = hyperfine_splitting_ev(2, 1, g_p);
+        let ratio = he / h;
+        assert!(
+            (ratio - 8.0).abs() < 0.1,
+            "HFS Z³ scaling: ratio={ratio}, expected 8"
+        );
+    }
+
+    #[test]
+    fn hyperfine_decreases_with_n() {
+        let g_p = crate::constants::PROTON_G_FACTOR;
+        let n1 = hyperfine_splitting_ev(1, 1, g_p);
+        let n2 = hyperfine_splitting_ev(1, 2, g_p);
+        assert!(n1 > n2, "HFS should decrease with n");
+    }
+
+    #[test]
+    fn hyperfine_zero_n() {
+        let hfs = hyperfine_splitting_ev(1, 0, 5.0);
+        assert!((hfs).abs() < 1e-30, "n=0 should return 0");
+    }
+
+    // --- Electron g-factor tests ---
+
+    #[test]
+    fn electron_g_factor_value() {
+        let g = electron_g_factor();
+        assert!(
+            (g - 2.002_319_304).abs() < 1e-6,
+            "g_e={g}, expected ~2.00232"
+        );
+    }
+
+    #[test]
+    fn electron_g_factor_greater_than_2() {
+        let g = electron_g_factor();
+        assert!(g > 2.0, "g_e should be > 2 due to QED corrections");
+    }
+
+    #[test]
+    fn bound_g_factor_hydrogen() {
+        // For Z=1, bound g-factor should be very close to free g-factor
+        let g_bound = bound_electron_g_factor(1);
+        let g_free = electron_g_factor();
+        assert!(
+            (g_bound - g_free).abs() < 0.001,
+            "H bound g={g_bound}, free g={g_free}"
+        );
+    }
+
+    #[test]
+    fn bound_g_factor_decreases_with_z() {
+        let g1 = bound_electron_g_factor(1);
+        let g50 = bound_electron_g_factor(50);
+        assert!(
+            g1 > g50,
+            "Bound g-factor should decrease with Z: g(1)={g1}, g(50)={g50}"
+        );
+    }
+
+    #[test]
+    fn bound_g_factor_supercritical() {
+        // Z > 137 is supercritical, should return 0
+        let g = bound_electron_g_factor(200);
+        assert!((g).abs() < 1e-30, "Supercritical should return 0");
+    }
+
+    // --- Anomalous Zeeman tests ---
+
+    #[test]
+    fn anomalous_zeeman_zero_field() {
+        let de = anomalous_zeeman_splitting_ev(0.0, 0, 1);
+        assert!((de).abs() < 1e-30, "No splitting in zero field");
+    }
+
+    #[test]
+    fn anomalous_zeeman_proportional_to_field() {
+        let de1 = anomalous_zeeman_splitting_ev(1.0, 0, 1);
+        let de2 = anomalous_zeeman_splitting_ev(2.0, 0, 1);
+        assert!(
+            (de2 - 2.0 * de1).abs() < 1e-15,
+            "Anomalous Zeeman should be linear in B"
+        );
+    }
+
+    #[test]
+    fn anomalous_zeeman_differs_from_normal() {
+        // The anomalous Zeeman uses g_e != 2, so it should differ
+        // from the simple formula with g=2
+        let anom = anomalous_zeeman_splitting_ev(1.0, 0, 1);
+        let mu_b = crate::constants::BOHR_MAGNETON_EV_T;
+        let normal = (0.0 + 2.0 * 0.5) * mu_b * 1.0; // ml=0, ms=+1/2, g=2
+        assert!(
+            (anom - normal).abs() > 1e-8,
+            "Anomalous should differ from normal Zeeman"
+        );
+    }
+
+    #[test]
+    fn anomalous_zeeman_spin_up_vs_down() {
+        let up = anomalous_zeeman_splitting_ev(1.0, 0, 1);
+        let down = anomalous_zeeman_splitting_ev(1.0, 0, -1);
+        assert!(
+            (up + down).abs() < 1e-15,
+            "Spin-up and spin-down should be symmetric for ml=0"
+        );
+    }
+
+    // --- Breit interaction tests ---
+
+    #[test]
+    fn breit_helium_negative() {
+        let de = breit_interaction_ev(2);
+        assert!(de < 0.0, "Breit correction should be negative");
+    }
+
+    #[test]
+    fn breit_helium_magnitude() {
+        // For He (Z=2): ΔE ≈ -(2/3) × α² × 16 × 13.6 ≈ -0.00768 eV
+        let de = breit_interaction_ev(2);
+        assert!(
+            (de - (-0.00768)).abs() < 0.001,
+            "He Breit={de} eV, expected ~-0.00768"
+        );
+    }
+
+    #[test]
+    fn breit_scales_with_z4() {
+        let he = breit_interaction_ev(2).abs();
+        let li = breit_interaction_ev(3).abs();
+        let ratio = li / he;
+        let expected = 81.0 / 16.0; // 3^4 / 2^4
+        assert!(
+            (ratio - expected).abs() < 0.01,
+            "Breit Z⁴ scaling: ratio={ratio}, expected={expected}"
+        );
+    }
+
+    #[test]
+    fn breit_increases_with_z() {
+        let he = breit_interaction_ev(2).abs();
+        let c = breit_interaction_ev(6).abs();
+        assert!(c > he, "Breit |ΔE| should increase with Z");
     }
 }

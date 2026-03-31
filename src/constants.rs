@@ -64,3 +64,39 @@ pub const BOHR_MAGNETON_EV_T: f64 = 5.788_381_806_0e-5;
 /// k_e = e^2 / (4 * pi * epsilon_0) expressed in nuclear units.
 /// Numerically: k_e * e^2 = 1.4399764 MeV*fm.
 pub const COULOMB_MEV_FM: f64 = 1.439_964_5;
+
+/// Classical electron radius in femtometers (CODATA 2022).
+///
+/// r_e = α ħc / (m_e c²) = 2.8179403262 fm.
+///
+/// Reference: <https://physics.nist.gov/cgi-bin/cuu/Value?re>
+pub const CLASSICAL_ELECTRON_RADIUS_FM: f64 = 2.817_940_326_2;
+
+/// Proton magnetic g-factor (CODATA 2022).
+///
+/// g_p = μ_p / μ_N = 5.5856947130 (dimensionless).
+///
+/// Reference: <https://physics.nist.gov/cgi-bin/cuu/Value?gp>
+pub const PROTON_G_FACTOR: f64 = 5.585_694_713;
+
+/// Electron anomalous magnetic moment (CODATA 2022).
+///
+/// a_e = (g_e - 2) / 2 = 0.00115965218128.
+///
+/// Reference: <https://physics.nist.gov/cgi-bin/cuu/Value?ae>
+pub const ELECTRON_ANOMALOUS_MOMENT: f64 = 0.001_159_652_181_28;
+
+/// Standard acceleration of gravity in m/s² (CODATA 2022, exact).
+///
+/// Reference: <https://physics.nist.gov/cgi-bin/cuu/Value?gn>
+pub const STANDARD_GRAVITY: f64 = 9.806_65;
+
+/// Geocentric gravitational constant GM_earth in m³/s² (IERS 2010).
+///
+/// Reference: IERS Conventions (2010), Table 1.1.
+pub const GM_EARTH: f64 = 3.986_004_418e14;
+
+/// Earth angular rotation rate in rad/s (IERS 2010).
+///
+/// Reference: IERS Conventions (2010), Table 1.2.
+pub const EARTH_ROTATION_RAD_S: f64 = 7.292_115_0e-5;
