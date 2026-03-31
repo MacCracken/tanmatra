@@ -42,7 +42,46 @@
 - [ ] Anomalous magnetic moment corrections
 - [ ] Breit interaction for two-electron atoms
 
-### v1.5 — Simulation Support
+### v1.5 — Frequency Standards & Atomic Time
+
+Atomic transitions define the SI second. tanmatra already models transitions (Einstein A/B, selection rules, Rydberg) — this version adds the specific transitions and time scale conversions that define physical timekeeping.
+
+#### Frequency Standards
+
+- [ ] `FrequencyStandard` enum: Cesium133, Rubidium87, HydrogenMaser, StrontiumOptical, YtterbiumOptical
+- [ ] Cesium-133 hyperfine transition: 9,192,631,770 Hz (SI second definition, CGPM 1967)
+- [ ] Strontium-87 optical lattice: 429,228,004,229,873.2 Hz (BIPM 2021 secondary representation)
+- [ ] Ytterbium-171 optical lattice: 518,295,836,590,863.6 Hz (BIPM 2021)
+- [ ] Rubidium-87 hyperfine: 6,834,682,610.904 Hz
+- [ ] Hydrogen maser 1420.405 MHz (21 cm line)
+- [ ] `transition_frequency()`, `transition_wavelength()`, `quality_factor()` for each standard
+- [ ] Fractional stability (Allan deviation) characterization per standard type
+
+#### Atomic Time Scales
+
+- [ ] `TimeScale` enum: TAI, UTC, TT, GPS, TCB, TCG
+- [ ] TAI↔UTC conversion with leap second table (IERS Bulletin C, maintained as const data)
+- [ ] TAI↔TT: fixed offset TT = TAI + 32.184s (IAU 1991)
+- [ ] TAI↔GPS: fixed offset GPS = TAI − 19s
+- [ ] TCB↔TCG↔TT relativistic coordinate time conversions (IAU 2000)
+- [ ] `AtomicInstant` type: TAI-referenced, sub-nanosecond precision (i64 seconds + u32 nanos)
+- [ ] Conversions to/from `chrono::DateTime<Utc>` via leap second table
+
+#### Relativistic Clock Corrections
+
+- [ ] Gravitational redshift at altitude: Δf/f = −gΔh/c² (first order)
+- [ ] Full Schwarzschild correction for satellite clocks (GPS: +45.850 μs/day gravitational, −7.214 μs/day velocity)
+- [ ] Second-order Doppler shift for moving clocks
+- [ ] Sagnac correction for rotating reference frames (Earth surface)
+- [ ] Bridge to hisab-mimamsa: `gravitational_time_dilation()` for exact corrections
+
+#### Cross-Crate Integration
+
+- [ ] **jyotish bridge**: `tai_to_tt()` replaces jyotish's polynomial Delta T approximation with exact TAI↔TT for modern epochs (post-1958)
+- [ ] **kiran/joshua bridge**: `AtomicInstant` as simulation time anchor — game world time referenced to physical time
+- [ ] **bhava bridge**: time scale awareness for circadian/rhythm modules — simulation time vs wall-clock time distinction
+
+### v1.6 — Simulation Support
 
 - [ ] Monte Carlo decay simulation (stochastic chains)
 - [ ] Particle transport (energy loss, range, straggling)
