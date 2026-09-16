@@ -1,5 +1,19 @@
 # Development Roadmap
 
+## ⭐ Priority — Cyrius port (tanmatra 2.0.0)
+
+**Plan of record: [`tanmatra-port-plan.md`](tanmatra-port-plan.md).**
+
+⏸ **Starts on the Cyrius 6.6.5 release**, which bundles ganita ≥ 1.2.6 with `f64_cbrt`. The pre-port assessment found no other blocker.
+
+- **Rust 1.3.0 is the final Rust feature release** and the reference implementation: every finding of the [2026-09-16 audit](../audit/2026-09-16-math-audit.md) is repaired and pinned by reference-value tests.
+- **tanmatra 2.0.0 is the Cyrius port**, initialized with `cyrius port` (Rust moves to `rust-old/` as the parity oracle).
+- **In scope:** constants, particle, relativity, nucleus, decay, atomic, reaction, scattering, timekeeping, and the `optics` profile against prakash (already in Cyrius).
+- **Deferred until the consumers are in Cyrius:** all bridges (bijli, kimiya, bhava, jyotish, chrono, hisab-mimamsa, falak, kiran/joshua) and the soorat integration. bijli, kimiya and soorat are still Rust.
+- **Milestones:** M0 initialize → M1 foundation → M2 nuclear → M5 timekeeping → M3 atomic → M4 reactions & scattering → M6 optics → M7 release 2.0.0.
+
+The v1.x items below continue in Cyrius after 2.0.0.
+
 ## Future
 
 - Nuclear density functional theory interface

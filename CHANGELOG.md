@@ -5,13 +5,15 @@ All notable changes to tanmatra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] — 2026-09-16
+## [1.3.0] — 2026-09-16
 
 Repairs every finding of the 2026-09-16 math and data audit
 (`docs/audit/2026-09-16-math-audit.md`). Every data table was regenerated from
 its primary source and every formula fix is pinned by a reference-value test.
-Major version: `NuclearReaction` gained fields and `projectile` became
-`Option<Nucleus>`; several functions now return physically different values.
+This is the final Rust feature release and the reference implementation for the
+Cyrius port, which will ship as 2.0.0 (`docs/development/tanmatra-port-plan.md`).
+It contains API breaks, listed below; the version number follows the port plan
+rather than a Rust major bump.
 
 ### Breaking
 - **reaction**: `NuclearReaction.projectile` is `Option<Nucleus>` (`None` for neutron-induced reactions); new fields `neutrons_in`, `neutrons_out`, `leptons_out`; `nuclear_charge_change()`, `baryon_number_change()`. `u235_fission` no longer uses H-1 as the neutron.

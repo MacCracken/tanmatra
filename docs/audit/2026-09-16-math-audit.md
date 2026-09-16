@@ -392,7 +392,7 @@ mechanically.
 
 ---
 
-## Repairs — 2026-09-16 (v2.0.0)
+## Repairs — 2026-09-16 (v1.3.0)
 
 Every finding above was repaired in the Rust crate the same day, so the Cyrius
 port can take the Rust crate as its reference implementation. Each repair is
