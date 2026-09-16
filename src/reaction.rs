@@ -4,25 +4,67 @@
 //! Coulomb barrier estimates, and preset reactions for common fusion and fission
 //! processes.
 
-use crate::constants::COULOMB_MEV_FM;
+use crate::constants::{COULOMB_MEV_FM, HBAR_C_MEV_FM};
 use crate::error::TanmatraError;
 use crate::nucleus::Nucleus;
+use crate::particle::Lepton;
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 /// A nuclear reaction: reactants -> products + Q.
+///
+/// Free neutrons and leptons are not nuclei; they are carried as counts and a
+/// lepton list so that charge and baryon number can be balanced.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NuclearReaction {
     /// Name or description of the reaction.
     pub name: String,
-    /// Projectile nucleus.
-    pub projectile: Nucleus,
+    /// Projectile nucleus (`None` for a neutron-induced reaction).
+    pub projectile: Option<Nucleus>,
     /// Target nucleus.
     pub target: Nucleus,
     /// Product nuclei.
     pub products: alloc::vec::Vec<Nucleus>,
-    /// Q-value in MeV (positive = exothermic, negative = endothermic).
+    /// Number of free neutrons in the entrance channel.
+    #[serde(default)]
+    pub neutrons_in: u32,
+    /// Number of free neutrons in the exit channel.
+    #[serde(default)]
+    pub neutrons_out: u32,
+    /// Leptons in the exit channel (positrons are represented by
+    /// [`Lepton::Electron`] with the reaction noted in `name`; neutrinos by
+    /// [`Lepton::ElectronNeutrino`]).
+    #[serde(default)]
+    pub leptons_out: alloc::vec::Vec<Lepton>,
+    /// Q-value in MeV (positive = exothermic, negative = endothermic),
+    /// computed from AME2020 atomic masses.
     pub q_value_mev: f64,
+}
+
+impl NuclearReaction {
+    /// Net change in electric charge of the nuclei (products − reactants), in e.
+    ///
+    /// For a balanced reaction this equals the negative of the lepton charge
+    /// emitted (e.g. −2 for 4p → He-4 + 2e⁺ + 2ν).
+    #[must_use]
+    pub fn nuclear_charge_change(&self) -> i64 {
+        let reactants =
+            i64::from(self.target.z()) + self.projectile.map_or(0, |p| i64::from(p.z()));
+        let products: i64 = self.products.iter().map(|n| i64::from(n.z())).sum();
+        products - reactants
+    }
+
+    /// Net change in baryon number (products − reactants), counting free neutrons.
+    /// Zero for every physical reaction.
+    #[must_use]
+    pub fn baryon_number_change(&self) -> i64 {
+        let reactants = i64::from(self.target.a())
+            + self.projectile.map_or(0, |p| i64::from(p.a()))
+            + i64::from(self.neutrons_in);
+        let products: i64 = self.products.iter().map(|n| i64::from(n.a())).sum::<i64>()
+            + i64::from(self.neutrons_out);
+        products - reactants
+    }
 }
 
 /// Calculates the Q-value of a reaction from the mass difference.
@@ -89,8 +131,9 @@ pub fn geometric_cross_section_barns(nucleus: &Nucleus) -> f64 {
 /// σ(E) = π λ̄² g (Γ_i Γ_f) / ((E - E_r)² + (Γ/2)²)
 ///
 /// where:
-/// - `energy_mev`: projectile kinetic energy in MeV
-/// - `resonance_energy_mev`: resonance energy E_r in MeV
+/// - `energy_mev`: centre-of-mass kinetic energy in MeV (non-relativistic;
+///   ƛ² = (ħc)² / (2 μc² E_cm))
+/// - `resonance_energy_mev`: resonance energy E_r in MeV (centre of mass)
 /// - `total_width_mev`: total decay width Γ in MeV
 /// - `partial_in_mev`: entrance channel partial width Γ_i
 /// - `partial_out_mev`: exit channel partial width Γ_f
@@ -114,9 +157,7 @@ pub fn breit_wigner_cross_section(
     }
 
     // de Broglie wavelength squared: λ̄² = ħ²c² / (2 μ E)
-    // ħc = 197.3269804 MeV·fm, so ħ²c² = 197.327² MeV²·fm²
-    let hbar_c = 197.326_980_4; // MeV·fm
-    let lambda_bar_sq = hbar_c * hbar_c / (2.0 * reduced_mass_mev * energy_mev);
+    let lambda_bar_sq = HBAR_C_MEV_FM * HBAR_C_MEV_FM / (2.0 * reduced_mass_mev * energy_mev);
 
     let de = energy_mev - resonance_energy_mev;
     let half_width = total_width_mev / 2.0;
@@ -134,83 +175,43 @@ pub fn breit_wigner_cross_section(
     sigma_fm2 / 100.0
 }
 
-/// Known thermal neutron cross-sections (at 0.0253 eV) in barns.
+/// Thermal neutron cross-sections (at 0.0253 eV, 2200 m/s) in barns.
 ///
-/// Source: NNDC, Mughabghab "Atlas of Neutron Resonances" (2018).
+/// Source: ENDF/B-VIII.0 (Brown et al., Nucl. Data Sheets 148, 1 (2018)),
+/// point-wise 0 K cross sections at 0.0253 eV. Scattering is the free-atom
+/// elastic cross section (not the bound-atom value of neutron-scattering tables).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ThermalCrossSection {
     /// Target nucleus.
     pub target: Nucleus,
-    /// Thermal neutron absorption cross-section in barns.
+    /// Thermal neutron absorption cross-section in barns: capture + fission + (n,α) + (n,p).
     pub absorption_barns: f64,
     /// Thermal neutron fission cross-section in barns (0 if not fissile).
     pub fission_barns: f64,
-    /// Thermal neutron scattering cross-section in barns.
+    /// Thermal neutron elastic scattering cross-section (free atom) in barns.
     pub scattering_barns: f64,
 }
 
 /// Returns thermal neutron cross-sections for key isotopes.
 ///
-/// Source: NNDC evaluated nuclear data, Mughabghab (2018).
+/// Source: ENDF/B-VIII.0, 0 K, E = 0.0253 eV.
 #[must_use]
 pub fn thermal_neutron_cross_sections() -> alloc::vec::Vec<ThermalCrossSection> {
+    let xs = |z: u32, a: u32, absorption: f64, fission: f64, scattering: f64| ThermalCrossSection {
+        target: Nucleus::new(z, a).unwrap_or_else(|_| Nucleus::hydrogen_1()),
+        absorption_barns: absorption,
+        fission_barns: fission,
+        scattering_barns: scattering,
+    };
     alloc::vec![
-        // U-235: fissile
-        ThermalCrossSection {
-            target: Nucleus::uranium_235(),
-            absorption_barns: 680.9,
-            fission_barns: 585.1,
-            scattering_barns: 15.04,
-        },
-        // U-238: fertile
-        ThermalCrossSection {
-            target: Nucleus::uranium_238(),
-            absorption_barns: 2.680,
-            fission_barns: 0.0,
-            scattering_barns: 8.871,
-        },
-        // Pu-239: fissile
-        ThermalCrossSection {
-            target: Nucleus::new(94, 239).unwrap_or_else(|_| Nucleus::hydrogen_1()),
-            absorption_barns: 1011.3,
-            fission_barns: 747.4,
-            scattering_barns: 7.7,
-        },
-        // B-10: neutron absorber
-        ThermalCrossSection {
-            target: Nucleus::new(5, 10).unwrap_or_else(|_| Nucleus::hydrogen_1()),
-            absorption_barns: 3835.0,
-            fission_barns: 0.0,
-            scattering_barns: 2.16,
-        },
-        // Cd-113: strong absorber
-        ThermalCrossSection {
-            target: Nucleus::new(48, 113).unwrap_or_else(|_| Nucleus::hydrogen_1()),
-            absorption_barns: 20_600.0,
-            fission_barns: 0.0,
-            scattering_barns: 12.1,
-        },
-        // H-1: moderator
-        ThermalCrossSection {
-            target: Nucleus::hydrogen_1(),
-            absorption_barns: 0.3326,
-            fission_barns: 0.0,
-            scattering_barns: 82.02,
-        },
-        // C-12: moderator
-        ThermalCrossSection {
-            target: Nucleus::carbon_12(),
-            absorption_barns: 0.003_53,
-            fission_barns: 0.0,
-            scattering_barns: 5.551,
-        },
-        // Fe-56: structural material
-        ThermalCrossSection {
-            target: Nucleus::iron_56(),
-            absorption_barns: 2.59,
-            fission_barns: 0.0,
-            scattering_barns: 12.42,
-        },
+        xs(92, 235, 686.178, 586.787, 14.0795), // U-235: capture 99.391
+        xs(92, 238, 2.682_52, 1.850_86e-5, 9.220_21), // U-238
+        xs(94, 239, 1016.70, 746.947, 8.055_77), // Pu-239: capture 269.75
+        xs(5, 10, 3844.55, 0.0, 2.088_64),      // B-10: (n,α) 3844.2, (n,γ) 0.396
+        xs(48, 113, 19_859.9, 0.0, 24.3186),    // Cd-113
+        xs(1, 1, 0.332_584, 0.0, 20.4361),      // H-1 (free atom)
+        xs(6, 12, 0.003_860_4, 0.0, 4.748_17),  // C-12 (free atom)
+        xs(26, 56, 2.604_31, 0.0, 12.0811),     // Fe-56
     ]
 }
 
@@ -218,148 +219,201 @@ pub fn thermal_neutron_cross_sections() -> alloc::vec::Vec<ThermalCrossSection> 
 // Resonance integrals
 // ---------------------------------------------------------------------------
 
-/// Epithermal neutron capture resonance integrals (I_gamma) in barns.
+/// Epithermal neutron resonance integrals in barns:
+/// (Z, A, capture I_γ, fission I_f, (n,α) I_α).
 ///
-/// Each entry is (Z, A, resonance_integral_barns).
-///
-/// The resonance integral is defined as:
-/// I = ∫(0.5 eV to ∞) σ(E)/E dE
-///
-/// Source: ENDF/B-VIII.0 evaluated nuclear data library.
-const RESONANCE_INTEGRALS: &[(u32, u32, f64)] = &[
-    (1, 1, 0.149),    // H-1
-    (5, 10, 1722.0),  // B-10
-    (6, 12, 0.0016),  // C-12
-    (26, 56, 1.36),   // Fe-56
-    (40, 90, 0.117),  // Zr-90
-    (42, 98, 6.90),   // Mo-98
-    (50, 120, 0.133), // Sn-120
-    (53, 127, 148.0), // I-127
-    (55, 133, 429.0), // Cs-133
-    (92, 235, 275.0), // U-235
-    (92, 238, 277.0), // U-238
-    (94, 239, 200.0), // Pu-239
+/// I_x = ∫ σ_x(E)/E dE from 0.5 eV (cadmium cut-off) to 20 MeV, integrated from
+/// ENDF/B-VIII.0 0 K point-wise cross sections.
+const RESONANCE_INTEGRALS: &[(u32, u32, f64, f64, f64)] = &[
+    (1, 1, 0.1493, 0.0, 0.0),       // H-1
+    (5, 10, 0.1780, 0.0, 1725.6),   // B-10
+    (6, 12, 0.002_05, 0.0, 0.0869), // C-12
+    (26, 56, 1.378, 0.0, 0.0),      // Fe-56
+    (40, 90, 0.1637, 0.0, 0.0),     // Zr-90
+    (42, 98, 6.562, 0.0, 0.0034),   // Mo-98
+    (50, 120, 1.104, 0.0, 0.0009),  // Sn-120
+    (53, 127, 159.7, 0.0, 0.0009),  // I-127
+    (55, 133, 405.4, 0.0, 0.0011),  // Cs-133
+    (92, 235, 143.0, 280.2, 0.0),   // U-235
+    (92, 238, 275.2, 2.070, 0.0),   // U-238 (fission is above-threshold, fast)
+    (94, 239, 180.1, 308.3, 0.0),   // Pu-239
 ];
 
-/// Returns the epithermal neutron capture resonance integral in barns.
-///
-/// The resonance integral I_γ represents the integrated capture cross-section
-/// over the epithermal energy range (above 0.5 eV).
+/// Returns the epithermal neutron **capture** resonance integral I_γ in barns.
 ///
 /// Returns `None` if the nuclide is not in the table.
 ///
-/// Source: ENDF/B-VIII.0 evaluated nuclear data library.
+/// Source: ENDF/B-VIII.0, 0.5 eV – 20 MeV.
 #[must_use]
 pub fn resonance_integral_barns(z: u32, a: u32) -> Option<f64> {
     RESONANCE_INTEGRALS
         .iter()
-        .find(|&&(rz, ra, _)| rz == z && ra == a)
-        .map(|&(_, _, ri)| ri)
+        .find(|&&(rz, ra, _, _, _)| rz == z && ra == a)
+        .map(|&(_, _, ri, _, _)| ri)
 }
 
-// --- Preset reactions with real Q-values ---
+/// Returns the epithermal neutron **fission** resonance integral I_f in barns.
+///
+/// Returns `None` if the nuclide is not in the table.
+///
+/// Source: ENDF/B-VIII.0, 0.5 eV – 20 MeV.
+#[must_use]
+pub fn fission_resonance_integral_barns(z: u32, a: u32) -> Option<f64> {
+    RESONANCE_INTEGRALS
+        .iter()
+        .find(|&&(rz, ra, _, _, _)| rz == z && ra == a)
+        .map(|&(_, _, _, ri, _)| ri)
+}
 
-/// D-T fusion: D + T -> He-4 + n, Q = 17.6 MeV.
+/// Returns the epithermal neutron **(n,α)** resonance integral I_α in barns.
+///
+/// Returns `None` if the nuclide is not in the table.
+///
+/// Source: ENDF/B-VIII.0, 0.5 eV – 20 MeV.
+#[must_use]
+pub fn n_alpha_resonance_integral_barns(z: u32, a: u32) -> Option<f64> {
+    RESONANCE_INTEGRALS
+        .iter()
+        .find(|&&(rz, ra, _, _, _)| rz == z && ra == a)
+        .map(|&(_, _, _, _, ri)| ri)
+}
+
+// --- Preset reactions with Q-values from AME2020 atomic masses ---
+
+fn nuc(z: u32, a: u32) -> Nucleus {
+    Nucleus::new(z, a).unwrap_or_else(|_| Nucleus::hydrogen_1())
+}
+
+/// D-T fusion: D + T -> He-4 + n, Q = 17.5893 MeV.
 ///
 /// The most favorable fusion reaction for energy production.
 #[must_use]
 pub fn dt_fusion() -> NuclearReaction {
     NuclearReaction {
         name: String::from("D-T fusion"),
-        projectile: Nucleus::new(1, 2).unwrap_or_else(|_| Nucleus::hydrogen_1()),
-        target: Nucleus::new(1, 3).unwrap_or_else(|_| Nucleus::hydrogen_1()),
+        projectile: Some(nuc(1, 2)),
+        target: nuc(1, 3),
         products: alloc::vec![Nucleus::helium_4()],
-        // He-4 + neutron; Q = 17.6 MeV
-        q_value_mev: 17.6,
+        neutrons_in: 0,
+        neutrons_out: 1,
+        leptons_out: alloc::vec::Vec::new(),
+        q_value_mev: 17.5893,
     }
 }
 
-/// D-D fusion (He-3 branch): D + D -> He-3 + n, Q = 3.27 MeV.
+/// D-D fusion (He-3 branch): D + D -> He-3 + n, Q = 3.2689 MeV.
 #[must_use]
 pub fn dd_fusion_he3() -> NuclearReaction {
     NuclearReaction {
         name: String::from("D-D fusion (He-3 branch)"),
-        projectile: Nucleus::new(1, 2).unwrap_or_else(|_| Nucleus::hydrogen_1()),
-        target: Nucleus::new(1, 2).unwrap_or_else(|_| Nucleus::hydrogen_1()),
-        products: alloc::vec![Nucleus::new(2, 3).unwrap_or_else(|_| Nucleus::helium_4())],
-        q_value_mev: 3.27,
+        projectile: Some(nuc(1, 2)),
+        target: nuc(1, 2),
+        products: alloc::vec![nuc(2, 3)],
+        neutrons_in: 0,
+        neutrons_out: 1,
+        leptons_out: alloc::vec::Vec::new(),
+        q_value_mev: 3.2689,
     }
 }
 
-/// D-D fusion (tritium branch): D + D -> T + p, Q = 4.03 MeV.
+/// D-D fusion (tritium branch): D + D -> T + p, Q = 4.0327 MeV.
 #[must_use]
 pub fn dd_fusion_t() -> NuclearReaction {
     NuclearReaction {
         name: String::from("D-D fusion (tritium branch)"),
-        projectile: Nucleus::new(1, 2).unwrap_or_else(|_| Nucleus::hydrogen_1()),
-        target: Nucleus::new(1, 2).unwrap_or_else(|_| Nucleus::hydrogen_1()),
-        products: alloc::vec![
-            Nucleus::new(1, 3).unwrap_or_else(|_| Nucleus::hydrogen_1()),
-            Nucleus::hydrogen_1(),
-        ],
-        q_value_mev: 4.03,
+        projectile: Some(nuc(1, 2)),
+        target: nuc(1, 2),
+        products: alloc::vec![nuc(1, 3), Nucleus::hydrogen_1()],
+        neutrons_in: 0,
+        neutrons_out: 0,
+        leptons_out: alloc::vec::Vec::new(),
+        q_value_mev: 4.0327,
     }
 }
 
-/// Proton-proton chain step 1: p + p -> D + e+ + neutrino, Q = 0.42 MeV.
+/// Proton-proton chain step 1: p + p -> D + e⁺ + ν_e, Q = 0.4202 MeV.
 ///
+/// Q is shared between the positron and the neutrino; it excludes the
+/// 1.022 MeV released when the positron later annihilates.
 /// The dominant energy source in the Sun.
 #[must_use]
 pub fn pp_chain_step1() -> NuclearReaction {
     NuclearReaction {
-        name: String::from("p-p chain (step 1)"),
-        projectile: Nucleus::hydrogen_1(),
+        name: String::from("p-p chain (step 1): p + p -> D + e+ + nu_e"),
+        projectile: Some(Nucleus::hydrogen_1()),
         target: Nucleus::hydrogen_1(),
-        products: alloc::vec![Nucleus::new(1, 2).unwrap_or_else(|_| Nucleus::hydrogen_1())],
-        // D + positron + neutrino; Q ≈ 0.42 MeV
-        q_value_mev: 0.42,
+        products: alloc::vec![nuc(1, 2)],
+        neutrons_in: 0,
+        neutrons_out: 0,
+        leptons_out: alloc::vec![Lepton::Electron, Lepton::ElectronNeutrino],
+        q_value_mev: 0.4202,
     }
 }
 
-/// Uranium-235 fission (typical): U-235 + n -> Ba-141 + Kr-92 + 3n, Q ≈ 200 MeV.
+/// Uranium-235 fission (one channel): n + U-235 -> Ba-141 + Kr-92 + 3n,
+/// Q = 173.28 MeV.
 ///
-/// One of many possible fission channels. The average energy release per
-/// fission of U-235 is approximately 200 MeV.
+/// This is the prompt Q-value of this specific channel from AME2020 masses.
+/// The ~200 MeV usually quoted per fission is the total energy release averaged
+/// over all channels, including the subsequent β decays of the fragments.
 #[must_use]
 pub fn u235_fission() -> NuclearReaction {
     NuclearReaction {
-        name: String::from("U-235 fission (typical)"),
-        projectile: Nucleus::new(1, 1).unwrap_or_else(|_| Nucleus::hydrogen_1()), // neutron approximated as H-1
+        name: String::from("U-235 fission: n + U-235 -> Ba-141 + Kr-92 + 3n"),
+        projectile: None,
         target: Nucleus::uranium_235(),
-        products: alloc::vec![
-            Nucleus::new(56, 141).unwrap_or_else(|_| Nucleus::iron_56()), // Ba-141
-            Nucleus::new(36, 92).unwrap_or_else(|_| Nucleus::iron_56()),  // Kr-92
-        ],
-        // + 3 neutrons; Q ≈ 200 MeV
-        q_value_mev: 200.0,
+        products: alloc::vec![nuc(56, 141), nuc(36, 92)],
+        neutrons_in: 1,
+        neutrons_out: 3,
+        leptons_out: alloc::vec::Vec::new(),
+        q_value_mev: 173.28,
     }
 }
 
-/// CNO cycle (net): 4p -> He-4 + 2e+ + 2nu, Q = 25.03 MeV.
+/// CNO cycle (net): 4p -> He-4 + 2e⁺ + 2ν_e, Q = 26.731 MeV.
 ///
+/// Q = 4 M(¹H) − M(⁴He) from atomic masses, which includes the energy of the
+/// two positron annihilations. Of this, on average 1.704 MeV (0.707 MeV from
+/// ¹³N and 0.997 MeV from ¹⁵O decay) is carried away by neutrinos, leaving
+/// 25.03 MeV deposited in the star.
 /// The dominant energy source in stars more massive than ~1.3 solar masses.
 #[must_use]
 pub fn cno_cycle() -> NuclearReaction {
     NuclearReaction {
-        name: String::from("CNO cycle (net)"),
-        projectile: Nucleus::hydrogen_1(),
+        name: String::from("CNO cycle (net): 4p -> He-4 + 2e+ + 2nu_e"),
+        projectile: Some(Nucleus::hydrogen_1()),
         target: Nucleus::carbon_12(), // Catalyst
         products: alloc::vec![Nucleus::helium_4(), Nucleus::carbon_12()],
-        q_value_mev: 25.03,
+        neutrons_in: 0,
+        neutrons_out: 0,
+        leptons_out: alloc::vec![
+            Lepton::Electron,
+            Lepton::Electron,
+            Lepton::ElectronNeutrino,
+            Lepton::ElectronNeutrino
+        ],
+        q_value_mev: 26.731,
     }
 }
 
-/// Triple-alpha process: 3 He-4 -> C-12, Q = 7.275 MeV.
+/// Mean energy carried away by neutrinos per CNO cycle, in MeV
+/// (Bahcall, Neutrino Astrophysics (1989): ¹³N 0.707 MeV + ¹⁵O 0.997 MeV).
+pub const CNO_NEUTRINO_LOSS_MEV: f64 = 1.704;
+
+/// Triple-alpha process: 3 He-4 -> C-12, Q = 7.2747 MeV.
 ///
 /// The process by which stars synthesize carbon from helium.
 #[must_use]
 pub fn triple_alpha() -> NuclearReaction {
     NuclearReaction {
         name: String::from("Triple-alpha process"),
-        projectile: Nucleus::helium_4(),
+        projectile: Some(Nucleus::helium_4()),
         target: Nucleus::helium_4(),
         products: alloc::vec![Nucleus::carbon_12()],
-        q_value_mev: 7.275,
+        neutrons_in: 0,
+        neutrons_out: 0,
+        leptons_out: alloc::vec::Vec::new(),
+        q_value_mev: 7.2747,
     }
 }
 
@@ -427,6 +481,10 @@ pub fn s_process_main() -> NucleosynthesisPathway {
                 reaction: String::from("Fe-57(n,γ)Fe-58"),
             },
             NucleosynthesisStep {
+                nucleus: Nucleus::new(26, 59).unwrap_or_else(|_| Nucleus::iron_56()),
+                reaction: String::from("Fe-58(n,γ)Fe-59"),
+            },
+            NucleosynthesisStep {
                 nucleus: Nucleus::new(27, 59).unwrap_or_else(|_| Nucleus::iron_56()),
                 reaction: String::from("Fe-59→Co-59 (β⁻)"),
             },
@@ -476,8 +534,8 @@ pub fn r_process_main() -> NucleosynthesisPathway {
                 reaction: String::from("2nd peak: Te-130 (A≈130, from N=82 waiting point)"),
             },
             NucleosynthesisStep {
-                nucleus: Nucleus::new(76, 195).unwrap_or_else(|_| Nucleus::iron_56()),
-                reaction: String::from("3rd peak: Os/Pt-195 (A≈195, from N=126 waiting point)"),
+                nucleus: Nucleus::new(78, 195).unwrap_or_else(|_| Nucleus::iron_56()),
+                reaction: String::from("3rd peak: Pt-195 (A≈195, from N=126 waiting point)"),
             },
             NucleosynthesisStep {
                 nucleus: Nucleus::new(92, 238).unwrap_or_else(|_| Nucleus::uranium_238()),
@@ -543,8 +601,9 @@ pub fn collisions_to_thermalize(target_a: u32, e_initial_ev: f64, e_final_ev: f6
 
 /// Calculates the moderating ratio (ξ Σ_s / Σ_a).
 ///
-/// A higher moderating ratio means better moderator performance.
-/// Typical values: H₂O ≈ 72, D₂O ≈ 5670, graphite ≈ 192.
+/// A higher moderating ratio means better moderator performance. The value
+/// depends on the energy range over which Σ_s and Σ_a are averaged, so it is
+/// computed from caller-supplied macroscopic cross sections.
 ///
 /// Parameters:
 /// - `lethargy_gain`: ξ value
@@ -568,151 +627,153 @@ pub fn moderating_ratio(lethargy_gain: f64, scatter_xs: f64, absorb_xs: f64) -> 
 pub struct FissionYield {
     /// Mass number A of the fission product.
     pub mass_number: u32,
-    /// Cumulative fission yield (fraction per fission).
+    /// Chain fission yield (fraction per fission).
     pub yield_fraction: f64,
 }
 
 /// Returns thermal neutron fission yield distribution for U-235.
 ///
-/// These are cumulative yields at key mass numbers showing the
-/// characteristic double-humped distribution.
+/// Chain yields (the largest cumulative yield in each mass chain) at key mass
+/// numbers, showing the characteristic double-humped distribution.
 ///
-/// Source: ENDF/B-VIII.0 fission yield data.
+/// Source: ENDF/B-VIII.0 neutron fission product yields (MT = 459), E = 0.0253 eV.
 #[must_use]
 pub fn u235_fission_yields() -> alloc::vec::Vec<FissionYield> {
     alloc::vec![
         FissionYield {
             mass_number: 85,
-            yield_fraction: 0.0131
+            yield_fraction: 0.013_186_2
         },
         FissionYield {
             mass_number: 90,
-            yield_fraction: 0.0580
+            yield_fraction: 0.057_819_4
         },
         FissionYield {
             mass_number: 95,
-            yield_fraction: 0.0650
+            yield_fraction: 0.065_028_7
         },
         FissionYield {
             mass_number: 99,
-            yield_fraction: 0.0611
+            yield_fraction: 0.061_087_3
         },
         FissionYield {
             mass_number: 101,
-            yield_fraction: 0.0514
+            yield_fraction: 0.051_725_5
         },
         FissionYield {
             mass_number: 105,
-            yield_fraction: 0.0093
+            yield_fraction: 0.009_641_6
         },
         FissionYield {
             mass_number: 110,
-            yield_fraction: 0.0002
+            yield_fraction: 0.000_254_432
         },
         FissionYield {
             mass_number: 115,
-            yield_fraction: 0.0001
+            yield_fraction: 0.000_125_831
         },
         FissionYield {
             mass_number: 120,
-            yield_fraction: 0.0001
+            yield_fraction: 0.000_126_081
         },
         FissionYield {
             mass_number: 131,
-            yield_fraction: 0.0290
+            yield_fraction: 0.028_906_9
         },
         FissionYield {
             mass_number: 133,
-            yield_fraction: 0.0670
+            yield_fraction: 0.066_990_9
         },
         FissionYield {
             mass_number: 135,
-            yield_fraction: 0.0650
+            yield_fraction: 0.065_389_9
         },
         FissionYield {
             mass_number: 137,
-            yield_fraction: 0.0630
+            yield_fraction: 0.061_885_1
         },
         FissionYield {
             mass_number: 140,
-            yield_fraction: 0.0620
+            yield_fraction: 0.062_196_9
         },
         FissionYield {
             mass_number: 144,
-            yield_fraction: 0.0540
+            yield_fraction: 0.054_995_7
         },
         FissionYield {
             mass_number: 147,
-            yield_fraction: 0.0224
+            yield_fraction: 0.022_467_3
         },
         FissionYield {
             mass_number: 151,
-            yield_fraction: 0.0042
+            yield_fraction: 0.004_187_67
         },
         FissionYield {
             mass_number: 155,
-            yield_fraction: 0.0003
+            yield_fraction: 0.000_321_357
         },
     ]
 }
 
 /// Returns thermal neutron fission yield distribution for Pu-239.
 ///
-/// Source: ENDF/B-VIII.0 fission yield data.
+/// Chain yields (the largest cumulative yield in each mass chain).
+///
+/// Source: ENDF/B-VIII.0 neutron fission product yields (MT = 459), E = 0.0253 eV.
 #[must_use]
 pub fn pu239_fission_yields() -> alloc::vec::Vec<FissionYield> {
     alloc::vec![
         FissionYield {
             mass_number: 85,
-            yield_fraction: 0.0054
+            yield_fraction: 0.005_740_61
         },
         FissionYield {
             mass_number: 90,
-            yield_fraction: 0.0211
+            yield_fraction: 0.021_042_7
         },
         FissionYield {
             mass_number: 95,
-            yield_fraction: 0.0484
+            yield_fraction: 0.048_184_5
         },
         FissionYield {
             mass_number: 99,
-            yield_fraction: 0.0620
+            yield_fraction: 0.062_117_2
         },
         FissionYield {
             mass_number: 103,
-            yield_fraction: 0.0700
+            yield_fraction: 0.069_948_1
         },
         FissionYield {
             mass_number: 106,
-            yield_fraction: 0.0425
+            yield_fraction: 0.043_501_6
         },
         FissionYield {
             mass_number: 110,
-            yield_fraction: 0.0040
+            yield_fraction: 0.006_451_24
         },
         FissionYield {
             mass_number: 131,
-            yield_fraction: 0.0385
+            yield_fraction: 0.038_563_9
         },
         FissionYield {
             mass_number: 134,
-            yield_fraction: 0.0708
+            yield_fraction: 0.076_761_2
         },
         FissionYield {
             mass_number: 137,
-            yield_fraction: 0.0666
+            yield_fraction: 0.066_137_6
         },
         FissionYield {
             mass_number: 140,
-            yield_fraction: 0.0538
+            yield_fraction: 0.053_647_2
         },
         FissionYield {
             mass_number: 144,
-            yield_fraction: 0.0375
+            yield_fraction: 0.037_397_4
         },
         FissionYield {
             mass_number: 147,
-            yield_fraction: 0.0210
+            yield_fraction: 0.020_029_6
         },
     ]
 }
@@ -725,30 +786,36 @@ mod tests {
     fn dt_fusion_q_value() {
         let rxn = dt_fusion();
         assert!(
-            (rxn.q_value_mev - 17.6).abs() < 0.1,
+            (rxn.q_value_mev - 17.5893).abs() < 1e-9,
             "DT Q={} MeV",
             rxn.q_value_mev
         );
+        assert_eq!(rxn.baryon_number_change(), 0);
+        assert_eq!(rxn.nuclear_charge_change(), 0);
     }
 
     #[test]
     fn dd_fusion_q_value() {
         let rxn = dd_fusion_he3();
         assert!(
-            (rxn.q_value_mev - 3.27).abs() < 0.1,
+            (rxn.q_value_mev - 3.2689).abs() < 1e-9,
             "DD Q={} MeV",
             rxn.q_value_mev
         );
+        assert_eq!(rxn.baryon_number_change(), 0);
     }
 
     #[test]
     fn u235_fission_q_value() {
         let rxn = u235_fission();
+        // AME2020: n + U-235 -> Ba-141 + Kr-92 + 3n.
         assert!(
-            (rxn.q_value_mev - 200.0).abs() < 10.0,
+            (rxn.q_value_mev - 173.28).abs() < 1e-9,
             "U-235 fission Q={} MeV",
             rxn.q_value_mev
         );
+        assert_eq!(rxn.baryon_number_change(), 0);
+        assert_eq!(rxn.nuclear_charge_change(), 0);
     }
 
     #[test]
@@ -783,17 +850,18 @@ mod tests {
     fn pp_chain_q_value() {
         let rxn = pp_chain_step1();
         assert!(
-            (rxn.q_value_mev - 0.42).abs() < 0.05,
+            (rxn.q_value_mev - 0.4202).abs() < 1e-9,
             "pp chain Q={} MeV",
             rxn.q_value_mev
         );
+        assert_eq!(rxn.nuclear_charge_change(), -1);
     }
 
     #[test]
     fn triple_alpha_q_value() {
         let rxn = triple_alpha();
         assert!(
-            (rxn.q_value_mev - 7.275).abs() < 0.1,
+            (rxn.q_value_mev - 7.2747).abs() < 1e-9,
             "Triple-alpha Q={} MeV",
             rxn.q_value_mev
         );
@@ -812,19 +880,19 @@ mod tests {
     fn cno_cycle_q_value() {
         let rxn = cno_cycle();
         assert!(
-            (rxn.q_value_mev - 25.03).abs() < 0.5,
+            (rxn.q_value_mev - 26.731).abs() < 1e-9,
             "CNO Q={} MeV",
             rxn.q_value_mev
         );
+        assert!((rxn.q_value_mev - CNO_NEUTRINO_LOSS_MEV - 25.027).abs() < 1e-9);
     }
 
     #[test]
     fn coulomb_constant_consistency() {
         use crate::constants::{COULOMB_MEV_FM, FINE_STRUCTURE};
-        let hbar_c = 197.326_980_4;
-        let expected = FINE_STRUCTURE * hbar_c;
+        let expected = FINE_STRUCTURE * HBAR_C_MEV_FM;
         let rel_err = (COULOMB_MEV_FM - expected).abs() / expected;
-        assert!(rel_err < 1e-5);
+        assert!(rel_err < 1e-9, "rel_err={rel_err}");
     }
 
     // --- Cross-section tests ---
@@ -856,7 +924,7 @@ mod tests {
             .find(|x| x.target == Nucleus::uranium_235())
             .unwrap();
         assert!(
-            (u235.fission_barns - 585.0).abs() < 5.0,
+            (u235.fission_barns - 586.787).abs() < 1e-9,
             "U-235 σ_f={} b",
             u235.fission_barns
         );
@@ -1021,6 +1089,38 @@ mod tests {
     }
 
     #[test]
+    fn hydrogen_thermal_scattering_is_free_atom() {
+        let xs = thermal_neutron_cross_sections();
+        let h = xs
+            .iter()
+            .find(|x| x.target == Nucleus::hydrogen_1())
+            .unwrap();
+        // ENDF/B-VIII.0 free-atom elastic, not the 82.02 b bound value.
+        assert!((h.scattering_barns - 20.4361).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fission_yields_match_endf_chain_yields() {
+        let u = u235_fission_yields();
+        let y137 = u.iter().find(|y| y.mass_number == 137).unwrap();
+        assert!((y137.yield_fraction - 0.061_885_1).abs() < 1e-12);
+        let p = pu239_fission_yields();
+        let y110 = p.iter().find(|y| y.mass_number == 110).unwrap();
+        assert!((y110.yield_fraction - 0.006_451_24).abs() < 1e-12);
+    }
+
+    #[test]
+    fn r_process_third_peak_is_stable_pt195() {
+        let pathway = r_process_main();
+        assert!(
+            pathway
+                .steps
+                .iter()
+                .any(|s| s.nucleus.z() == 78 && s.nucleus.a() == 195)
+        );
+    }
+
+    #[test]
     fn thermal_cross_sections_all_positive() {
         for xs in &thermal_neutron_cross_sections() {
             assert!(xs.absorption_barns >= 0.0);
@@ -1034,13 +1134,26 @@ mod tests {
     #[test]
     fn resonance_integral_u235() {
         let ri = resonance_integral_barns(92, 235).unwrap();
-        assert!((ri - 275.0).abs() < 1.0, "U-235 resonance integral={ri} b");
+        assert!(
+            (ri - 143.0).abs() < 1e-9,
+            "U-235 capture resonance integral={ri} b"
+        );
+        let rif = fission_resonance_integral_barns(92, 235).unwrap();
+        assert!(
+            (rif - 280.2).abs() < 1e-9,
+            "U-235 fission resonance integral={rif} b"
+        );
     }
 
     #[test]
     fn resonance_integral_b10_large() {
-        let ri = resonance_integral_barns(5, 10).unwrap();
-        assert!(ri > 1000.0, "B-10 resonance integral should be large");
+        // B-10 absorbs by (n,α); its capture (n,γ) integral is small.
+        let ri = n_alpha_resonance_integral_barns(5, 10).unwrap();
+        assert!(
+            (ri - 1725.6).abs() < 1e-9,
+            "B-10 (n,a) resonance integral={ri}"
+        );
+        assert!(resonance_integral_barns(5, 10).unwrap() < 1.0);
     }
 
     #[test]
@@ -1056,7 +1169,7 @@ mod tests {
 
     #[test]
     fn resonance_integral_all_positive() {
-        for &(z, a, _) in RESONANCE_INTEGRALS {
+        for &(z, a, _, _, _) in RESONANCE_INTEGRALS {
             let ri = resonance_integral_barns(z, a).unwrap();
             assert!(
                 ri >= 0.0,
@@ -1069,6 +1182,9 @@ mod tests {
     fn resonance_integral_cs133_large() {
         // Cs-133 has a very large resonance integral
         let ri = resonance_integral_barns(55, 133).unwrap();
-        assert!((ri - 429.0).abs() < 1.0, "Cs-133 resonance integral={ri} b");
+        assert!(
+            (ri - 405.4).abs() < 1e-9,
+            "Cs-133 resonance integral={ri} b"
+        );
     }
 }

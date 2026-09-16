@@ -20,20 +20,24 @@ fn he4_binding_energy() {
 
 #[test]
 fn hydrogen_h_alpha() {
+    // Infinite nuclear mass (R∞): 656.112 nm; with the proton reduced mass: 656.470 nm (vacuum).
     let lambda = spectral_line_nm(1, 2, 3).unwrap();
+    assert!((lambda - 656.1123).abs() < 1e-3, "H-alpha = {lambda} nm");
+    let vacuum = tanmatra::atomic::spectral_line_vacuum_nm(1, 1, 2, 3).unwrap();
     assert!(
-        (lambda - 656.3).abs() < 1.0,
-        "H-alpha = {lambda} nm, expected ~656.3 nm"
+        (vacuum - 656.4696).abs() < 1e-3,
+        "H-alpha (reduced mass) = {vacuum} nm"
     );
 }
 
 #[test]
-fn c14_half_life_5730_years() {
+fn c14_half_life_5700_years() {
+    // NUBASE2020: 5.70(3) ky, 1 y = 365.2422 d.
     let isotopes = known_isotopes();
     let c14 = isotopes.iter().find(|i| i.name == "C-14").unwrap();
-    let years = c14.half_life_seconds / (365.25 * 24.0 * 3600.0);
+    let years = c14.half_life_seconds / (365.2422 * 24.0 * 3600.0);
     assert!(
-        (years - 5730.0).abs() < 1.0,
+        (years - 5700.0).abs() < 1e-9,
         "C-14 half-life = {years} years"
     );
 }

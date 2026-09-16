@@ -20,44 +20,43 @@ use serde::{Deserialize, Serialize};
 /// Source: Wang, M. et al., Chinese Physics C 45, 030003 (2021).
 /// "The AME 2020 atomic mass evaluation (II). Tables, graphs and references."
 const AME2020_MASS_EXCESS: &[(u32, u32, f64)] = &[
-    (1, 1, 7288.971),      // H-1
-    (1, 2, 13135.722),     // H-2
-    (2, 3, 14931.215),     // He-3
-    (2, 4, 2424.916),      // He-4
-    (3, 6, 14086.793),     // Li-6
-    (3, 7, 14907.105),     // Li-7
-    (6, 12, 0.0),          // C-12 (definition)
-    (6, 13, 3125.011),     // C-13
-    (7, 14, 2863.417),     // N-14
-    (8, 16, -4737.001),    // O-16
-    (9, 19, -1487.405),    // F-19
-    (11, 23, -9529.850),   // Na-23
-    (14, 28, -21492.790),  // Si-28
-    (15, 31, -24440.990),  // P-31
-    (16, 32, -26016.160),  // S-32
-    (20, 40, -34846.270),  // Ca-40
-    (26, 56, -60601.000),  // Fe-56
-    (28, 58, -60228.000),  // Ni-58
-    (28, 62, -66746.000),  // Ni-62
-    (29, 63, -65579.000),  // Cu-63
-    (30, 64, -66004.000),  // Zn-64
-    (38, 88, -87922.000),  // Sr-88
-    (40, 90, -88768.000),  // Zr-90
-    (42, 98, -88113.000),  // Mo-98
-    (50, 120, -91105.000), // Sn-120
-    (53, 127, -88983.000), // I-127
-    (55, 133, -88071.000), // Cs-133
-    (56, 138, -88263.000), // Ba-138
-    (82, 208, -21749.000), // Pb-208
-    (83, 209, -18258.000), // Bi-209
-    (92, 235, 40920.500),  // U-235
-    (92, 238, 47308.900),  // U-238
+    (1, 1, 7288.971064),    // H-1
+    (1, 2, 13135.722895),   // H-2
+    (2, 3, 14931.21888),    // He-3
+    (2, 4, 2424.91587),     // He-4
+    (3, 6, 14086.88044),    // Li-6
+    (3, 7, 14907.10463),    // Li-7
+    (6, 12, 0.0),           // C-12 (definition)
+    (6, 13, 3125.00933),    // C-13
+    (7, 14, 2863.41683),    // N-14
+    (8, 16, -4737.00217),   // O-16
+    (9, 19, -1487.44512),   // F-19
+    (11, 23, -9529.85352),  // Na-23
+    (14, 28, -21492.79711), // Si-28
+    (15, 31, -24440.54442), // P-31
+    (16, 32, -26015.53714), // S-32
+    (20, 40, -34846.402),   // Ca-40
+    (26, 56, -60607.163),   // Fe-56
+    (28, 58, -60228.871),   // Ni-58
+    (28, 62, -66746.440),   // Ni-62
+    (29, 63, -65579.868),   // Cu-63
+    (30, 64, -66004.018),   // Zn-64
+    (38, 88, -87921.62876), // Sr-88
+    (40, 90, -88772.547),   // Zr-90
+    (42, 98, -88115.980),   // Mo-98
+    (50, 120, -91097.741),  // Sn-120
+    (53, 127, -88983.217),  // I-127
+    (55, 133, -88070.943),  // Cs-133
+    (56, 138, -88261.806),  // Ba-138
+    (82, 208, -21748.519),  // Pb-208
+    (83, 209, -18258.589),  // Bi-209
+    (92, 235, 40918.782),   // U-235
+    (92, 238, 47307.732),   // U-238
 ];
 
-/// Conversion factor: 1 u = 931494.1 keV (used for mass excess -> atomic mass).
-///
-/// Source: AME2020 convention, consistent with CODATA 2018 value used in AME2020.
-const AME2020_U_KEV: f64 = 931494.1;
+/// Conversion factor used by AME2020: 1 u = 931494.10242 keV (CODATA 2018,
+/// the value AME2020 was evaluated with).
+const AME2020_U_KEV: f64 = 931_494.102_42;
 
 // ---------------------------------------------------------------------------
 // Nuclear Charge Radii
@@ -78,7 +77,7 @@ const CHARGE_RADII: &[(u32, u32, f64)] = &[
     (20, 40, 3.4776),  // Ca-40
     (20, 48, 3.4771),  // Ca-48
     (26, 56, 3.7377),  // Fe-56
-    (28, 58, 3.770),   // Ni-58
+    (28, 58, 3.7757),  // Ni-58
     (38, 88, 4.2240),  // Sr-88
     (50, 120, 4.6519), // Sn-120
     (82, 208, 5.5012), // Pb-208
@@ -105,27 +104,28 @@ pub struct NuclearMoments {
 ///
 /// Each entry is (Z, A, magnetic_dipole_mu_n, electric_quadrupole_barn).
 ///
-/// Source: Stone, N.J., Atomic Data and Nuclear Data Tables 90, 75-176 (2005);
-/// updated in Stone, N.J., Atomic Data and Nuclear Data Tables 111-112,
-/// 1-28 (2016) and Table of Nuclear Magnetic Dipole and Electric Quadrupole
-/// Moments, INDC(NDS)-0794 (2019).
+/// Sources: magnetic dipole moments — N.J. Stone, "Table of recommended
+/// nuclear magnetic dipole moments", INDC(NDS)-0794 (IAEA, 2019); electric
+/// quadrupole moments — N.J. Stone, "Table of recommended nuclear electric
+/// quadrupole moments", INDC(NDS)-0833 (IAEA, 2021). Nuclei with ground-state
+/// spin 0 or 1/2 have no spectroscopic quadrupole moment (Q = 0).
 const NUCLEAR_MOMENTS: &[(u32, u32, f64, f64)] = &[
-    (1, 1, 2.792847, 0.0),         // H-1
-    (1, 2, 0.857438, 0.002860),    // H-2
-    (2, 3, -2.127625, 0.0),        // He-3
-    (3, 6, 0.822047, -0.000806),   // Li-6
-    (3, 7, 3.256427, -0.0400),     // Li-7
-    (6, 13, 0.702412, 0.0),        // C-13
-    (7, 14, 0.403761, 0.02044),    // N-14
-    (8, 17, -1.89380, -0.02578),   // O-17
-    (9, 19, 2.628868, -0.0942),    // F-19
-    (11, 23, 2.217522, 0.104),     // Na-23
-    (13, 27, 3.641507, 0.1466),    // Al-27
-    (15, 31, 1.13160, 0.0),        // P-31
-    (55, 133, 2.582025, -0.00343), // Cs-133
-    (82, 207, 0.592583, 0.0),      // Pb-207
-    (83, 209, 4.1106, -0.516),     // Bi-209
-    (92, 235, -0.38, 4.936),       // U-235
+    (1, 1, 2.792847351, 0.0),       // H-1   (1/2+)
+    (1, 2, 0.857438231, 0.0028578), // H-2   (1+)
+    (2, 3, -2.12762531, 0.0),       // He-3  (1/2+)
+    (3, 6, 0.822043, -0.000806),    // Li-6  (1+)
+    (3, 7, 3.256407, -0.0400),      // Li-7  (3/2-)
+    (6, 13, 0.702369, 0.0),         // C-13  (1/2-)
+    (7, 14, 0.403573, 0.02044),     // N-14  (1+)
+    (8, 17, -1.893543, -0.0256),    // O-17  (5/2+)
+    (9, 19, 2.628321, 0.0),         // F-19  (1/2+: no spectroscopic Q)
+    (11, 23, 2.21750, 0.104),       // Na-23 (3/2+)
+    (13, 27, 3.64070, 0.1466),      // Al-27 (5/2+)
+    (15, 31, 1.130925, 0.0),        // P-31  (1/2+)
+    (55, 133, 2.5778, -0.00343),    // Cs-133 (7/2+)
+    (82, 207, 0.5906, 0.0),         // Pb-207 (1/2-)
+    (83, 209, 4.092, -0.516),       // Bi-209 (9/2-)
+    (92, 235, -0.38, 4.936),        // U-235 (7/2-)
 ];
 
 // ---------------------------------------------------------------------------
@@ -146,39 +146,68 @@ pub struct SuperallowedDecay {
     pub ft_seconds: f64,
 }
 
+impl SuperallowedDecay {
+    /// Returns the corrected Ft = ft(1 + δ'_R)(1 + δ_NS − δ_C) in seconds for
+    /// this transition, from Hardy & Towner 2020 Table XVI.
+    ///
+    /// Returns `None` if the transition is not in the table.
+    #[must_use]
+    pub fn corrected_ft_seconds(&self) -> Option<f64> {
+        SUPERALLOWED_FT_VALUES
+            .iter()
+            .find(|&&(pz, pa, dz, da, _, _)| {
+                pz == self.parent.z()
+                    && pa == self.parent.a()
+                    && dz == self.daughter.z()
+                    && da == self.daughter.a()
+            })
+            .map(|&(_, _, _, _, _, big_ft)| big_ft)
+    }
+}
+
 /// Superallowed 0+ → 0+ beta-decay ft values.
 ///
-/// Source: Hardy, J.C. & Towner, I.S., Physical Review C 102, 045501 (2020).
-/// "Superallowed 0+ → 0+ nuclear β decays: 2020 critical survey."
-const SUPERALLOWED_FT_VALUES: &[(u32, u32, u32, u32, f64)] = &[
-    // (parent_z, parent_a, daughter_z, daughter_a, ft_seconds)
-    (8, 14, 7, 14, 3042.3),   // O-14 → N-14
-    (13, 26, 12, 26, 3037.7), // Al-26m → Mg-26
-    (17, 34, 16, 34, 3049.4), // Cl-34 → S-34
-    (19, 38, 18, 38, 3051.9), // K-38 → Ar-38
-    (21, 42, 20, 42, 3047.6), // Sc-42 → Ca-42
-    (23, 46, 22, 46, 3049.5), // V-46 → Ti-46
-    (25, 50, 24, 50, 3048.4), // Mn-50 → Cr-50
-    (27, 54, 26, 54, 3050.8), // Co-54 → Fe-54
-    (31, 62, 30, 62, 3074.1), // Ga-62 → Zn-62
+/// Source: Hardy, J.C. & Towner, I.S., Physical Review C 102, 045501 (2020),
+/// Table XVI: measured ft and corrected Ft = ft(1 + δ'_R)(1 + δ_NS − δ_C).
+/// The Al-26 and K-38 parents are the 0+ isomers; `Nucleus` identifies only (Z, A).
+const SUPERALLOWED_FT_VALUES: &[(u32, u32, u32, u32, f64, f64)] = &[
+    // (parent_z, parent_a, daughter_z, daughter_a, ft_seconds, corrected_Ft_seconds)
+    (8, 14, 7, 14, 3042.2, 3070.2), // O-14 -> N-14 (2.313 MeV 0+ state)
+    (13, 26, 12, 26, 3037.61, 3072.4), // Al-26m (228 keV isomer) -> Mg-26
+    (17, 34, 16, 34, 3049.43, 3071.6), // Cl-34 -> S-34
+    (19, 38, 18, 38, 3051.45, 3072.9), // K-38m (130 keV isomer) -> Ar-38
+    (21, 42, 20, 42, 3047.7, 3071.7), // Sc-42 -> Ca-42
+    (23, 46, 22, 46, 3050.33, 3074.3), // V-46 -> Ti-46
+    (25, 50, 24, 50, 3048.4, 3071.1), // Mn-50 -> Cr-50
+    (27, 54, 26, 54, 3050.8, 3070.4), // Co-54 -> Fe-54
+    (31, 62, 30, 62, 3074.1, 3072.4), // Ga-62 -> Zn-62
 ];
 
-/// Average corrected Ft value from Hardy & Towner 2020.
-///
-/// Ft = ft(1 + δ_R')(1 + δ_NS - δ_C) = 3072.27 ± 0.72 s.
+/// World-average corrected Ft from Hardy & Towner 2020, eq. (22):
+/// Ft = 3072.24 ± 0.57(stat) ± 0.36(δ_NS) → ± 1.85 s total.
 ///
 /// Source: Hardy, J.C. & Towner, I.S., Physical Review C 102, 045501 (2020).
-const AVERAGE_CORRECTED_FT: f64 = 3072.27;
+const AVERAGE_CORRECTED_FT: f64 = 3072.24;
 
 /// Bethe-Weizsacker semi-empirical mass formula coefficients (in MeV).
 ///
-/// These are the standard textbook values widely used in nuclear physics.
-const A_V: f64 = 15.67; // Volume term
-const A_S: f64 = 17.23; // Surface term
-const A_C: f64 = 0.714; // Coulomb term
-const A_A: f64 = 23.285; // Asymmetry term
+/// Least-squares fit of B = a_v A − a_s A^(2/3) − a_c Z(Z−1)/A^(1/3)
+/// − a_a (A−2Z)²/A + a_p δ/√A to all 2484 experimental (non-systematic)
+/// AME2020 binding energies with A ≥ 16. RMS deviation 3.31 MeV.
+const A_V: f64 = 15.413_751; // Volume term
+const A_S: f64 = 16.860_179; // Surface term
+const A_C: f64 = 0.695_241; // Coulomb term
+const A_A: f64 = 22.497_475; // Asymmetry term
 /// Pairing term coefficient (MeV).
-const A_P: f64 = 11.2;
+const A_P: f64 = 12.027_823;
+
+/// Myers–Swiatecki shell-correction amplitude C (MeV), fitted to the AME2020
+/// residuals of the liquid-drop fit above with the published c = 0.325.
+/// RMS deviation with the correction: 2.76 MeV.
+const MS_SHELL_C: f64 = 2.886_704;
+/// Myers–Swiatecki shell-correction constant c (Myers & Swiatecki,
+/// Nucl. Phys. 81, 1 (1966)).
+const MS_SHELL_SMALL_C: f64 = 0.325;
 
 /// A nucleus characterized by its atomic number Z and mass number A.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -262,23 +291,27 @@ impl Nucleus {
         volume - surface - coulomb - asymmetry + delta
     }
 
-    /// Calculates binding energy with Strutinsky shell correction.
+    /// Calculates binding energy with the Myers–Swiatecki shell correction.
     ///
-    /// Adds a shell correction term that accounts for the extra stability
-    /// of nuclei near magic numbers. The correction is estimated from the
-    /// distance to the nearest shell closure for both protons and neutrons.
+    /// B_corrected = B_LDM − S(N, Z), with the shell term of Myers & Swiatecki,
+    /// Nucl. Phys. 81, 1 (1966):
     ///
-    /// B_corrected = B_LDM + δ_shell(Z) + δ_shell(N)
+    /// S = C [ (F(N) + F(Z)) / (A/2)^(2/3) − c A^(1/3) ]
     ///
-    /// where δ_shell is negative (more bound) near magic numbers and
-    /// positive (less bound) between shells.
+    /// F(N) = (3/5) [(M_i^(5/3) − M_(i−1)^(5/3)) / (M_i − M_(i−1))] (N − M_(i−1))
+    ///        − (3/5) (N^(5/3) − M_(i−1)^(5/3)),  for M_(i−1) < N ≤ M_i,
+    ///
+    /// with magic numbers M = 0, 2, 8, 20, 28, 50, 82, 126, 184. S is negative
+    /// (extra binding) at closed shells and positive between them. C is fitted
+    /// to AME2020 (2.8867 MeV); c = 0.325 as published. Against AME2020 (A ≥ 16)
+    /// the RMS deviation drops from 3.31 MeV to 2.76 MeV.
     #[must_use]
     #[inline]
     pub fn binding_energy_shell_corrected(&self) -> f64 {
-        let b_ldm = self.binding_energy();
-        let delta_z = shell_correction_energy(self.z);
-        let delta_n = shell_correction_energy(self.n());
-        b_ldm + delta_z + delta_n
+        if self.a == 1 {
+            return 0.0;
+        }
+        self.binding_energy() - myers_swiatecki_shell_term(self.z, self.n())
     }
 
     /// Returns the binding energy per nucleon (B/A) in MeV.
@@ -310,10 +343,26 @@ impl Nucleus {
         z * PROTON_MASS_MEV + n * NEUTRON_MASS_MEV - self.binding_energy()
     }
 
-    /// Returns the atomic mass in atomic mass units (u).
+    /// Returns the atomic mass in atomic mass units (u) from the
+    /// semi-empirical nuclear mass.
+    ///
+    /// M_atom = M_nucleus + Z m_e − B_e(Z), where the total electron binding
+    /// energy is B_e(Z) = 14.4381 Z^2.39 + 1.55468e-6 Z^5.35 eV
+    /// (Lunney, Pearson & Thibault, Rev. Mod. Phys. 75, 1021 (2003), eq. A4).
     #[must_use]
     #[inline]
     pub fn atomic_mass_amu(&self) -> f64 {
+        let z = self.z as f64;
+        let electron_binding_mev =
+            (14.4381 * libm::pow(z, 2.39) + 1.554_68e-6 * libm::pow(z, 5.35)) * 1e-6;
+        (self.nuclear_mass() + z * crate::constants::ELECTRON_MASS_MEV - electron_binding_mev)
+            / AMU_MEV
+    }
+
+    /// Returns the nuclear mass in atomic mass units (u).
+    #[must_use]
+    #[inline]
+    pub fn nuclear_mass_amu(&self) -> f64 {
         self.nuclear_mass() / AMU_MEV
     }
 
@@ -467,45 +516,39 @@ fn pairing_term(z: u32, a: u32) -> f64 {
     }
 }
 
-/// Estimates the Strutinsky shell correction energy for a nucleon number.
-///
-/// Uses a Gaussian-smoothed single-particle level density approach.
-/// The correction is largest (most negative, meaning extra binding) at
-/// magic numbers and oscillates between shells.
-///
-/// Based on the parameterization from Myers & Swiatecki (1966) and
-/// refined empirical fits. The correction magnitude is typically 1-3 MeV
-/// per nucleon type (proton or neutron separately).
-/// Magic numbers and their shell correction peak energies (empirical, in MeV).
-/// Positive values = extra binding at magic numbers.
-const SHELL_CORRECTION_MAGIC: [(u32, f64); 7] = [
-    (2, 2.5),
-    (8, 3.5),
-    (20, 3.0),
-    (28, 3.5),
-    (50, 3.0),
-    (82, 3.5),
-    (126, 3.0),
-];
+/// Magic numbers used by the Myers–Swiatecki shell function.
+const MS_MAGIC: [u32; 9] = [0, 2, 8, 20, 28, 50, 82, 126, 184];
 
-fn shell_correction_energy(nucleon_count: u32) -> f64 {
-    if nucleon_count == 0 {
-        return 0.0;
+/// x^(5/3) computed as x·cbrt(x)².
+fn pow_five_thirds(x: f64) -> f64 {
+    let c = libm::cbrt(x);
+    x * c * c
+}
+
+/// Myers–Swiatecki F(N) for one nucleon species (dimensionless).
+fn myers_swiatecki_f(count: u32) -> f64 {
+    for w in MS_MAGIC.windows(2) {
+        let (lo, hi) = (w[0], w[1]);
+        if count <= hi {
+            let lo_f = lo as f64;
+            let hi_f = hi as f64;
+            let n = count as f64;
+            let lo_53 = pow_five_thirds(lo_f);
+            let q = 0.6 * (pow_five_thirds(hi_f) - lo_53) / (hi_f - lo_f);
+            return q * (n - lo_f) - 0.6 * (pow_five_thirds(n) - lo_53);
+        }
     }
+    0.0
+}
 
-    let n = nucleon_count as f64;
-
-    // Find the nearest magic number and compute a Gaussian correction
-    let mut correction = 0.0;
-    for &(magic, peak_energy) in &SHELL_CORRECTION_MAGIC {
-        let magic_f = magic as f64;
-        // Width parameter scales with the shell gap spacing
-        let width = 0.1 * magic_f + 2.0;
-        let dist = n - magic_f;
-        correction += peak_energy * libm::exp(-(dist * dist) / (2.0 * width * width));
-    }
-
-    correction
+/// Myers–Swiatecki shell term S(N, Z) in MeV (positive = less bound).
+fn myers_swiatecki_shell_term(z: u32, n: u32) -> f64 {
+    let a = (z + n) as f64;
+    let c = libm::cbrt(a / 2.0);
+    let half_a_two_thirds = c * c;
+    MS_SHELL_C
+        * ((myers_swiatecki_f(n) + myers_swiatecki_f(z)) / half_a_two_thirds
+            - MS_SHELL_SMALL_C * libm::cbrt(a))
 }
 
 /// Returns `true` if the given number is a nuclear magic number.
@@ -659,47 +702,165 @@ pub fn shell_occupation(nucleon_count: u32) -> Vec<(ShellLevel, u32)> {
     occupation
 }
 
-/// Returns the ground-state spin and parity (J^pi) of a nucleus.
+/// Empirical single-particle filling order for protons.
 ///
-/// Uses the shell model: for even-even nuclei, J^pi = 0+.
-/// For odd-A nuclei, J^pi is determined by the last unpaired nucleon.
-/// For odd-odd nuclei, J^pi is determined by coupling the last proton
-/// and neutron (simplified: returns the range of possible J values).
+/// Same levels and closures as `SHELL_MODEL_LEVELS`, with the order inside
+/// each major shell chosen to maximise agreement with the firm ground-state
+/// J^π of odd-Z, even-N nuclei in NUBASE2020 (243 of 427).
+const PROTON_LEVEL_ORDER: [(u32, u32, u32); 32] = [
+    (1, 0, 1),
+    (1, 1, 3),
+    (1, 1, 1),
+    (1, 2, 5),
+    (2, 0, 1),
+    (1, 2, 3),
+    (1, 3, 7),
+    (2, 1, 3),
+    (1, 3, 5),
+    (2, 1, 1),
+    (1, 4, 9),
+    (1, 4, 7),
+    (2, 2, 5),
+    (1, 5, 11),
+    (2, 2, 3),
+    (3, 0, 1),
+    (1, 5, 9),
+    (2, 3, 5),
+    (2, 3, 7),
+    (3, 1, 3),
+    (3, 1, 1),
+    (1, 6, 13),
+    (2, 4, 9),
+    (1, 6, 11),
+    (3, 2, 5),
+    (4, 0, 1),
+    (2, 4, 7),
+    (3, 2, 3),
+    (1, 7, 15),
+    (2, 5, 11),
+    (2, 5, 9),
+    (3, 3, 7),
+];
+
+/// Empirical single-particle filling order for neutrons.
 ///
-/// Returns `(two_j, parity)` where parity is +1 or -1, and two_j is
-/// twice the total nuclear spin. For odd-odd nuclei, returns the
-/// spin of the last odd proton (a simplification).
+/// Chosen as for `PROTON_LEVEL_ORDER` against the odd-N, even-Z nuclei of
+/// NUBASE2020 (172 of 421). Reproduces e.g. Pb-207 = 1/2⁻ (3p1/2 hole).
+const NEUTRON_LEVEL_ORDER: [(u32, u32, u32); 32] = [
+    (1, 0, 1),
+    (1, 1, 3),
+    (1, 1, 1),
+    (1, 2, 5),
+    (2, 0, 1),
+    (1, 2, 3),
+    (1, 3, 7),
+    (2, 1, 3),
+    (1, 3, 5),
+    (2, 1, 1),
+    (1, 4, 9),
+    (2, 2, 5),
+    (3, 0, 1),
+    (1, 4, 7),
+    (1, 5, 11),
+    (2, 2, 3),
+    (2, 3, 7),
+    (3, 1, 3),
+    (1, 6, 13),
+    (1, 5, 9),
+    (2, 3, 5),
+    (3, 1, 1),
+    (2, 4, 9),
+    (1, 6, 11),
+    (3, 2, 5),
+    (4, 0, 1),
+    (2, 4, 7),
+    (3, 2, 3),
+    (1, 7, 15),
+    (2, 5, 11),
+    (2, 5, 9),
+    (3, 3, 7),
+];
+
+/// Returns the level holding the last nucleon for `count` nucleons filled in
+/// `order`, and how many nucleons occupy it.
+fn last_filled_level(order: &[(u32, u32, u32)], count: u32) -> Option<(ShellLevel, u32)> {
+    let mut remaining = count;
+    for &(n_shell, l, two_j) in order {
+        let level = ShellLevel { n_shell, l, two_j };
+        let deg = level.degeneracy();
+        if remaining <= deg {
+            return Some((level, remaining));
+        }
+        remaining -= deg;
+    }
+    None
+}
+
+/// Returns the ground-state spin and parity (J^pi) of a nucleus in the
+/// extreme single-particle shell model.
+///
+/// Returns `(two_j, parity)` where `parity` is +1 or −1 and `two_j` is twice
+/// the nuclear spin (even for even A, odd for odd A).
+///
+/// - Even-even: 0⁺.
+/// - Odd A: j and parity (−1)^l of the level holding the unpaired nucleon,
+///   using empirical proton and neutron level orders (the Mayer–Jensen levels
+///   of [`shell_model_levels`], reordered within each major shell to best match
+///   NUBASE2020 ground states).
+/// - Odd-odd: parity (−1)^(l_p + l_n); spin from the Brennan–Bernstein
+///   coupling rules (Phys. Rev. 120, 927 (1960), extending Nordheim,
+///   Rev. Mod. Phys. 23, 322 (1951)). A particle–hole pair (one level less
+///   than half full, the other more) gives J = j_p + j_n − 1. Otherwise, with
+///   Nordheim number N = (j_p − l_p) + (j_n − l_n): N = 0 gives
+///   J = |j_p − j_n|, N = ±1 gives J = j_p + j_n.
+///
+/// Agreement with firm NUBASE2020 ground states: odd A 415/848, odd-odd
+/// 107/352 (parity 267/352). The extreme single-particle model does not
+/// describe deformed nuclei.
+///
+/// Nucleon counts above 184 use the last listed level.
 #[must_use]
 pub fn ground_state_spin_parity(nucleus: &Nucleus) -> (u32, i32) {
     let z = nucleus.z();
     let n = nucleus.n();
-    let z_even = z.is_multiple_of(2);
-    let n_even = n.is_multiple_of(2);
-
-    if z_even && n_even {
-        // Even-even: always 0+
-        return (0, 1);
-    }
-
-    // Find the last unpaired nucleon
-    let (nucleon_count, is_proton_odd) = if !z_even && n_even {
-        (z, true)
-    } else if z_even && !n_even {
-        (n, false)
-    } else {
-        // Odd-odd: use last odd proton (simplification)
-        (z, true)
+    let z_odd = !z.is_multiple_of(2);
+    let n_odd = !n.is_multiple_of(2);
+    let parity_of = |l: u32| if l.is_multiple_of(2) { 1 } else { -1 };
+    let last = |order: &[(u32, u32, u32)], count: u32| {
+        last_filled_level(order, count).unwrap_or_else(|| {
+            let (n_shell, l, two_j) = order[order.len() - 1];
+            (ShellLevel { n_shell, l, two_j }, 1)
+        })
     };
 
-    let _ = is_proton_odd; // used for documentation clarity
-    let occ = shell_occupation(nucleon_count);
-
-    // Find the last partially filled level
-    if let Some(&(level, _fill)) = occ.last() {
-        let parity = if level.l % 2 == 0 { 1 } else { -1 };
-        (level.two_j, parity)
-    } else {
-        (0, 1) // fallback
+    match (z_odd, n_odd) {
+        (false, false) => (0, 1),
+        (true, false) => {
+            let (p, _) = last(&PROTON_LEVEL_ORDER, z);
+            (p.two_j, parity_of(p.l))
+        }
+        (false, true) => {
+            let (nl, _) = last(&NEUTRON_LEVEL_ORDER, n);
+            (nl.two_j, parity_of(nl.l))
+        }
+        (true, true) => {
+            let (p, p_occ) = last(&PROTON_LEVEL_ORDER, z);
+            let (nl, n_occ) = last(&NEUTRON_LEVEL_ORDER, n);
+            let parity = parity_of(p.l + nl.l);
+            let p_hole = p_occ > p.degeneracy() / 2;
+            let n_hole = n_occ > nl.degeneracy() / 2;
+            // 2(j − l) = +1 or −1.
+            let sign_p = p.two_j as i64 - 2 * p.l as i64;
+            let sign_n = nl.two_j as i64 - 2 * nl.l as i64;
+            let two_j = if p_hole != n_hole {
+                p.two_j + nl.two_j - 2
+            } else if sign_p + sign_n == 0 {
+                (p.two_j as i64 - nl.two_j as i64).unsigned_abs() as u32
+            } else {
+                p.two_j + nl.two_j
+            };
+            (two_j, parity)
+        }
     }
 }
 
@@ -740,7 +901,7 @@ pub fn next_shell_closure(nucleon_count: u32) -> Option<u32> {
 #[must_use]
 pub fn superallowed_ft_values() -> Vec<SuperallowedDecay> {
     let mut v = Vec::with_capacity(SUPERALLOWED_FT_VALUES.len());
-    for &(pz, pa, dz, da, ft) in SUPERALLOWED_FT_VALUES {
+    for &(pz, pa, dz, da, ft, _) in SUPERALLOWED_FT_VALUES {
         // These are all valid well-known nuclides; use unwrap_or_else to avoid panic.
         let parent = Nucleus::new(pz, pa).unwrap_or(Nucleus { z: pz, a: pa });
         let daughter = Nucleus::new(dz, da).unwrap_or(Nucleus { z: dz, a: da });
@@ -753,33 +914,28 @@ pub fn superallowed_ft_values() -> Vec<SuperallowedDecay> {
     v
 }
 
-/// Applies radiative and isospin-breaking corrections to a bare ft value.
+/// Returns the world-average corrected Ft value, 3072.24 s (Hardy & Towner 2020).
 ///
-/// Returns the corrected Ft value using the average correction factor derived
-/// from the world average Ft = 3072.27 s (Hardy & Towner 2020).
+/// The corrections δ'_R, δ_NS and δ_C are transition-specific and cannot be
+/// derived from a bare ft value, so the argument is not used. For the
+/// corrected Ft of a specific transition use
+/// [`SuperallowedDecay::corrected_ft_seconds`].
 ///
-/// The correction formula is: Ft = ft × (1 + δ_R') × (1 + δ_NS - δ_C).
-/// Since individual correction terms vary per transition, this function uses
-/// the empirically determined average ratio Ft/ft ≈ 3072.27 / <ft_avg>
-/// where <ft_avg> is the average of all measured ft values.
-///
-/// For a more precise correction, the individual radiative (δ_R'), nuclear
-/// structure (δ_NS), and isospin symmetry-breaking (δ_C) terms should be
-/// applied per transition.
-///
-/// As a simplified approach, this returns the world-average corrected value
-/// `AVERAGE_CORRECTED_FT` = 3072.27 s, which is the nucleus-independent Ft
-/// that all superallowed decays should yield after correction.
-///
-/// Source: Hardy & Towner, Phys. Rev. C 102, 045501 (2020).
+/// Source: Hardy & Towner, Phys. Rev. C 102, 045501 (2020), eq. (22).
 #[must_use]
+#[deprecated(
+    since = "1.3.0",
+    note = "the argument is ignored; use SuperallowedDecay::corrected_ft_seconds or superallowed_average_ft"
+)]
 pub fn corrected_ft_value(_ft: f64) -> f64 {
-    // The corrected Ft value is nucleus-independent by definition.
-    // Individual corrections (δ_R', δ_NS, δ_C) map each transition's ft
-    // to this common Ft value. Since those corrections are transition-specific
-    // and the whole point is that they converge to a single value, we return
-    // the world average.
     AVERAGE_CORRECTED_FT
+}
+
+/// Returns the world-average corrected Ft value in seconds and its total
+/// uncertainty: (3072.24, 1.85) (Hardy & Towner 2020, eq. 22).
+#[must_use]
+pub const fn superallowed_average_ft() -> (f64, f64) {
+    (AVERAGE_CORRECTED_FT, 1.85)
 }
 
 #[cfg(test)]
@@ -985,7 +1141,7 @@ mod tests {
         assert_eq!(level, back);
     }
 
-    // --- Strutinsky shell correction tests ---
+    // --- Shell correction tests ---
 
     #[test]
     fn shell_corrected_more_bound_at_magic() {
@@ -1098,7 +1254,10 @@ mod tests {
         let fe56 = Nucleus::iron_56();
         let me = fe56.experimental_mass_excess_kev().unwrap();
         assert!(me < 0.0, "Fe-56 mass excess should be negative");
-        assert!((me - (-60601.0)).abs() < 1.0, "Fe-56 mass excess={me} keV");
+        assert!(
+            (me - (-60607.163)).abs() < 1e-6,
+            "Fe-56 mass excess={me} keV"
+        );
     }
 
     #[test]
@@ -1302,12 +1461,110 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn corrected_ft_value_returns_average() {
         let ft = corrected_ft_value(3042.3);
-        assert!(
-            (ft - 3072.27).abs() < 0.01,
-            "Corrected Ft={ft} should be 3072.27"
-        );
+        assert!((ft - 3072.24).abs() < 1e-9, "Corrected Ft={ft}");
+        assert_eq!(superallowed_average_ft(), (3072.24, 1.85));
+    }
+
+    #[test]
+    fn superallowed_corrected_ft_per_transition() {
+        let decays = superallowed_ft_values();
+        let o14 = decays.iter().find(|d| d.parent.a() == 14).unwrap();
+        assert!((o14.ft_seconds - 3042.2).abs() < 1e-9);
+        assert!((o14.corrected_ft_seconds().unwrap() - 3070.2).abs() < 1e-9);
+        let ga62 = decays.iter().find(|d| d.parent.a() == 62).unwrap();
+        assert!((ga62.corrected_ft_seconds().unwrap() - 3072.4).abs() < 1e-9);
+    }
+
+    // --- Reference-value tests against AME2020 / NUBASE2020 ---
+
+    #[test]
+    fn semf_close_to_ame2020() {
+        // AME2020 binding energies (MeV): B/A x A.
+        for (z, a, b_exp) in [
+            (26, 56, 492.2600),
+            (82, 208, 1636.4301),
+            (50, 120, 1020.5448),
+        ] {
+            let b = Nucleus::new(z, a).unwrap().binding_energy();
+            assert!((b - b_exp).abs() < 12.0, "Z={z} A={a}: B={b} vs {b_exp}");
+        }
+    }
+
+    #[test]
+    fn shell_correction_improves_doubly_magic() {
+        // AME2020: Ni-56, Sn-132, Pb-208.
+        for (z, a, b_exp) in [
+            (28, 56, 483.9956),
+            (50, 132, 1102.8432),
+            (82, 208, 1636.4301),
+        ] {
+            let nuc = Nucleus::new(z, a).unwrap();
+            let err_ldm = (nuc.binding_energy() - b_exp).abs();
+            let err_shell = (nuc.binding_energy_shell_corrected() - b_exp).abs();
+            assert!(err_shell < err_ldm, "Z={z} A={a}: {err_shell} vs {err_ldm}");
+        }
+    }
+
+    #[test]
+    fn shell_term_sign_at_magic_and_midshell() {
+        // Doubly magic Pb-208: extra binding. Mid-shell Er-166: less binding.
+        assert!(myers_swiatecki_shell_term(82, 126) < 0.0);
+        assert!(myers_swiatecki_shell_term(68, 98) > 0.0);
+    }
+
+    #[test]
+    fn atomic_mass_includes_electrons() {
+        let fe = Nucleus::iron_56();
+        let diff = fe.atomic_mass_amu() - fe.nuclear_mass_amu();
+        // 26 electrons (0.0142631 u) minus the 34.8 keV total electron
+        // binding energy (0.0000374 u).
+        assert!((diff - 0.014_225_7).abs() < 1e-7, "diff={diff}");
+    }
+
+    #[test]
+    fn odd_odd_spin_is_integer() {
+        for z in 1..=99u32 {
+            for a in (2 * z)..=(2 * z + 60) {
+                if z % 2 == 1 && (a - z) % 2 == 1 {
+                    let (two_j, _) = ground_state_spin_parity(&Nucleus::new(z, a).unwrap());
+                    assert_eq!(two_j % 2, 0, "Z={z} A={a} gave half-integer spin");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn spin_parity_reference_nuclei() {
+        // NUBASE2020 ground states.
+        for (z, a, two_j, parity) in [
+            (7, 14, 2, 1),    // N-14 1+
+            (5, 10, 6, 1),    // B-10 3+
+            (19, 40, 8, -1),  // K-40 4-
+            (17, 38, 4, -1),  // Cl-38 2-
+            (82, 207, 1, -1), // Pb-207 1/2-
+            (83, 209, 9, -1), // Bi-209 9/2-
+            (8, 17, 5, 1),    // O-17 5/2+
+            (20, 41, 7, -1),  // Ca-41 7/2-
+        ] {
+            let got = ground_state_spin_parity(&Nucleus::new(z, a).unwrap());
+            assert_eq!(got, (two_j, parity), "Z={z} A={a}");
+        }
+    }
+
+    #[test]
+    fn spin_zero_or_half_has_no_quadrupole() {
+        for &(z, a, _, q) in NUCLEAR_MOMENTS {
+            let (two_j, _) = match (z, a) {
+                (9, 19) | (1, 1) | (2, 3) | (6, 13) | (15, 31) | (82, 207) => (1, 0),
+                _ => (2, 0),
+            };
+            if two_j <= 1 {
+                assert!(q.abs() < 1e-15, "Z={z} A={a} spin <= 1/2 but Q={q}");
+            }
+        }
     }
 
     #[test]

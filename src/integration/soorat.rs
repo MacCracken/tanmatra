@@ -25,9 +25,14 @@ pub struct OrbitalVisualization {
 }
 
 impl OrbitalVisualization {
-    /// Generate an orbital slice through the XZ plane (y=0) for hydrogen-like atoms.
+    /// Generate a probability-density slice |ψ_nl0|² through the XZ plane (y = 0)
+    /// for hydrogen (Z = 1), with the quantization axis along z.
     ///
-    /// `n`, `l`: principal and angular momentum quantum numbers.
+    /// ψ_nlm = R_nl(r) Y_lm(θ, φ) with m = 0, using the exact normalized radial
+    /// functions of [`crate::atomic::radial_wavefunction`] (radial nodes
+    /// included) and |Y_l0|² = (2l+1)/(4π) P_l(cos θ)². Densities are in a₀⁻³.
+    ///
+    /// `principal`, `angular`: n and l (invalid combinations give a zero grid).
     /// `grid_size`: number of points per side.
     /// `extent`: half-width in Bohr radii.
     #[must_use]
@@ -36,6 +41,7 @@ impl OrbitalVisualization {
         let spacing = 2.0 * extent / grid_size.max(1) as f64;
         let mut density = Vec::with_capacity(grid_size * grid_size);
         let mut max_density = 0.0_f64;
+        let four_pi = 4.0 * core::f64::consts::PI;
 
         for iy in 0..grid_size {
             for ix in 0..grid_size {
@@ -43,14 +49,12 @@ impl OrbitalVisualization {
                 let pz = -extent + iy as f64 * spacing;
                 let radius = (px * px + pz * pz).sqrt();
 
-                let rho = radius / principal as f64;
-                let prob = if radius < 1e-10 {
-                    0.0
-                } else {
-                    let exp_part = (-rho).exp();
-                    let poly = rho.powi(angular.cast_signed());
-                    poly * poly * exp_part * exp_part * radius * radius
-                };
+                let radial = crate::atomic::radial_wavefunction(1, principal, angular, radius)
+                    .unwrap_or(0.0);
+                let cos_theta = if radius > 0.0 { pz / radius } else { 1.0 };
+                let p_l = crate::scattering::legendre_polynomial(angular, cos_theta);
+                let angular_density = (2.0 * f64::from(angular) + 1.0) / four_pi * p_l * p_l;
+                let prob = radial * radial * angular_density;
                 if prob > max_density {
                     max_density = prob;
                 }
@@ -84,7 +88,11 @@ pub struct NuclearStructure {
 }
 
 impl NuclearStructure {
-    /// Generate a simple spherical shell layout for a nucleus.
+    /// Generate a schematic layout of nucleons filling a sphere of radius
+    /// R = 1.2 A^(1/3) fm on a golden-angle spiral (uniform number density).
+    ///
+    /// Protons and neutrons are interleaved in proportion Z : N along the
+    /// spiral; positions are illustrative, not a physical density distribution.
     #[must_use]
     pub fn from_nucleon_count(num_protons: u32, num_neutrons: u32, symbol: &str) -> Self {
         let mass_number = num_protons + num_neutrons;
@@ -109,7 +117,14 @@ impl NuclearStructure {
                 shell_r * phi.cos(),
             ];
 
-            if (idx as u32) < num_protons {
+            // Interleave: place a proton whenever the proton fraction so far
+            // falls below Z/A.
+            let protons_so_far = protons.len() as u64;
+            let want = u64::from(num_protons) * (idx as u64 + 1);
+            if protons_so_far < u64::from(num_protons)
+                && (protons_so_far * u64::from(mass_number) < want
+                    || neutrons.len() as u64 >= u64::from(num_neutrons))
+            {
                 protons.push(pos);
             } else {
                 neutrons.push(pos);

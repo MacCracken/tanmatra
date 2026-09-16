@@ -4,7 +4,10 @@
 //! configurations via the Aufbau principle with Madelung's rule, and
 //! ionization energies from NIST data.
 
-use crate::constants::RYDBERG;
+use crate::constants::{
+    ATOMIC_UNIT_TIME_S, BOHR_MAGNETON_EV_T, BOHR_RADIUS, C, ELECTRON_ANOMALOUS_MOMENT,
+    ELECTRON_MASS_MEV, FINE_STRUCTURE, H_EV_S, HC_EV_NM, PROTON_MASS_MEV, RYDBERG, RYDBERG_EV,
+};
 use crate::error::TanmatraError;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -137,8 +140,9 @@ const FILLING_ORDER: [(u32, OrbitalType); 20] = [
 
 /// Returns the electron configuration for element with atomic number Z.
 ///
-/// Follows the Aufbau principle with Madelung's rule, including the
-/// well-known exceptions for chromium (Z=24) and copper (Z=29).
+/// Follows the Aufbau principle with Madelung's rule, including all 20
+/// ground-state exceptions listed by NIST (Cr, Cu, Nb, Mo, Ru, Rh, Pd, Ag, La,
+/// Ce, Gd, Pt, Au, Ac, Th, Pa, U, Np, Cm, Lr).
 ///
 /// # Errors
 ///
@@ -195,8 +199,10 @@ fn set_subshell(config: &mut Vec<OrbitalFilling>, n: u32, orbital: OrbitalType, 
 
 /// Applies known ground-state electron configuration exceptions (NIST).
 ///
-/// Source: NIST Atomic Spectra Database ground-state configurations.
-/// All 22 known Aufbau/Madelung exceptions for Z=1-118.
+/// Source: NIST Atomic Spectra Database ground-state configurations: the 20
+/// Aufbau/Madelung exceptions for Z ≤ 103. For Z ≥ 104 relativistic
+/// calculations predict Madelung-order ground states (e.g. Ds 6d⁸7s²,
+/// Rg 6d⁹7s²; Smits et al., Phys. Rep. 1035, 1 (2023)), so no exceptions apply.
 #[allow(clippy::too_many_lines)]
 fn apply_exceptions(z: u32, config: &mut Vec<OrbitalFilling>) {
     match z {
@@ -311,17 +317,6 @@ fn apply_exceptions(z: u32, config: &mut Vec<OrbitalFilling>) {
             set_subshell(config, 6, OrbitalType::D, 0);
             set_subshell(config, 7, OrbitalType::P, 1);
         }
-        110 => {
-            // Ds: [Rn] 5f14 6d9 7s1 (predicted, parallels Pt)
-            set_subshell(config, 7, OrbitalType::S, 1);
-            set_subshell(config, 6, OrbitalType::D, 9);
-        }
-        111 => {
-            // Rg: [Rn] 5f14 6d10 7s1 (predicted, parallels Au)
-            set_subshell(config, 7, OrbitalType::S, 1);
-            set_subshell(config, 6, OrbitalType::D, 10);
-        }
-
         _ => {}
     }
 }
@@ -352,7 +347,7 @@ pub fn format_configuration(config: &[OrbitalFilling]) -> String {
 
 /// Formats an electron configuration with noble gas core notation.
 ///
-/// Example: `"[Ar] 3d6 4s2"` for iron (Z=26).
+/// Subshells are listed in filling order, e.g. `"[Ar] 4s2 3d6"` for iron (Z=26).
 #[must_use]
 pub fn format_configuration_short(config: &[OrbitalFilling], z: u32) -> String {
     // Noble gas cores: He=2, Ne=10, Ar=18, Kr=36, Xe=54, Rn=86
@@ -393,18 +388,26 @@ pub fn format_configuration_short(config: &[OrbitalFilling], z: u32) -> String {
     alloc::format!("{core_symbol} {valence_str}")
 }
 
-/// Calculates the wavelength of a spectral line in nanometers using
-/// the Rydberg formula for hydrogen-like atoms.
+/// Calculates the vacuum wavelength of a spectral line in nanometers using
+/// the Rydberg formula for a hydrogen-like atom with an **infinitely heavy**
+/// nucleus.
 ///
-/// 1/lambda = R_inf * Z^2 * |1/n1^2 - 1/n2^2|
+/// 1/λ = R∞ Z² |1/n1² − 1/n2²|
 ///
-/// where n1 < n2 (n1 is the lower energy level).
+/// The finite nuclear mass shifts real lines to longer wavelength by the
+/// factor 1 + m_e/M (5.4e-4 for hydrogen: Hα 656.112 nm here, 656.470 nm
+/// with the proton mass); use [`spectral_line_vacuum_nm`] for that. Air
+/// wavelengths (Hα 656.28 nm) are shorter by the refractive index of air.
 ///
 /// # Errors
 ///
-/// Returns [`TanmatraError::InvalidQuantumNumbers`] if n1 or n2 is 0, or n1 == n2.
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if n1 or n2 is 0, or n1 == n2,
+/// and [`TanmatraError::InvalidAtomicNumber`] if z is 0.
 #[inline]
 pub fn spectral_line_nm(z: u32, n1: u32, n2: u32) -> Result<f64, TanmatraError> {
+    if z == 0 {
+        return Err(TanmatraError::InvalidAtomicNumber(z));
+    }
     if n1 == 0 || n2 == 0 {
         return Err(TanmatraError::InvalidQuantumNumbers(String::from(
             "quantum numbers must be >= 1",
@@ -428,49 +431,85 @@ pub fn spectral_line_nm(z: u32, n1: u32, n2: u32) -> Result<f64, TanmatraError> 
     Ok(1.0e9 / inv_lambda)
 }
 
-/// Calculates the energy of a hydrogen-like level with fine-structure correction.
+/// Returns the reduced-mass factor μ/m_e = 1/(1 + m_e/M) for a hydrogen-like
+/// ion of nuclear charge `z` and mass number `a`.
 ///
-/// E_nj = -13.6 eV * Z² / n² * [1 + (αZ)²/n * (1/(j+1/2) - 3/(4n))]
+/// The nuclear mass comes from the AME2020 atomic mass when tabulated
+/// (minus Z electron masses), otherwise from the semi-empirical mass formula;
+/// either is far more accurate than the 1e-7 relative precision this factor
+/// needs.
 ///
-/// where α is the fine-structure constant, j is the total angular momentum
-/// quantum number (j = l ± 1/2, stored as integer 2j).
+/// # Errors
+///
+/// Returns an error if (z, a) is not a valid nucleus.
+pub fn reduced_mass_factor(z: u32, a: u32) -> Result<f64, TanmatraError> {
+    let nucleus = crate::nucleus::Nucleus::new(z, a)?;
+    let nuclear_mass_mev = if z == 1 && a == 1 {
+        PROTON_MASS_MEV
+    } else {
+        nucleus.experimental_atomic_mass_amu().map_or_else(
+            || nucleus.nuclear_mass(),
+            |m| m * crate::constants::AMU_MEV - z as f64 * ELECTRON_MASS_MEV,
+        )
+    };
+    Ok(1.0 / (1.0 + ELECTRON_MASS_MEV / nuclear_mass_mev))
+}
+
+/// Vacuum wavelength of a hydrogen-like line including the nuclear
+/// reduced-mass correction, in nanometers.
+///
+/// λ = λ∞ / (μ/m_e), with λ∞ from [`spectral_line_nm`].
+/// Hydrogen (z=1, a=1) Hα: 656.470 nm.
+///
+/// # Errors
+///
+/// Returns an error for invalid quantum numbers or an invalid nucleus.
+pub fn spectral_line_vacuum_nm(z: u32, a: u32, n1: u32, n2: u32) -> Result<f64, TanmatraError> {
+    Ok(spectral_line_nm(z, n1, n2)? / reduced_mass_factor(z, a)?)
+}
+
+/// Calculates the energy of a hydrogen-like level with the first-order
+/// fine-structure correction (infinite nuclear mass).
+///
+/// E_nj = −R∞hc Z² / n² × [1 + (αZ)²/n² × (n/(j+1/2) − 3/4)]
+///
+/// where R∞hc = 13.605693122990 eV (CODATA 2022), α is the fine-structure
+/// constant and j = l ± 1/2 is passed as 2j. For the exact Dirac energy use
+/// [`dirac_binding_energy_ev`].
 ///
 /// Returns the energy in eV (negative, bound state).
 ///
 /// # Errors
 ///
-/// Returns [`TanmatraError::InvalidQuantumNumbers`] if quantum numbers are invalid.
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if n = 0 or 2j is not an
+/// odd number in 1..=2n−1.
 pub fn hydrogen_level_energy_ev(z: u32, n: u32, two_j: u32) -> Result<f64, TanmatraError> {
     if n == 0 {
         return Err(TanmatraError::InvalidQuantumNumbers(String::from(
             "n must be >= 1",
         )));
     }
-    if two_j == 0 || two_j > 2 * n - 1 {
+    if two_j.is_multiple_of(2) || two_j > 2 * n - 1 {
         return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
-            "2j={two_j} invalid for n={n}"
+            "2j={two_j} invalid for n={n}: must be odd and <= 2n-1"
         )));
     }
 
     let z_f = z as f64;
     let n_f = n as f64;
-    let alpha = crate::constants::FINE_STRUCTURE;
     let j_plus_half = f64::midpoint(two_j as f64, 1.0);
 
-    // Non-relativistic energy
-    let e0 = -13.6 * z_f * z_f / (n_f * n_f);
-
-    // Fine-structure correction (first-order)
-    let az = alpha * z_f;
-    let correction = 1.0 + az * az / n_f * (1.0 / j_plus_half - 3.0 / (4.0 * n_f));
+    let e0 = -RYDBERG_EV * z_f * z_f / (n_f * n_f);
+    let az = FINE_STRUCTURE * z_f;
+    let correction = 1.0 + az * az / (n_f * n_f) * (n_f / j_plus_half - 0.75);
 
     Ok(e0 * correction)
 }
 
 /// Calculates the wavelength of a spectral line with fine-structure correction.
 ///
-/// Uses the Dirac energy levels for hydrogen-like atoms, which include
-/// the relativistic fine-structure splitting.
+/// Uses the first-order fine-structure energies of
+/// [`hydrogen_level_energy_ev`] (infinite nuclear mass, vacuum wavelength).
 ///
 /// Parameters:
 /// - `z`: atomic number
@@ -499,10 +538,8 @@ pub fn spectral_line_fine_nm(
         )));
     }
 
-    // Convert eV to wavelength in nm: λ = hc/ΔE
-    // hc = 1239.8419843320028 eV·nm
-    let hc_ev_nm = 1_239.841_984;
-    Ok(hc_ev_nm / delta_e)
+    // λ = hc/ΔE
+    Ok(HC_EV_NM / delta_e)
 }
 
 // ---------------------------------------------------------------------------
@@ -618,20 +655,23 @@ pub fn pfund_series(z: u32, n_max: u32) -> Result<Vec<(u32, f64)>, TanmatraError
 // Zeeman and Stark effects
 // ---------------------------------------------------------------------------
 
-/// Calculates the Lande g-factor for an atomic level.
+/// Calculates the Lande g-factor for a single-electron level.
 ///
-/// g_J = 1 + [J(J+1) + S(S+1) - L(L+1)] / [2J(J+1)]
+/// g_J = 1 + [J(J+1) + S(S+1) − L(L+1)] / [2J(J+1)]
 ///
-/// For a single electron: S = 1/2, L = l, J = j.
+/// with S = 1/2, L = l, J = j and g_s = 2.
 ///
 /// Parameters: `l` (orbital), `two_j` (2*total angular momentum).
-/// Returns the dimensionless g-factor.
+/// Returns 0.0 if j is not l ± 1/2 (no such level).
 #[must_use]
 #[inline]
 pub fn lande_g_factor(l: u32, two_j: u32) -> f64 {
+    if two_j + 1 != 2 * l + 2 && two_j + 1 != 2 * l {
+        return 0.0;
+    }
     let j = two_j as f64 / 2.0;
     let l_f = l as f64;
-    let s = 0.5; // single electron spin
+    let s = 0.5;
 
     let j_j1 = j * (j + 1.0);
     if j_j1 < 1e-30 {
@@ -659,140 +699,202 @@ pub fn lande_g_factor(l: u32, two_j: u32) -> f64 {
 pub fn zeeman_splitting_ev(l: u32, two_j: u32, two_mj: i32, b_tesla: f64) -> f64 {
     let mj = two_mj as f64 / 2.0;
     let g = lande_g_factor(l, two_j);
-    mj * g * crate::constants::BOHR_MAGNETON_EV_T * b_tesla
+    mj * g * BOHR_MAGNETON_EV_T * b_tesla
 }
 
-/// Calculates the linear Stark effect energy shift for hydrogen.
+/// Calculates the linear Stark effect energy shift for hydrogen (Z = 1).
 ///
-/// For hydrogen, the linear Stark effect gives:
-/// ΔE = (3/2) * n * (n1 - n2) * e * a0 * E_field
+/// ΔE = (3/2) n k e a₀ F
 ///
-/// where n1 and n2 are parabolic quantum numbers with n1 + n2 + |m| + 1 = n.
-///
-/// Simplified: for the maximum shift state (n1 = n-1, n2 = 0, m = 0):
-/// ΔE_max = (3/2) * n * (n-1) * e * a0 * E_field
+/// where k = n₁ − n₂ is the difference of parabolic quantum numbers
+/// (n₁ + n₂ + |m| + 1 = n, so |k| ≤ n − 1) and F the field strength.
 ///
 /// Parameters:
 /// - `n`: principal quantum number
-/// - `parabolic_index`: (n1 - n2), ranges from -(n-1) to (n-1)
+/// - `parabolic_index`: k = n₁ − n₂, from −(n−1) to (n−1)
 /// - `e_field_v_per_m`: electric field strength in V/m
 ///
-/// Returns the energy shift in eV.
+/// Returns the energy shift in eV, or 0.0 if |k| > n − 1.
 #[must_use]
 #[inline]
 pub fn stark_shift_hydrogen_ev(n: u32, parabolic_index: i32, e_field_v_per_m: f64) -> f64 {
-    let n_f = n as f64;
-    let k = parabolic_index as f64;
-    let a0 = crate::constants::BOHR_RADIUS; // meters
-    // ΔE = (3/2) * n * k * e * a0 * E = (3/2) * n * k * a0 * E (in eV, since e*V = eV)
-    1.5 * n_f * k * a0 * e_field_v_per_m
+    if n == 0 || parabolic_index.unsigned_abs() > n - 1 {
+        return 0.0;
+    }
+    // e·a₀·F in joules divided by e gives eV: a₀ [m] × F [V/m].
+    1.5 * n as f64 * parabolic_index as f64 * BOHR_RADIUS * e_field_v_per_m
 }
 
 // ---------------------------------------------------------------------------
 // QED corrections
 // ---------------------------------------------------------------------------
 
-/// Calculates the Lamb shift for hydrogen-like atoms (approximate).
-///
-/// The Lamb shift is the QED correction that lifts the degeneracy between
-/// levels of the same n and j but different l (e.g., 2S₁/₂ vs 2P₁/₂).
-///
-/// For hydrogen, the 2S₁/₂ - 2P₁/₂ splitting is ~1057 MHz (the original
-/// Lamb shift). The shift scales approximately as:
-///
-/// ΔE ∝ α⁵ mc² Z⁴ / (π n³) × [ln(1/(α²Z²)) + corrections]
-///
-/// This implementation uses the known hydrogen 2S Lamb shift (1057.845 MHz)
-/// and scales for other levels and Z values.
-///
-/// Parameters:
-/// - `z`: atomic number
-/// - `n`: principal quantum number
-/// - `l`: orbital angular momentum (shift is largest for s-states, l=0)
-///
-/// Returns the Lamb shift energy in eV.
-#[must_use]
-#[inline]
-pub fn lamb_shift_ev(z: u32, n: u32, l: u32) -> f64 {
-    if n == 0 || l >= n {
-        return 0.0;
-    }
-
-    // Known hydrogen 2S₁/₂ Lamb shift: 1057.845 MHz = 4.3725e-6 eV
-    let lamb_2s_h = 4.372_5e-6; // eV for hydrogen n=2, l=0
-
-    let zf = z as f64;
-    let nf = n as f64;
-
-    // Scale from the known H 2S value:
-    // ΔE ∝ Z⁴ / n³ for s-states
-    // For l > 0, the shift is much smaller (~1/10 for p-states)
-    let z_scale = zf.powi(4);
-    let n_scale = 8.0 / (nf * nf * nf); // normalized to n=2
-
-    let l_factor = if l == 0 {
-        1.0
-    } else {
-        // p-states have ~10x smaller shift, d-states even less
-        0.1 / (l as f64)
-    };
-
-    lamb_2s_h * z_scale * n_scale * l_factor
+/// Bethe logarithms ln k₀(n, l) for hydrogen (Drake & Swainson,
+/// Phys. Rev. A 41, 1243 (1990)).
+fn bethe_log(n: u32, l: u32) -> Option<f64> {
+    Some(match (n, l) {
+        (1, 0) => 2.984_128_556,
+        (2, 0) => 2.811_769_893,
+        (2, 1) => -0.030_016_709,
+        (3, 0) => 2.767_663_612,
+        (3, 1) => -0.038_190_229,
+        (3, 2) => -0.005_232_148,
+        (4, 0) => 2.749_811_840,
+        (4, 1) => -0.041_954_895,
+        (4, 2) => -0.006_740_939,
+        (4, 3) => -0.001_733_661,
+        _ => return None,
+    })
 }
 
-/// Calculates the vacuum polarization contribution to energy levels.
+/// One-loop QED (Lamb) shift of the hydrogen-like level (n, l, j) in eV,
+/// infinite nuclear mass.
 ///
-/// Vacuum polarization (Uehling potential) shifts s-state energies by:
+/// ΔE = (α/π) (Zα)⁴ m_e c² / n³ × [A₄₁ ln(Zα)⁻² + A₄₀ + Zα A₅₀]
 ///
-/// ΔE_VP ≈ -(α/3π) × (Zα)⁴ mc² / n³ × (for s-states)
+/// Self-energy: A₄₁ = 4/3 δ_l0, A₄₀ = −(4/3) ln k₀(n,l) + 10/9 δ_l0
+/// − (1 − δ_l0)/(2κ(2l+1)), A₅₀ = (139/32 − 2 ln 2) π δ_l0.
+/// Vacuum polarization (Uehling): A₄₀ = −4/15 δ_l0, A₅₀ = (5/48) π δ_l0.
+/// κ = −(l+1) for j = l + 1/2 and κ = l for j = l − 1/2.
+/// (Eides, Grotch & Shelyuto, Phys. Rep. 342, 63 (2001); Mohr et al.,
+/// CODATA 2018 Rev. Mod. Phys. 93, 025010 (2021).)
 ///
-/// This is typically ~2% of the total Lamb shift for hydrogen.
+/// The Zα expansion is accurate to ≈0.2% for hydrogen (2S½−2P½:
+/// 1059.6 MHz vs 1057.845 MHz measured) and ≈3% for He⁺; it is not valid for
+/// high Z. Bethe logarithms are tabulated for n ≤ 4.
 ///
-/// Returns the vacuum polarization energy shift in eV (negative = downward shift).
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] for n > 4, l ≥ n, or j ≠ l ± 1/2.
+pub fn lamb_shift_nlj_ev(z: u32, n: u32, l: u32, two_j: u32) -> Result<f64, TanmatraError> {
+    if n == 0 || l >= n || (two_j != 2 * l + 1 && two_j + 1 != 2 * l) {
+        return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
+            "invalid level n={n} l={l} 2j={two_j}"
+        )));
+    }
+    let ln_k0 = bethe_log(n, l).ok_or_else(|| {
+        TanmatraError::InvalidQuantumNumbers(alloc::format!(
+            "Bethe logarithm not tabulated for n={n} l={l}"
+        ))
+    })?;
+    let za = z as f64 * FINE_STRUCTURE;
+    let nf = n as f64;
+    let prefactor = FINE_STRUCTURE / core::f64::consts::PI * za.powi(4) * ELECTRON_MASS_MEV * 1e6
+        / (nf * nf * nf);
+    let pi = core::f64::consts::PI;
+    let coefficient = if l == 0 {
+        let a41 = 4.0 / 3.0 * libm::log(1.0 / (za * za));
+        let a40 = -4.0 / 3.0 * ln_k0 + 10.0 / 9.0 - 4.0 / 15.0;
+        let a50 = (139.0 / 32.0 - 2.0 * core::f64::consts::LN_2) * pi + 5.0 / 48.0 * pi;
+        a41 + a40 + za * a50
+    } else {
+        let kappa = if two_j == 2 * l + 1 {
+            -(l as f64 + 1.0)
+        } else {
+            l as f64
+        };
+        -4.0 / 3.0 * ln_k0 - 1.0 / (2.0 * kappa * (2.0 * l as f64 + 1.0))
+    };
+    Ok(prefactor * coefficient)
+}
+
+/// One-loop QED (Lamb) shift of a hydrogen-like (n, l) level in eV.
+///
+/// For s states this is the shift of nS½ from [`lamb_shift_nlj_ev`]. For
+/// l > 0 it is the (2j+1)-weighted mean over j = l ± 1/2, for which the
+/// κ-dependent terms cancel. Returns 0.0 where [`lamb_shift_nlj_ev`] would
+/// return an error (n = 0, l ≥ n, or n > 4).
+#[must_use]
+pub fn lamb_shift_ev(z: u32, n: u32, l: u32) -> f64 {
+    if l == 0 {
+        return lamb_shift_nlj_ev(z, n, 0, 1).unwrap_or(0.0);
+    }
+    let lo = lamb_shift_nlj_ev(z, n, l, 2 * l - 1).unwrap_or(0.0);
+    let hi = lamb_shift_nlj_ev(z, n, l, 2 * l + 1).unwrap_or(0.0);
+    (2.0 * l as f64 * lo + (2.0 * l as f64 + 2.0) * hi) / (4.0 * l as f64 + 2.0)
+}
+
+/// Vacuum polarization (Uehling potential) shift of a hydrogen-like s level
+/// in eV, infinite nuclear mass.
+///
+/// ΔE_VP = (α/π)(Zα)⁴ m_e c² / n³ × [−4/15 + (5π/48) Zα]
+///
+/// For hydrogen 2S: −26.89 MHz (leading term −27.13 MHz, α(Zα)⁵ term
+/// +0.24 MHz). Returns 0.0 for l > 0, where these terms vanish.
 #[must_use]
 #[inline]
 pub fn vacuum_polarization_ev(z: u32, n: u32, l: u32) -> f64 {
     if n == 0 || l >= n || l != 0 {
-        return 0.0; // only affects s-states significantly
+        return 0.0;
     }
-
-    let alpha = crate::constants::FINE_STRUCTURE;
-    let zf = z as f64;
+    let za = z as f64 * FINE_STRUCTURE;
     let nf = n as f64;
-    let me_c2 = crate::constants::ELECTRON_MASS_MEV * 1e6; // eV
-
-    // ΔE_VP = -(α/(3π)) × (Zα)⁴ × mc² / n³
-    let za = zf * alpha;
-    -alpha / (3.0 * core::f64::consts::PI) * za.powi(4) * me_c2 / (nf * nf * nf)
+    FINE_STRUCTURE / core::f64::consts::PI * za.powi(4) * ELECTRON_MASS_MEV * 1e6 / (nf * nf * nf)
+        * (-4.0 / 15.0 + 5.0 * core::f64::consts::PI / 48.0 * za)
 }
 
 // ---------------------------------------------------------------------------
 // Hydrogen wavefunctions
 // ---------------------------------------------------------------------------
 
-/// Computes the radial wavefunction R_nl(r) for a hydrogen-like atom.
+/// Coefficients c_i of the polynomial P(ρ) = ρ^l L_{n−l−1}^{(2l+1)}(ρ) in powers
+/// of ρ (index = power), and the normalization N of
+/// R_nl = N P(ρ) e^{−ρ/2}, ρ = 2Zr/(n a₀), in units of a₀^{−3/2}.
+fn hydrogen_radial_polynomial(z: u32, n: u32, l: u32) -> (Vec<f64>, f64) {
+    let k = n - l - 1;
+    let alpha = 2 * l + 1;
+    let mut coeffs = alloc::vec![0.0; (l + k + 1) as usize];
+    // L_k^α(x) = Σ_i (−1)^i C(k+α, k−i) x^i / i!
+    for i in 0..=k {
+        let mut binom = 1.0_f64; // C(k+α, k−i)
+        let top = k + alpha;
+        let choose = k - i;
+        for t in 0..choose {
+            binom *= f64::from(top - t) / f64::from(t + 1);
+        }
+        let mut fact = 1.0_f64;
+        for t in 1..=i {
+            fact *= f64::from(t);
+        }
+        let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
+        coeffs[(l + i) as usize] = sign * binom / fact;
+    }
+    // N = sqrt((2Z/n)³ (n−l−1)! / (2n (n+l)!))
+    let zf = f64::from(z);
+    let nf = f64::from(n);
+    let mut ratio = 1.0_f64; // (n−l−1)!/(n+l)! = 1/Π_{i=n−l}^{n+l} i
+    for t in (n - l)..=(n + l) {
+        ratio /= f64::from(t);
+    }
+    let scale = 2.0 * zf / nf;
+    let norm = libm::sqrt(scale * scale * scale * ratio / (2.0 * nf));
+    (coeffs, norm)
+}
+
+/// Computes the radial wavefunction R_nl(r) for a hydrogen-like atom
+/// (infinite nuclear mass).
 ///
-/// R_nl(r) = N * (2Zr/na0)^l * exp(-Zr/na0) * L_{n-l-1}^{2l+1}(2Zr/na0)
+/// R_nl(r) = N ρ^l e^{−ρ/2} L_{n−l−1}^{(2l+1)}(ρ),  ρ = 2Zr/(n a₀),
+/// N = √((2Z/n a₀)³ (n−l−1)! / (2n (n+l)!)),
 ///
-/// where L is the associated Laguerre polynomial and N is the normalization.
-///
-/// For simplicity, implements exact forms for n=1,2,3 with any l.
+/// with the generalized Laguerre polynomial L, normalized so that
+/// ∫₀^∞ R² r² dr = 1.
 ///
 /// Parameters:
-/// - `z`: atomic number
-/// - `n`: principal quantum number (1, 2, or 3)
-/// - `l`: orbital angular momentum (0 to n-1)
-/// - `r_bohr`: radial distance in units of Bohr radius (r/a0)
+/// - `z`: atomic number (≥ 1)
+/// - `n`: principal quantum number (1..=60)
+/// - `l`: orbital angular momentum (0 to n−1)
+/// - `r_bohr`: radial distance in units of the Bohr radius (r/a₀)
 ///
-/// Returns R_nl(r) * a0^(3/2) (dimensionless when multiplied by a0^{-3/2}).
+/// Returns R_nl(r) in units of a₀^(−3/2).
 ///
 /// # Errors
 ///
-/// Returns [`TanmatraError::InvalidQuantumNumbers`] if n > 3 or l >= n.
+/// Returns [`TanmatraError::InvalidQuantumNumbers`] if n = 0, n > 60, l ≥ n or z = 0.
 pub fn radial_wavefunction(z: u32, n: u32, l: u32, r_bohr: f64) -> Result<f64, TanmatraError> {
-    if n == 0 || n > 3 {
+    if n == 0 || n > 60 {
         return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
-            "n={n} not supported (1-3)"
+            "n={n} not supported (1-60)"
         )));
     }
     if l >= n {
@@ -800,52 +902,46 @@ pub fn radial_wavefunction(z: u32, n: u32, l: u32, r_bohr: f64) -> Result<f64, T
             "l={l} must be < n={n}"
         )));
     }
+    if z == 0 {
+        return Err(TanmatraError::InvalidAtomicNumber(z));
+    }
+    let (coeffs, norm) = hydrogen_radial_polynomial(z, n, l);
+    let rho = 2.0 * f64::from(z) * r_bohr / f64::from(n);
+    let mut poly = 0.0;
+    for c in coeffs.iter().rev() {
+        poly = poly * rho + c;
+    }
+    Ok(norm * poly * libm::exp(-rho / 2.0))
+}
 
-    let zf = z as f64;
-    let rho = 2.0 * zf * r_bohr / n as f64; // 2Zr/(n*a0)
-    let exp_factor = libm::exp(-rho / 2.0);
-
-    let result = match (n, l) {
-        (1, 0) => {
-            // R_10 = 2 * (Z/a0)^{3/2} * exp(-Zr/a0)
-            2.0 * zf * libm::sqrt(zf) * exp_factor
+/// Exact dipole radial integral ⟨n l | r | n′ l′⟩ = ∫ R_nl R_n′l′ r³ dr in units
+/// of a₀/Z (hydrogen-like, infinite nuclear mass).
+fn radial_dipole_integral(n: u32, l: u32, n2: u32, l2: u32) -> f64 {
+    let (c1, norm1) = hydrogen_radial_polynomial(1, n, l);
+    let (c2, norm2) = hydrogen_radial_polynomial(1, n2, l2);
+    // R1 R2 r³ = N1 N2 Σ_i Σ_j c1_i c2_j (2/n)^i (2/n2)^j r^(i+j+3) e^{−(1/n + 1/n2) r}
+    let s1 = 2.0 / f64::from(n);
+    let s2 = 2.0 / f64::from(n2);
+    let decay = 1.0 / f64::from(n) + 1.0 / f64::from(n2);
+    let mut total = 0.0;
+    for (i, a) in c1.iter().enumerate() {
+        if *a == 0.0 {
+            continue;
         }
-        (2, 0) => {
-            // R_20 = (1/2√2) * (Z/a0)^{3/2} * (2 - Zr/a0) * exp(-Zr/2a0)
-            let norm = 1.0 / (2.0 * core::f64::consts::SQRT_2);
-            norm * zf * libm::sqrt(zf) * (2.0 - zf * r_bohr) * exp_factor
+        for (jdx, b) in c2.iter().enumerate() {
+            if *b == 0.0 {
+                continue;
+            }
+            let power = i + jdx + 3;
+            // ∫ r^p e^{−c r} dr = p! / c^{p+1}, accumulated as a product to avoid overflow.
+            let mut integral = 1.0 / decay;
+            for t in 1..=power {
+                integral *= t as f64 / decay;
+            }
+            total += a * b * libm::pow(s1, i as f64) * libm::pow(s2, jdx as f64) * integral;
         }
-        (2, 1) => {
-            // R_21 = (1/2√6) * (Z/a0)^{3/2} * (Zr/a0) * exp(-Zr/2a0)
-            let norm = 1.0 / (2.0 * libm::sqrt(6.0));
-            norm * zf * libm::sqrt(zf) * zf * r_bohr * exp_factor
-        }
-        (3, 0) => {
-            // R_30 = (2/81√3) * (Z/a0)^{3/2} * (27 - 18Zr/a0 + 2(Zr/a0)²) * exp(-Zr/3a0)
-            let zr = zf * r_bohr;
-            let norm = 2.0 / (81.0 * libm::sqrt(3.0));
-            norm * zf * libm::sqrt(zf) * (27.0 - 18.0 * zr + 2.0 * zr * zr) * exp_factor
-        }
-        (3, 1) => {
-            // R_31 = (8/27√6) * (Z/a0)^{3/2} * (Zr/a0)(6 - Zr/a0) * exp(-Zr/3a0)
-            let zr = zf * r_bohr;
-            let norm = 8.0 / (27.0 * libm::sqrt(6.0));
-            norm * zf * libm::sqrt(zf) * zr * (6.0 - zr) * exp_factor
-        }
-        (3, 2) => {
-            // R_32 = (4/81√30) * (Z/a0)^{3/2} * (Zr/a0)² * exp(-Zr/3a0)
-            let zr = zf * r_bohr;
-            let norm = 4.0 / (81.0 * libm::sqrt(30.0));
-            norm * zf * libm::sqrt(zf) * zr * zr * exp_factor
-        }
-        _ => {
-            return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
-                "n={n}, l={l} not supported"
-            )));
-        }
-    };
-
-    Ok(result)
+    }
+    norm1 * norm2 * total
 }
 
 /// Computes the radial probability density |R_nl(r)|² * r² for hydrogen-like atoms.
@@ -915,25 +1011,25 @@ pub fn check_selection_rules_full(l1: u32, ml1: i32, l2: u32, ml2: i32) -> Trans
     }
 }
 
-/// Calculates the Einstein A coefficient (spontaneous emission rate) for
-/// hydrogen-like atoms.
+/// Calculates the Einstein A coefficient (spontaneous emission rate) for an
+/// electric dipole transition (n_u, l_u) → (n_l, l_l) in a hydrogen-like ion,
+/// summed over final and averaged over initial magnetic substates (infinite
+/// nuclear mass, non-relativistic).
 ///
-/// For electric dipole transitions between levels (n1,l1) and (n2,l2)
-/// in a hydrogen-like atom with atomic number Z:
+/// A = (4/3) α³ ω³ × max(l_u, l_l)/(2l_u + 1) × |⟨n_l l_l|r|n_u l_u⟩|²  (atomic units)
 ///
-/// A_{21} = (4 α³ ω³)/(3 c²) |⟨1|r|2⟩|²
-///
-/// For hydrogen (Z=1), a simplified formula gives:
-/// A ∝ Z⁴ * (frequency)³ * |radial matrix element|²
-///
-/// This implementation uses the known analytical result for hydrogen:
-/// A_{n2,l2 → n1,l1} scales as Z⁴ / n_eff⁵
+/// with ω = Z²(1/(2n_l²) − 1/(2n_u²)) E_h and the radial integral evaluated
+/// exactly from the hydrogenic wavefunctions (∝ 1/Z), so A ∝ Z⁴. Converted to
+/// s⁻¹ with the atomic unit of time ħ/E_h. For a finite nuclear mass multiply
+/// by μ/m_e (see [`reduced_mass_factor`]): H Lyα gives 6.2684e8 s⁻¹ here and
+/// 6.2649e8 s⁻¹ with μ, matching NIST ASD.
 ///
 /// Returns the rate in s⁻¹.
 ///
 /// # Errors
 ///
-/// Returns error if the transition violates selection rules.
+/// Returns an error if the transition violates Δl = ±1, if n_u ≤ n_l, if
+/// l ≥ n for either level, if n_u > 60, or if z = 0.
 pub fn einstein_a_coefficient(
     z: u32,
     n_upper: u32,
@@ -946,54 +1042,43 @@ pub fn einstein_a_coefficient(
             "transition ({n_upper},{l_upper})->({n_lower},{l_lower}) is E1-forbidden"
         )));
     }
-
     if n_upper <= n_lower {
         return Err(TanmatraError::InvalidQuantumNumbers(String::from(
             "upper level must have larger n",
         )));
     }
+    if n_lower == 0 || l_upper >= n_upper || l_lower >= n_lower || n_upper > 60 {
+        return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
+            "invalid levels ({n_upper},{l_upper})->({n_lower},{l_lower})"
+        )));
+    }
+    if z == 0 {
+        return Err(TanmatraError::InvalidAtomicNumber(z));
+    }
 
-    let zf = z as f64;
-    let n1 = n_lower as f64;
-    let n2 = n_upper as f64;
-    let l_max = if l_upper > l_lower { l_upper } else { l_lower };
+    let zf = f64::from(z);
+    let nu = f64::from(n_upper);
+    let nl = f64::from(n_lower);
+    let omega_au = zf * zf * 0.5 * (1.0 / (nl * nl) - 1.0 / (nu * nu));
+    let radial_au = radial_dipole_integral(n_upper, l_upper, n_lower, l_lower) / zf;
+    let l_max = f64::from(l_upper.max(l_lower));
+    let angular = l_max / f64::from(2 * l_upper + 1);
+    let alpha3 = FINE_STRUCTURE * FINE_STRUCTURE * FINE_STRUCTURE;
 
-    // Transition energy in eV
-    let delta_e_ev = 13.6 * zf * zf * (1.0 / (n1 * n1) - 1.0 / (n2 * n2));
-
-    // Transition frequency in Hz: ν = ΔE / h
-    let freq_hz = delta_e_ev / crate::constants::H_EV_S;
-
-    // Use the standard relation: A = (8π² e² ν²) / (m_e c³) * f_osc
-    // with Kramers' approximate oscillator strength for hydrogen:
-    // f ≈ (32/(3√3 π)) * 1/(n1² n2² (1/n1² - 1/n2²)³) * max(l,l')/(2l_upper+1)
-    //
-    // Instead, use the exact formula in SI:
-    // A_{21} = (ω³ |d|²) / (3π ε₀ ħ c³)
-    //
-    // For hydrogen transitions, the known scaling is:
-    // A = 6.27e8 * Z⁴ * (freq/freq_ly_alpha)³ * max(l,l')/(2l_upper+1) * correction
-    //
-    // Ly-alpha: n=2→1, l=1→0, freq = 2.466e15 Hz, A = 6.27e8 s⁻¹
-    let freq_ly_alpha = 2.466e15; // Hz for hydrogen Lyman-alpha
-    let a_ly_alpha = 6.27e8; // s⁻¹ for hydrogen Lyman-alpha
-
-    let freq_ratio = freq_hz / freq_ly_alpha;
-    let g_ratio = l_max as f64 / (2 * l_upper + 1) as f64;
-
-    // A scales as Z⁴ * ν³ * angular factor
-    let a_coeff = a_ly_alpha * zf.powi(4) * freq_ratio.powi(3) * g_ratio;
-
-    Ok(a_coeff.abs())
+    let rate_au =
+        4.0 / 3.0 * alpha3 * omega_au * omega_au * omega_au * angular * radial_au * radial_au;
+    Ok(rate_au / ATOMIC_UNIT_TIME_S)
 }
 
-/// Calculates the Einstein B coefficient for stimulated emission/absorption.
+/// Calculates the Einstein B coefficient for stimulated emission.
 ///
-/// B_{21} = A_{21} * c³ / (8π h ν³)
+/// B₂₁ = A₂₁ c³ / (8π h ν³)
 ///
-/// where ν is the transition frequency.
+/// where ν is the transition frequency (infinite nuclear mass). This B refers
+/// to the spectral energy density per unit frequency; absorption follows from
+/// g₁B₁₂ = g₂B₂₁.
 ///
-/// Returns B in m³/(J·s²) = m³·sr/(J·s).
+/// Returns B in m³/(J·s²).
 ///
 /// # Errors
 ///
@@ -1011,295 +1096,324 @@ pub fn einstein_b_coefficient(
     let n1 = n_lower as f64;
     let n2 = n_upper as f64;
 
-    // Transition frequency in Hz
-    let delta_e_ev = 13.6 * zf * zf * (1.0 / (n1 * n1) - 1.0 / (n2 * n2));
-    let freq_hz = delta_e_ev / crate::constants::H_EV_S;
-
-    let c_val = crate::constants::C;
-    let h_val = crate::constants::H_EV_S * crate::constants::ELEMENTARY_CHARGE; // h in J·s
+    let delta_e_ev = RYDBERG_EV * zf * zf * (1.0 / (n1 * n1) - 1.0 / (n2 * n2));
+    let freq_hz = delta_e_ev / H_EV_S;
+    let h_joule_s = H_EV_S * crate::constants::ELEMENTARY_CHARGE;
 
     if freq_hz <= 0.0 {
         return Ok(0.0);
     }
 
-    Ok(a21 * c_val * c_val * c_val / (8.0 * core::f64::consts::PI * h_val * freq_hz.powi(3)))
+    Ok(a21 * C * C * C / (8.0 * core::f64::consts::PI * h_joule_s * freq_hz.powi(3)))
 }
 
 // ---------------------------------------------------------------------------
 // Electron affinities
 // ---------------------------------------------------------------------------
 
-/// Electron affinities in eV for Z=1..=118.
+/// Electron affinity of a neutral atom.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ElectronAffinity {
+    /// The anion is bound; the electron affinity in eV.
+    Bound(f64),
+    /// No bound anion exists (negative electron affinity).
+    Unbound,
+    /// No measurement or accepted calculation is available.
+    Unknown,
+}
+
+/// Electron affinities for Z=1..=118.
 ///
-/// Positive value = energy released when forming X⁻ (stable anion).
-/// 0.0 = anion unstable (noble gases, alkaline earths, Mn, N, etc.).
-///
-/// Sources: NIST, T. Andersen (2004), Rienstra-Kiracofe et al. (2002).
-/// Z>104: relativistic theoretical values (Eliav, Kaldor, Borschevsky).
+/// Measured values: Andersen, Haugen & Hotop, J. Phys. Chem. Ref. Data 28,
+/// 1511 (1999), superseded where newer laser-photodetachment measurements exist
+/// (cited per entry). Elements without measurements use the cited calculations
+/// or estimates; superheavy values are from Smits et al., Phys. Rep. 1035, 1
+/// (2023), Table 2, unless noted.
 #[allow(clippy::too_many_lines)]
-const ELECTRON_AFFINITY_EV: [f64; 118] = [
-    0.754_20, // H  (Z=1)
-    0.0,      // He (Z=2)
-    0.618_05, // Li (Z=3)
-    0.0,      // Be (Z=4)
-    0.279_72, // B  (Z=5)
-    1.262_12, // C  (Z=6)
-    0.0,      // N  (Z=7)
-    1.461_12, // O  (Z=8)
-    3.401_19, // F  (Z=9)
-    0.0,      // Ne (Z=10)
-    0.547_93, // Na (Z=11)
-    0.0,      // Mg (Z=12)
-    0.432_83, // Al (Z=13)
-    1.389_52, // Si (Z=14)
-    0.746_61, // P  (Z=15)
-    2.077_10, // S  (Z=16)
-    3.612_72, // Cl (Z=17)
-    0.0,      // Ar (Z=18)
-    0.501_46, // K  (Z=19)
-    0.024_55, // Ca (Z=20)
-    0.188,    // Sc (Z=21)
-    0.079,    // Ti (Z=22)
-    0.525,    // V  (Z=23)
-    0.666_0,  // Cr (Z=24)
-    0.0,      // Mn (Z=25)
-    0.151,    // Fe (Z=26)
-    0.662_26, // Co (Z=27)
-    1.156_16, // Ni (Z=28)
-    1.235_78, // Cu (Z=29)
-    0.0,      // Zn (Z=30)
-    0.430,    // Ga (Z=31)
-    1.232_71, // Ge (Z=32)
-    0.804,    // As (Z=33)
-    2.020_67, // Se (Z=34)
-    3.363_59, // Br (Z=35)
-    0.0,      // Kr (Z=36)
-    0.485_92, // Rb (Z=37)
-    0.048_16, // Sr (Z=38)
-    0.307,    // Y  (Z=39)
-    0.426,    // Zr (Z=40)
-    0.916_0,  // Nb (Z=41)
-    0.748_0,  // Mo (Z=42)
-    0.550,    // Tc (Z=43)
-    1.046_38, // Ru (Z=44)
-    1.142_89, // Rh (Z=45)
-    0.562_14, // Pd (Z=46)
-    1.304_7,  // Ag (Z=47)
-    0.0,      // Cd (Z=48)
-    0.404,    // In (Z=49)
-    1.112_07, // Sn (Z=50)
-    1.047_01, // Sb (Z=51)
-    1.970_88, // Te (Z=52)
-    3.059_04, // I  (Z=53)
-    0.0,      // Xe (Z=54)
-    0.471_63, // Cs (Z=55)
-    0.144_62, // Ba (Z=56)
-    0.470,    // La (Z=57)
-    0.570,    // Ce (Z=58)
-    0.962,    // Pr (Z=59)
-    0.0,      // Nd (Z=60)
-    0.0,      // Pm (Z=61)
-    0.0,      // Sm (Z=62)
-    0.0,      // Eu (Z=63)
-    0.0,      // Gd (Z=64)
-    0.0,      // Tb (Z=65)
-    0.0,      // Dy (Z=66)
-    0.0,      // Ho (Z=67)
-    0.0,      // Er (Z=68)
-    1.029,    // Tm (Z=69)
-    0.0,      // Yb (Z=70)
-    0.340,    // Lu (Z=71)
-    0.017,    // Hf (Z=72)
-    0.322,    // Ta (Z=73)
-    0.816_26, // W  (Z=74)
-    0.150,    // Re (Z=75)
-    1.077_80, // Os (Z=76)
-    1.564_36, // Ir (Z=77)
-    2.128_10, // Pt (Z=78)
-    2.308_63, // Au (Z=79)
-    0.0,      // Hg (Z=80)
-    0.377,    // Tl (Z=81)
-    0.364_3,  // Pb (Z=82)
-    0.942_36, // Bi (Z=83)
-    1.900,    // Po (Z=84)
-    2.415_78, // At (Z=85)
-    0.0,      // Rn (Z=86)
-    0.486_3,  // Fr (Z=87)
-    0.144,    // Ra (Z=88)
-    0.350,    // Ac (Z=89)
-    1.170,    // Th (Z=90)
-    0.0,      // Pa (Z=91)
-    0.0,      // U  (Z=92)
-    0.0,      // Np-Og (Z=93-118): most actinides/superheavy have unbound anions
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,   // Z=94-102
-    0.470, // Lr (Z=103)
-    0.0,   // Rf (Z=104)
-    0.680, // Db (Z=105)
-    0.810, // Sg (Z=106)
-    0.0, 0.0, 0.0, 0.0,   // Bh-Ds (Z=107-110)
-    1.565, // Rg (Z=111)
-    0.0,   // Cn (Z=112)
-    0.680, // Nh (Z=113)
-    0.905, // Fl (Z=114)
-    0.674, // Mc (Z=115)
-    1.470, // Lv (Z=116)
-    1.635, // Ts (Z=117)
-    0.0,   // Og (Z=118)
+const ELECTRON_AFFINITY_EV: [ElectronAffinity; 118] = [
+    ElectronAffinity::Bound(0.754195),    // H (Z=1) Lykke 1991; AHH99
+    ElectronAffinity::Unbound,            // He (Z=2) AHH99 <0
+    ElectronAffinity::Bound(0.618049),    // Li (Z=3) AHH99
+    ElectronAffinity::Unbound,            // Be (Z=4) AHH99 <0
+    ElectronAffinity::Bound(0.279723),    // B (Z=5) AHH99
+    ElectronAffinity::Bound(1.2621226),   // C (Z=6) Bresteau 2016 (AHH99 1.262118(20))
+    ElectronAffinity::Unbound,            // N (Z=7) AHH99 -0.07(2)
+    ElectronAffinity::Bound(1.461112972), // O (Z=8) Kristiansson 2022
+    ElectronAffinity::Bound(3.4011887),   // F (Z=9) AHH99
+    ElectronAffinity::Unbound,            // Ne (Z=10) AHH99 <0
+    ElectronAffinity::Bound(0.547926),    // Na (Z=11) AHH99
+    ElectronAffinity::Unbound,            // Mg (Z=12) AHH99 <0
+    ElectronAffinity::Bound(0.43283),     // Al (Z=13) AHH99
+    ElectronAffinity::Bound(1.389521),    // Si (Z=14) AHH99
+    ElectronAffinity::Bound(0.746609),    // P (Z=15) Pelaez 2011 (AHH99 0.7465(3))
+    ElectronAffinity::Bound(2.0771029),   // S (Z=16) AHH99
+    ElectronAffinity::Bound(3.612724),    // Cl (Z=17) AHH99
+    ElectronAffinity::Unbound,            // Ar (Z=18) AHH99 <0
+    ElectronAffinity::Bound(0.501459),    // K (Z=19) AHH99
+    ElectronAffinity::Bound(0.02455),     // Ca (Z=20) AHH99
+    ElectronAffinity::Bound(0.179378),    // Sc (Z=21) Lu et al. JCP 2023 (AHH99 0.188(20))
+    ElectronAffinity::Bound(0.07554),     // Ti (Z=22) Tang 2018 (AHH99 0.084(9))
+    ElectronAffinity::Bound(0.52766),     // V (Z=23) Fu 2016 (AHH99 0.525(12))
+    ElectronAffinity::Bound(0.67584),     // Cr (Z=24) Bilodeau 1998 5451.0(10) cm-1; AHH99
+    ElectronAffinity::Unbound,            // Mn (Z=25) AHH99 <0
+    ElectronAffinity::Bound(0.153236),    // Fe (Z=26) Chen 2016 (AHH99 0.151(3))
+    ElectronAffinity::Bound(0.662256),    // Co (Z=27) Chen&Ning 2016 (AHH99 0.6633(6))
+    ElectronAffinity::Bound(1.15716),     // Ni (Z=28) Scheer 1998 1157.16(12) meV; AHH99
+    ElectronAffinity::Bound(1.23578),     // Cu (Z=29) Bilodeau 1998; AHH99
+    ElectronAffinity::Unbound,            // Zn (Z=30) AHH99 <0
+    ElectronAffinity::Bound(0.301166),    // Ga (Z=31) Tang 2020 (AHH99 0.41(4))
+    ElectronAffinity::Bound(1.2326764),   // Ge (Z=32) Bresteau 2015 (AHH99 1.232712(15))
+    ElectronAffinity::Bound(0.804486),    // As (Z=33) Blondel&Drag 2025 (AHH99 0.814(8))
+    ElectronAffinity::Bound(2.020667),    // Se (Z=34) Zhang 2026 (AHH99 2.02067(2))
+    ElectronAffinity::Bound(3.363588),    // Br (Z=35) AHH99
+    ElectronAffinity::Unbound,            // Kr (Z=36) AHH99 <0
+    ElectronAffinity::Bound(0.485916),    // Rb (Z=37) AHH99
+    ElectronAffinity::Bound(0.05206),     // Sr (Z=38) Andersen 1997 52.06(6) meV; AHH99
+    ElectronAffinity::Bound(0.31129),     // Y (Z=39) Lu et al. JCP 2023 (AHH99 0.307(12))
+    ElectronAffinity::Bound(0.433283),    // Zr (Z=40) Fu 2017 (AHH99 0.426(14))
+    ElectronAffinity::Bound(0.9174),      // Nb (Z=41) Luo 2016 (AHH99 0.893(25))
+    ElectronAffinity::Bound(0.7472),      // Mo (Z=42) Bilodeau 1998 6027(2) cm-1; AHH99
+    ElectronAffinity::Bound(0.55),        // Tc (Z=43) AHH99 semi-empirical est.
+    ElectronAffinity::Bound(1.04638),     // Ru (Z=44) AHH99 (NingLu2022 1.04627(2), W)
+    ElectronAffinity::Bound(1.14289),     // Rh (Z=45) Scheer 1998; AHH99
+    ElectronAffinity::Bound(0.56214),     // Pd (Z=46) Scheer 1998; AHH99
+    ElectronAffinity::Bound(1.30447),     // Ag (Z=47) AHH99 10521.3(2) cm-1 (Bilodeau 1998)
+    ElectronAffinity::Unbound,            // Cd (Z=48) AHH99 <0
+    ElectronAffinity::Bound(0.38392),     // In (Z=49) Walter 2010 (AHH99 0.404(9))
+    ElectronAffinity::Bound(1.11207),     // Sn (Z=50) Vandevraye 2013 (AHH99 1.112066(15))
+    ElectronAffinity::Bound(1.047401),    // Sb (Z=51) Scheer 1997 8447.86(15) cm-1; AHH99
+    ElectronAffinity::Bound(1.970875),    // Te (Z=52) AHH99
+    ElectronAffinity::Bound(3.0590465),   // I (Z=53) Pelaez 2009 (AHH99 3.059038(10))
+    ElectronAffinity::Unbound,            // Xe (Z=54) AHH99 <0
+    ElectronAffinity::Bound(0.4715983),   // Cs (Z=55) Navarro Navarrete 2024 (AHH99 0.471626(25))
+    ElectronAffinity::Bound(0.14462),     // Ba (Z=56) AHH99
+    ElectronAffinity::Bound(0.557546),    // La (Z=57) Blondel 2020 / Lu 2019 (AHH99 0.47(2))
+    ElectronAffinity::Bound(0.60016),     // Ce (Z=58) Fu 2020 (AHH99: <0.5 est.)
+    ElectronAffinity::Bound(0.10923),     // Pr (Z=59) Fu 2020 PRA 101 022502
+    ElectronAffinity::Bound(0.09748),     // Nd (Z=60) Fu 2020 PRA 101 022502
+    ElectronAffinity::Bound(0.129),       // Pm (Z=61) Felfli 2009 calc (uncertain)
+    ElectronAffinity::Bound(0.162),       // Sm (Z=62) Felfli 2009 calc (uncertain)
+    ElectronAffinity::Bound(0.116),       // Eu (Z=63) Cheng&Castleman 2015
+    ElectronAffinity::Bound(0.212),       // Gd (Z=64) NingLu 2022 (primary not verified)
+    ElectronAffinity::Bound(0.13131),     // Tb (Z=65) Fu 2020 PRA 101 022502
+    ElectronAffinity::Bound(0.015),       // Dy (Z=66) Nadeau 1997 AMS (uncertain)
+    ElectronAffinity::Bound(0.338),       // Ho (Z=67) Felfli 2009 calc (uncertain)
+    ElectronAffinity::Bound(0.312),       // Er (Z=68) Felfli 2009 calc (uncertain)
+    ElectronAffinity::Bound(1.029),       // Tm (Z=69) Davis&Thompson 2001
+    ElectronAffinity::Unbound,            // Yb (Z=70) CRC est. -0.02
+    ElectronAffinity::Bound(0.23882),     // Lu (Z=71) Fu 2019
+    ElectronAffinity::Bound(0.178),       // Hf (Z=72) Tang 2018 (AHH99 ~0)
+    ElectronAffinity::Bound(0.322),       // Ta (Z=73) AHH99 (NingLu2022 0.328859(23), W)
+    ElectronAffinity::Bound(0.815),       // W (Z=74) AHH99 (NingLu2022 0.816500(82), W)
+    ElectronAffinity::Bound(0.060396),    // Re (Z=75) Chen&Ning 2017 (AHH99 0.15(15))
+    ElectronAffinity::Bound(1.0778),      // Os (Z=76) AHH99 (NingLu2022 1.077661(24), W)
+    ElectronAffinity::Bound(1.564057),    // Ir (Z=77) Lu 2020 (Bilodeau 1999/AHH99 1.56436(15))
+    ElectronAffinity::Bound(2.1251),      // Pt (Z=78) Bilodeau 1999 17140.1(4) cm-1; AHH99
+    ElectronAffinity::Bound(2.30861),     // Au (Z=79) AHH99
+    ElectronAffinity::Unbound,            // Hg (Z=80) AHH99 <0
+    ElectronAffinity::Bound(0.320053),    // Tl (Z=81) Walter 2020 (AHH99 0.377(13))
+    ElectronAffinity::Bound(0.356721),    // Pb (Z=82) Bresteau 2019 (AHH99 0.364(8))
+    ElectronAffinity::Bound(0.942363),    // Bi (Z=83) AHH99
+    ElectronAffinity::Bound(1.4), // Po (Z=84) Li 2012 MCDHF calc; AHH99 SE est 1.9(3) (unmeasured)
+    ElectronAffinity::Bound(2.41578), // At (Z=85) Leimbach 2020
+    ElectronAffinity::Unbound,    // Rn (Z=86) AHH99 <0
+    ElectronAffinity::Bound(0.491), // Fr (Z=87) Landau 2001 calc
+    ElectronAffinity::Bound(0.1), // Ra (Z=88) CRC/Andersen est. (uncertain)
+    ElectronAffinity::Bound(0.35), // Ac (Z=89) CRC est. (uncertain)
+    ElectronAffinity::Bound(0.60769), // Th (Z=90) Tang 2019 PRL
+    ElectronAffinity::Bound(0.55), // Pa (Z=91) est. (uncertain)
+    ElectronAffinity::Bound(0.31497), // U (Z=92) Tang 2021 PRA; Ciborowski 2021 0.309(25)
+    ElectronAffinity::Bound(0.48), // Np (Z=93) est. (uncertain)
+    ElectronAffinity::Unbound,    // Pu (Z=94) est. -0.50 (uncertain)
+    ElectronAffinity::Bound(0.1), // Am (Z=95) est. (uncertain)
+    ElectronAffinity::Bound(0.28), // Cm (Z=96) est. (uncertain)
+    ElectronAffinity::Unbound,    // Bk (Z=97) est. -1.72 (uncertain)
+    ElectronAffinity::Unbound,    // Cf (Z=98) est. -1.01 (uncertain)
+    ElectronAffinity::Unbound,    // Es (Z=99) est. -0.30 (uncertain)
+    ElectronAffinity::Bound(0.35), // Fm (Z=100) est. (uncertain)
+    ElectronAffinity::Bound(0.98), // Md (Z=101) est. (uncertain)
+    ElectronAffinity::Unbound,    // No (Z=102) est. -2.33 (uncertain)
+    ElectronAffinity::Bound(0.446), // Lr (Z=103) Guo 2024 PRA 110 022817 (FSCC 2007: 0.476)
+    ElectronAffinity::Unknown,    // Rf (Z=104) no value in Smits 2023 Tab.2
+    ElectronAffinity::Bound(1.189), // Db (Z=105) Smits 2023 Tab.2
+    ElectronAffinity::Unknown,    // Sg (Z=106) no value in Smits 2023
+    ElectronAffinity::Unknown,    // Bh (Z=107) no value
+    ElectronAffinity::Unknown,    // Hs (Z=108) no value
+    ElectronAffinity::Unknown,    // Mt (Z=109) no value
+    ElectronAffinity::Bound(0.83), // Ds (Z=110) Smits 2023 Tab.2
+    ElectronAffinity::Bound(1.56), // Rg (Z=111) Eliav 1994 abstract 1.56 (Eliav 2015 1.565; Smits 2023 1.97)
+    ElectronAffinity::Unbound,     // Cn (Z=112) Borschevsky slides / Smits 2023: 0
+    ElectronAffinity::Bound(0.776), // Nh (Z=113) Guo 2022 JPB (Borschevsky 0.69; Smits 0.73)
+    ElectronAffinity::Unbound,     // Fl (Z=114) Borschevsky slides / Smits 2023: 0 (no EA)
+    ElectronAffinity::Bound(0.313), // Mc (Z=115) Smits 2023 (Borschevsky 0.366)
+    ElectronAffinity::Bound(0.776), // Lv (Z=116) Smits 2023
+    ElectronAffinity::Bound(1.602), // Ts (Z=117) Smits 2023 (Borschevsky 1.719)
+    ElectronAffinity::Bound(0.076), // Og (Z=118) Kaygorodov 2021 (Eliav 1996: 0.056)
 ];
 
-/// Returns the electron affinity in eV for the given atomic number.
-///
-/// The electron affinity is the energy released when an electron is added
-/// to a neutral atom: X + e⁻ → X⁻ + EA.
-///
-/// Returns 0.0 for elements with unstable anions (noble gases, etc.).
+/// Returns the electron affinity of the neutral atom, distinguishing bound,
+/// unbound and unknown anions.
 ///
 /// # Errors
 ///
 /// Returns [`TanmatraError::InvalidAtomicNumber`] if Z is 0 or > 118.
 #[inline]
-pub fn electron_affinity_ev(z: u32) -> Result<f64, TanmatraError> {
+pub fn electron_affinity(z: u32) -> Result<ElectronAffinity, TanmatraError> {
     if z == 0 || z > 118 {
         return Err(TanmatraError::InvalidAtomicNumber(z));
     }
     Ok(ELECTRON_AFFINITY_EV[(z - 1) as usize])
 }
 
-/// NIST ionization energies for Z=1 to Z=118 in eV.
+/// Returns the electron affinity in eV for the given atomic number.
 ///
-/// Source: NIST Atomic Spectra Database, Ionization Energies.
+/// The electron affinity is the energy released when an electron is added
+/// to a neutral atom: X + e⁻ → X⁻ + EA.
+///
+/// Returns 0.0 both when no bound anion exists and when no value is known;
+/// use [`electron_affinity`] to tell these apart.
+///
+/// # Errors
+///
+/// Returns [`TanmatraError::InvalidAtomicNumber`] if Z is 0 or > 118.
+#[inline]
+pub fn electron_affinity_ev(z: u32) -> Result<f64, TanmatraError> {
+    Ok(match electron_affinity(z)? {
+        ElectronAffinity::Bound(ev) => ev,
+        ElectronAffinity::Unbound | ElectronAffinity::Unknown => 0.0,
+    })
+}
+
+/// First ionization energies for Z=1 to Z=118 in eV.
+///
+/// Z=1–108: NIST Atomic Spectra Database, Ionization Energies Data
+/// (Kramida, Ralchenko, Reader & NIST ASD Team), retrieved 2026-09. Values NIST
+/// marks as theoretical, interpolated or estimated are noted per entry.
 /// <https://physics.nist.gov/PhysRefData/ASD/ionEnergy.html>
 ///
-/// Z=1-103: experimental values from NIST ASD.
-/// Z=104-118: relativistic theoretical predictions (noted in comments).
+/// Z=109–118: relativistic calculations compiled in Smits et al.,
+/// Phys. Rep. 1035, 1 (2023), Table 2 (no measurements exist).
 #[allow(clippy::too_many_lines)]
 const IONIZATION_ENERGIES_EV: [f64; 118] = [
-    // --- Period 1 ---
-    13.598_44, // H  (Z=1)
-    24.587_4,  // He (Z=2)
-    // --- Period 2 ---
-    5.391_71, // Li (Z=3)
-    9.322_7,  // Be (Z=4)
-    8.298_0,  // B  (Z=5)
-    11.260_3, // C  (Z=6)
-    14.534_1, // N  (Z=7)
-    13.618_1, // O  (Z=8)
-    17.422_8, // F  (Z=9)
-    21.564_5, // Ne (Z=10)
-    // --- Period 3 ---
-    5.139_08, // Na (Z=11)
-    7.646_2,  // Mg (Z=12)
-    5.985_77, // Al (Z=13)
-    8.151_7,  // Si (Z=14)
-    10.486_7, // P  (Z=15)
-    10.360_0, // S  (Z=16)
-    12.967_6, // Cl (Z=17)
-    15.759_6, // Ar (Z=18)
-    // --- Period 4 ---
-    4.340_66, // K  (Z=19)
-    6.113_2,  // Ca (Z=20)
-    6.561_5,  // Sc (Z=21)
-    6.828_1,  // Ti (Z=22)
-    6.746_2,  // V  (Z=23)
-    6.766_5,  // Cr (Z=24)
-    7.434_0,  // Mn (Z=25)
-    7.902_4,  // Fe (Z=26)
-    7.881_0,  // Co (Z=27)
-    7.639_8,  // Ni (Z=28)
-    7.726_4,  // Cu (Z=29)
-    9.394_2,  // Zn (Z=30)
-    5.999_3,  // Ga (Z=31)
-    7.899_4,  // Ge (Z=32)
-    9.788_6,  // As (Z=33)
-    9.752_4,  // Se (Z=34)
-    11.813_8, // Br (Z=35)
-    13.999_6, // Kr (Z=36)
-    // --- Period 5 ---
-    4.177_13,  // Rb (Z=37)
-    5.694_84,  // Sr (Z=38)
-    6.217_26,  // Y  (Z=39)
-    6.634_0,   // Zr (Z=40)
-    6.758_85,  // Nb (Z=41)
-    7.092_43,  // Mo (Z=42)
-    7.28,      // Tc (Z=43)
-    7.360_50,  // Ru (Z=44)
-    7.458_90,  // Rh (Z=45)
-    8.336_9,   // Pd (Z=46)
-    7.576_24,  // Ag (Z=47)
-    8.993_82,  // Cd (Z=48)
-    5.786_36,  // In (Z=49)
-    7.343_92,  // Sn (Z=50)
-    8.608_4,   // Sb (Z=51)
-    9.009_66,  // Te (Z=52)
-    10.451_26, // I  (Z=53)
-    12.129_84, // Xe (Z=54)
-    // --- Period 6 ---
-    3.893_905, // Cs (Z=55)
-    5.211_70,  // Ba (Z=56)
-    5.576_9,   // La (Z=57)
-    5.538_7,   // Ce (Z=58)
-    5.473,     // Pr (Z=59)
-    5.525_0,   // Nd (Z=60)
-    5.582_0,   // Pm (Z=61)
-    5.643_71,  // Sm (Z=62)
-    5.670_38,  // Eu (Z=63)
-    6.149_80,  // Gd (Z=64)
-    5.863_8,   // Tb (Z=65)
-    5.938_9,   // Dy (Z=66)
-    6.021_5,   // Ho (Z=67)
-    6.107_7,   // Er (Z=68)
-    6.184_31,  // Tm (Z=69)
-    6.254_16,  // Yb (Z=70)
-    5.425_59,  // Lu (Z=71)
-    6.825_07,  // Hf (Z=72)
-    7.549_6,   // Ta (Z=73)
-    7.864_03,  // W  (Z=74)
-    7.833_52,  // Re (Z=75)
-    8.438_23,  // Os (Z=76)
-    8.967_00,  // Ir (Z=77)
-    8.958_7,   // Pt (Z=78)
-    9.225_53,  // Au (Z=79)
-    10.437_50, // Hg (Z=80)
-    6.108_29,  // Tl (Z=81)
-    7.416_66,  // Pb (Z=82)
-    7.285_6,   // Bi (Z=83)
-    8.414,     // Po (Z=84)
-    9.317_5,   // At (Z=85)
-    10.748_5,  // Rn (Z=86)
-    // --- Period 7 ---
-    4.072_74, // Fr (Z=87)
-    5.278_46, // Ra (Z=88)
-    5.380_2,  // Ac (Z=89)
-    6.306_7,  // Th (Z=90)
-    5.89,     // Pa (Z=91)
-    6.194_05, // U  (Z=92)
-    6.265_6,  // Np (Z=93)
-    6.026_0,  // Pu (Z=94)
-    5.993_8,  // Am (Z=95)
-    6.021_96, // Cm (Z=96)
-    6.198_5,  // Bk (Z=97)
-    6.281_7,  // Cf (Z=98)
-    6.42,     // Es (Z=99)
-    6.50,     // Fm (Z=100)
-    6.58,     // Md (Z=101)
-    6.65,     // No (Z=102)
-    4.96,     // Lr (Z=103)
-    // --- Superheavy (theoretical) ---
-    6.01, // Rf (Z=104)
-    6.89, // Db (Z=105)
-    7.08, // Sg (Z=106)
-    7.7,  // Bh (Z=107)
-    7.6,  // Hs (Z=108)
-    9.1,  // Mt (Z=109)
-    8.7,  // Ds (Z=110)
-    9.79, // Rg (Z=111)
-    9.38, // Cn (Z=112)
-    5.85, // Nh (Z=113)
-    7.31, // Fl (Z=114)
-    6.92, // Mc (Z=115)
-    8.59, // Lv (Z=116)
-    7.64, // Ts (Z=117)
-    8.91, // Og (Z=118)
+    13.598434599702, // H (Z=1)
+    24.587389011,    // He (Z=2)
+    5.391714996,     // Li (Z=3)
+    9.322699,        // Be (Z=4)
+    8.298019,        // B (Z=5)
+    11.260288,       // C (Z=6)
+    14.53413,        // N (Z=7)
+    13.618055,       // O (Z=8)
+    17.42282,        // F (Z=9)
+    21.564541,       // Ne (Z=10)
+    5.13907696,      // Na (Z=11)
+    7.646236,        // Mg (Z=12)
+    5.985769,        // Al (Z=13)
+    8.15168,         // Si (Z=14)
+    10.486686,       // P (Z=15)
+    10.3600167,      // S (Z=16)
+    12.967633,       // Cl (Z=17)
+    15.7596119,      // Ar (Z=18)
+    4.34066373,      // K (Z=19)
+    6.113154921,     // Ca (Z=20)
+    6.56149,         // Sc (Z=21)
+    6.82812,         // Ti (Z=22)
+    6.746187,        // V (Z=23)
+    6.76651,         // Cr (Z=24)
+    7.434038,        // Mn (Z=25)
+    7.9024681,       // Fe (Z=26)
+    7.88101,         // Co (Z=27)
+    7.639878,        // Ni (Z=28)
+    7.72638,         // Cu (Z=29)
+    9.394197,        // Zn (Z=30)
+    5.999302,        // Ga (Z=31)
+    7.899435,        // Ge (Z=32)
+    9.78855,         // As (Z=33)
+    9.752368,        // Se (Z=34)
+    11.81381,        // Br (Z=35)
+    13.9996055,      // Kr (Z=36)
+    4.1771281,       // Rb (Z=37)
+    5.69486745,      // Sr (Z=38)
+    6.21726,         // Y (Z=39)
+    6.634126,        // Zr (Z=40)
+    6.75885,         // Nb (Z=41)
+    7.09243,         // Mo (Z=42)
+    7.11938,         // Tc (Z=43)
+    7.3605,          // Ru (Z=44)
+    7.4589,          // Rh (Z=45)
+    8.336839,        // Pd (Z=46)
+    7.576234,        // Ag (Z=47)
+    8.99382,         // Cd (Z=48)
+    5.7863558,       // In (Z=49)
+    7.343918,        // Sn (Z=50)
+    8.608389,        // Sb (Z=51)
+    9.009808,        // Te (Z=52)
+    10.451236,       // I (Z=53)
+    12.1298437,      // Xe (Z=54)
+    3.89390572743,   // Cs (Z=55)
+    5.2116646,       // Ba (Z=56)
+    5.5769,          // La (Z=57)
+    5.5386,          // Ce (Z=58)
+    5.4702,          // Pr (Z=59) — NIST ASD
+    5.52475,         // Nd (Z=60)
+    5.58187,         // Pm (Z=61)
+    5.643722,        // Sm (Z=62)
+    5.670385,        // Eu (Z=63)
+    6.1498,          // Gd (Z=64)
+    5.8638,          // Tb (Z=65)
+    5.939061,        // Dy (Z=66)
+    6.0215,          // Ho (Z=67)
+    6.1077,          // Er (Z=68)
+    6.184402,        // Tm (Z=69)
+    6.25416,         // Yb (Z=70)
+    5.425871,        // Lu (Z=71)
+    6.82507,         // Hf (Z=72)
+    7.549571,        // Ta (Z=73)
+    7.86403,         // W (Z=74)
+    7.83352,         // Re (Z=75)
+    8.43823,         // Os (Z=76)
+    8.96702,         // Ir (Z=77)
+    8.95883,         // Pt (Z=78)
+    9.225554,        // Au (Z=79)
+    10.437504,       // Hg (Z=80)
+    6.1082873,       // Tl (Z=81)
+    7.4166799,       // Pb (Z=82)
+    7.285516,        // Bi (Z=83)
+    8.41807,         // Po (Z=84)
+    9.31751,         // At (Z=85)
+    10.7485,         // Rn (Z=86)
+    4.0727411,       // Fr (Z=87)
+    5.2784239,       // Ra (Z=88)
+    5.380235,        // Ac (Z=89)
+    6.3067,          // Th (Z=90)
+    5.89,            // Pa (Z=91) — NIST ASD (theory/estimate)
+    6.19405,         // U (Z=92)
+    6.265608,        // Np (Z=93)
+    6.02576,         // Pu (Z=94)
+    5.97381,         // Am (Z=95)
+    5.992241,        // Cm (Z=96)
+    6.19785,         // Bk (Z=97)
+    6.281878,        // Cf (Z=98)
+    6.3684,          // Es (Z=99)
+    6.5,             // Fm (Z=100) — NIST ASD (theory/estimate)
+    6.58,            // Md (Z=101) — NIST ASD (theory/estimate)
+    6.62621,         // No (Z=102)
+    4.96,            // Lr (Z=103)
+    6.02,            // Rf (Z=104) — NIST ASD (theory/estimate)
+    6.8,             // Db (Z=105) — NIST ASD (theory/estimate)
+    7.8,             // Sg (Z=106) — NIST ASD (theory/estimate)
+    7.7,             // Bh (Z=107) — NIST ASD (theory/estimate)
+    7.6,             // Hs (Z=108) — NIST ASD (theory/estimate)
+    10.4,            // Mt (Z=109) — Smits et al. 2023, theory
+    9.562,           // Ds (Z=110) — Smits et al. 2023, theory
+    11.03,           // Rg (Z=111) — Smits et al. 2023, theory
+    12.02,           // Cn (Z=112) — Smits et al. 2023, theory
+    7.49,            // Nh (Z=113) — Smits et al. 2023, theory
+    8.65,            // Fl (Z=114) — Smits et al. 2023, theory
+    5.574,           // Mc (Z=115) — Smits et al. 2023, theory
+    6.855,           // Lv (Z=116) — Smits et al. 2023, theory
+    7.654,           // Ts (Z=117) — Smits et al. 2023, theory
+    8.888,           // Og (Z=118) — Smits et al. 2023, theory
 ];
 
 /// Returns the first ionization energy in eV for the given atomic number.
@@ -1322,9 +1436,6 @@ pub fn ionization_energy_ev(z: u32) -> Result<f64, TanmatraError> {
 // ---------------------------------------------------------------------------
 // Relativistic quantum: Dirac equation, hyperfine, anomalous moment, Breit
 // ---------------------------------------------------------------------------
-
-/// Rydberg energy in eV (13.605693 eV, CODATA 2022).
-const RYDBERG_EV: f64 = 13.605_693;
 
 /// Calculates the exact Dirac energy for a hydrogen-like atom in MeV.
 ///
@@ -1350,14 +1461,14 @@ pub fn dirac_energy_mev(z: u32, n: u32, two_j: u32) -> Result<f64, TanmatraError
             "n must be >= 1",
         )));
     }
-    if two_j == 0 || two_j.is_multiple_of(2) {
+    if two_j == 0 || two_j.is_multiple_of(2) || two_j > 2 * n - 1 {
         return Err(TanmatraError::InvalidQuantumNumbers(alloc::format!(
-            "two_j={two_j} must be odd and >= 1 (half-integer j)"
+            "two_j={two_j} must be odd, >= 1 and <= 2n-1 (half-integer j <= n - 1/2)"
         )));
     }
 
-    let alpha = crate::constants::FINE_STRUCTURE;
-    let me_c2 = crate::constants::ELECTRON_MASS_MEV;
+    let alpha = FINE_STRUCTURE;
+    let me_c2 = ELECTRON_MASS_MEV;
     let zf = z as f64;
     let nf = n as f64;
     let j_plus_half = f64::midpoint(two_j as f64, 1.0); // j + 1/2
@@ -1400,7 +1511,7 @@ pub fn dirac_energy_mev(z: u32, n: u32, two_j: u32) -> Result<f64, TanmatraError
 #[inline]
 pub fn dirac_binding_energy_ev(z: u32, n: u32, two_j: u32) -> Result<f64, TanmatraError> {
     let e_dirac = dirac_energy_mev(z, n, two_j)?;
-    let me_c2 = crate::constants::ELECTRON_MASS_MEV;
+    let me_c2 = ELECTRON_MASS_MEV;
     Ok((me_c2 - e_dirac) * 1e6)
 }
 
@@ -1418,61 +1529,85 @@ pub fn dirac_binding_energy_ev(z: u32, n: u32, two_j: u32) -> Result<f64, Tanmat
 pub fn relativistic_correction_ev(z: u32, n: u32, two_j: u32) -> Result<f64, TanmatraError> {
     let binding_dirac = dirac_binding_energy_ev(z, n, two_j)?;
 
-    // Non-relativistic binding energy: 13.605693 * Z² / n²
+    // Non-relativistic binding energy ½α²m_ec² Z²/n², from the same constants
+    // as the Dirac energy so the difference is self-consistent.
     let zf = z as f64;
     let nf = n as f64;
-    let binding_nonrel = RYDBERG_EV * zf * zf / (nf * nf);
+    let rydberg_ev = 0.5 * FINE_STRUCTURE * FINE_STRUCTURE * ELECTRON_MASS_MEV * 1e6;
+    let binding_nonrel = rydberg_ev * zf * zf / (nf * nf);
 
     Ok(binding_dirac - binding_nonrel)
 }
 
-/// Calculates the hyperfine splitting for s-states of hydrogen-like atoms in eV.
+/// Calculates the magnetic-dipole hyperfine splitting of an s state of a
+/// hydrogen-like ion with a nuclear spin-1/2 nucleus, in eV.
 ///
-/// For an s-state (l=0), the magnetic dipole hyperfine splitting is:
+/// ΔE = (4/3) α⁴ Z³ g_I (m_e/m_p) m_e c² / n³  (Fermi contact interaction,
+/// leading order: no reduced-mass, QED or relativistic corrections)
 ///
-/// ΔE_hfs = (4/3) × α⁴ × Z³ × (m_e/m_p) × g_I × m_e c² / n³
-///
-/// For hydrogen 1s: this gives ~5.88 × 10⁻⁶ eV, corresponding to the
-/// famous 21 cm line at 1420.405751 MHz.
+/// For hydrogen 1s this gives 5.8776e-6 eV (1421.2 MHz; measured 1420.406 MHz).
+/// For nuclear spin I ≠ 1/2 use [`hyperfine_splitting_spin_ev`].
 ///
 /// Parameters:
 /// - `z`: atomic number
 /// - `n`: principal quantum number
-/// - `nuclear_g_factor`: nuclear g-factor (5.585694713 for proton)
-///
-/// Returns the hyperfine splitting energy in eV.
+/// - `nuclear_g_factor`: g_I = μ_I/(I μ_N) (5.5856946893 for the proton)
 #[must_use]
 #[inline]
 pub fn hyperfine_splitting_ev(z: u32, n: u32, nuclear_g_factor: f64) -> f64 {
-    if n == 0 {
+    hyperfine_splitting_spin_ev(z, n, nuclear_g_factor, 0.5)
+}
+
+/// Calculates the magnetic-dipole hyperfine splitting between F = I + 1/2 and
+/// F = I − 1/2 of an s state of a hydrogen-like ion, in eV.
+///
+/// ΔE = A (I + 1/2),  A = (4/3) α⁴ Z³ g_I (m_e/m_p) m_e c² / n³
+///
+/// Leading order (Fermi contact term). Deuterium 1s (I = 1,
+/// g_d = 0.8574382335): 327.23 MHz (measured 327.384 MHz).
+///
+/// Returns 0.0 for n = 0 or I ≤ 0.
+#[must_use]
+#[inline]
+pub fn hyperfine_splitting_spin_ev(
+    z: u32,
+    n: u32,
+    nuclear_g_factor: f64,
+    nuclear_spin: f64,
+) -> f64 {
+    if n == 0 || nuclear_spin <= 0.0 {
         return 0.0;
     }
-
-    let alpha = crate::constants::FINE_STRUCTURE;
-    let me_mev = crate::constants::ELECTRON_MASS_MEV;
-    let mp_mev = crate::constants::PROTON_MASS_MEV;
     let zf = z as f64;
     let nf = n as f64;
-
-    let alpha4 = alpha * alpha * alpha * alpha;
-    let mass_ratio = me_mev / mp_mev;
-    let me_ev = me_mev * 1e6;
-
-    (4.0 / 3.0) * alpha4 * zf * zf * zf * mass_ratio * nuclear_g_factor * me_ev / (nf * nf * nf)
+    let alpha4 = FINE_STRUCTURE * FINE_STRUCTURE * FINE_STRUCTURE * FINE_STRUCTURE;
+    let mass_ratio = ELECTRON_MASS_MEV / PROTON_MASS_MEV;
+    let a_const = (4.0 / 3.0)
+        * alpha4
+        * zf
+        * zf
+        * zf
+        * mass_ratio
+        * nuclear_g_factor
+        * ELECTRON_MASS_MEV
+        * 1e6
+        / (nf * nf * nf);
+    a_const * (nuclear_spin + 0.5)
 }
 
 /// Returns the free-electron g-factor including QED corrections.
 ///
 /// g_e = 2(1 + a_e) where a_e is the anomalous magnetic moment.
 ///
-/// CODATA 2022: g_e = 2.00231930436256.
+/// CODATA 2022: |g_e| = 2.00231930436092.
 #[must_use]
 #[inline]
 pub fn electron_g_factor() -> f64 {
-    2.0 * (1.0 + crate::constants::ELECTRON_ANOMALOUS_MOMENT)
+    2.0 * (1.0 + ELECTRON_ANOMALOUS_MOMENT)
 }
 
-/// Calculates the bound-electron g-factor for hydrogen-like ions (Breit formula).
+/// Calculates the bound-electron g-factor of the 1s ground state of a
+/// hydrogen-like ion (Breit 1928 Dirac value times the free-electron QED factor).
 ///
 /// g_bound = (2/3)(1 + 2√(1 - (αZ)²)) × (1 + a_e)
 ///
@@ -1484,7 +1619,7 @@ pub fn electron_g_factor() -> f64 {
 #[must_use]
 #[inline]
 pub fn bound_electron_g_factor(z: u32) -> f64 {
-    let alpha = crate::constants::FINE_STRUCTURE;
+    let alpha = FINE_STRUCTURE;
     let az = alpha * z as f64;
     let az2 = az * az;
 
@@ -1494,16 +1629,17 @@ pub fn bound_electron_g_factor(z: u32) -> f64 {
     }
 
     let breit = (2.0 / 3.0) * (1.0 + 2.0 * libm::sqrt(1.0 - az2));
-    breit * (1.0 + crate::constants::ELECTRON_ANOMALOUS_MOMENT)
+    breit * (1.0 + ELECTRON_ANOMALOUS_MOMENT)
 }
 
-/// Calculates the anomalous Zeeman energy splitting in eV.
+/// Calculates the strong-field (Paschen–Back) Zeeman shift of a
+/// single-electron state in eV, using the QED electron g-factor.
 ///
-/// Uses the full QED electron g-factor instead of g=2:
+/// ΔE = (m_l + g_e m_s) μ_B B,  g_e = 2.00231930436092 (CODATA 2022)
 ///
-/// ΔE = m_j × g_e × μ_B × B
-///
-/// where g_e = 2.00231930436256 (CODATA 2022).
+/// Valid when the Zeeman energy greatly exceeds the fine-structure splitting,
+/// so that l and s decouple. For weak fields use [`zeeman_splitting_ev`]
+/// (m_j g_J μ_B B).
 ///
 /// Parameters:
 /// - `b_tesla`: magnetic field strength in Tesla
@@ -1514,38 +1650,36 @@ pub fn bound_electron_g_factor(z: u32) -> f64 {
 #[must_use]
 #[inline]
 pub fn anomalous_zeeman_splitting_ev(b_tesla: f64, ml: i32, ms: i32) -> f64 {
-    let mu_b = crate::constants::BOHR_MAGNETON_EV_T;
     let g_e = electron_g_factor();
-    // ΔE = (ml + g_e × ms/2) × μ_B × B
-    // For ms stored as ±1 (representing ±1/2):
-    let ml_f = ml as f64;
     let ms_half = ms as f64 / 2.0;
-    (ml_f + g_e * ms_half) * mu_b * b_tesla
+    (ml as f64 + g_e * ms_half) * BOHR_MAGNETON_EV_T * b_tesla
 }
 
-/// Calculates the Breit interaction correction for ground-state helium-like ions in eV.
+/// Calculates the leading-order Breit (magnetic) interaction energy of the
+/// 1s² ¹S₀ ground state of a helium-like ion in eV.
 ///
-/// The Breit interaction is the leading relativistic correction to the
-/// electron-electron interaction in two-electron atoms. For the 1s² ground
-/// state of the helium isoelectronic sequence:
+/// In the Breit–Pauli reduction the two-electron magnetic terms for 1s²
+/// ¹S₀ reduce to the spin–spin contact term, since orbit–orbit and
+/// spin–other-orbit terms vanish for two s electrons in a spin singlet
+/// (Bethe & Salpeter, Quantum Mechanics of One- and Two-Electron Atoms, §38–39):
 ///
-/// ΔE_Breit = -(2/3) × α² × Z⁴ × 13.605693 eV
+/// ΔE = −(8π/3) α² ⟨s₁·s₂⟩ ⟨δ³(r₁₂)⟩ = 2π α² ⟨δ³(r₁₂)⟩ E_h a₀³,
 ///
-/// For He (Z=2): ΔE ≈ -0.00768 eV.
+/// and with unscreened hydrogenic 1s orbitals ⟨δ³(r₁₂)⟩ = Z³/(8π a₀³):
 ///
-/// Parameters:
-/// - `z`: atomic number (must be >= 2 for helium-like ion)
+/// ΔE = α² Z³ / 4 E_h  (positive: the singlet is raised).
 ///
-/// Returns the Breit correction energy in eV (negative).
+/// This is the leading term of the 1/Z expansion. Electron correlation reduces
+/// it substantially at low Z (for He the correlated value of the contact term
+/// is ≈ 0.67 α² E_h, versus 2 α² E_h here) and relativistic corrections of
+/// order (Zα)² increase it at high Z; the formula is most useful for
+/// intermediate Z (roughly 10–40).
 #[must_use]
 #[inline]
 pub fn breit_interaction_ev(z: u32) -> f64 {
-    let alpha = crate::constants::FINE_STRUCTURE;
     let zf = z as f64;
-    let alpha2 = alpha * alpha;
-    let z4 = zf * zf * zf * zf;
-
-    -(2.0 / 3.0) * alpha2 * z4 * RYDBERG_EV
+    let hartree_ev = 2.0 * RYDBERG_EV;
+    FINE_STRUCTURE * FINE_STRUCTURE * zf * zf * zf / 4.0 * hartree_ev
 }
 
 #[cfg(test)]
@@ -1956,7 +2090,8 @@ mod tests {
     fn radial_invalid_quantum_numbers() {
         assert!(radial_wavefunction(1, 0, 0, 1.0).is_err()); // n=0
         assert!(radial_wavefunction(1, 1, 1, 1.0).is_err()); // l >= n
-        assert!(radial_wavefunction(1, 4, 0, 1.0).is_err()); // n > 3
+        assert!(radial_wavefunction(1, 61, 0, 1.0).is_err()); // n > 60
+        assert!(radial_wavefunction(0, 1, 0, 1.0).is_err()); // z = 0
     }
 
     // --- Selection rules and Einstein coefficient tests ---
@@ -2032,11 +2167,8 @@ mod tests {
     }
 
     #[test]
-    fn lamb_shift_scales_with_z4() {
-        let h = lamb_shift_ev(1, 2, 0);
-        let he = lamb_shift_ev(2, 2, 0);
-        let ratio = he / h;
-        assert!((ratio - 16.0).abs() < 1.0, "Z⁴ scaling: ratio={ratio}");
+    fn lamb_shift_grows_with_z() {
+        assert!(lamb_shift_ev(2, 2, 0) > lamb_shift_ev(1, 2, 0));
     }
 
     #[test]
@@ -2138,7 +2270,7 @@ mod tests {
         // H 1s1/2 (n=1, j=1/2 -> two_j=1)
         // Should be very close to electron rest mass (slightly less due to binding)
         let e = dirac_energy_mev(1, 1, 1).unwrap();
-        let me = crate::constants::ELECTRON_MASS_MEV;
+        let me = ELECTRON_MASS_MEV;
         assert!(e < me, "Dirac energy should be less than rest mass");
         assert!(e > 0.510_9, "Dirac energy should be close to rest mass");
     }
@@ -2202,7 +2334,7 @@ mod tests {
     fn dirac_energy_high_z() {
         // Uranium Z=92: should still be valid for 1s1/2
         let e = dirac_energy_mev(92, 1, 1).unwrap();
-        let me = crate::constants::ELECTRON_MASS_MEV;
+        let me = ELECTRON_MASS_MEV;
         // For high Z, binding is significant
         assert!(e < me, "Bound state energy < rest mass");
         assert!(e > 0.0, "Energy should be positive");
@@ -2375,37 +2507,198 @@ mod tests {
     // --- Breit interaction tests ---
 
     #[test]
-    fn breit_helium_negative() {
+    fn breit_leading_order_value() {
+        // α² Z³ / 4 Hartree for Z = 2: 2 α² E_h.
         let de = breit_interaction_ev(2);
-        assert!(de < 0.0, "Breit correction should be negative");
+        let expected = 2.0 * FINE_STRUCTURE * FINE_STRUCTURE * 2.0 * RYDBERG_EV;
+        assert!((de - expected).abs() < 1e-15, "He Breit={de}");
+        assert!(de > 0.0);
     }
 
     #[test]
-    fn breit_helium_magnitude() {
-        // For He (Z=2): ΔE ≈ -(2/3) × α² × 16 × 13.6 ≈ -0.00768 eV
-        let de = breit_interaction_ev(2);
+    fn breit_scales_with_z3() {
+        let ratio = breit_interaction_ev(20) / breit_interaction_ev(10);
+        assert!((ratio - 8.0).abs() < 1e-12, "ratio={ratio}");
+    }
+
+    #[test]
+    fn breit_below_total_two_electron_energy_uranium() {
+        // Measured total two-electron contribution for He-like U: 2248 ± 9 eV
+        // (Gumberidze et al., PRL 92, 203004 (2004)).
+        assert!(breit_interaction_ev(92) < 2248.0);
+    }
+
+    // --- Reference-value tests ---
+
+    fn mhz(ev: f64) -> f64 {
+        ev / H_EV_S / 1e6
+    }
+
+    #[test]
+    fn radial_wavefunctions_normalized() {
+        for n in 1..=10_u32 {
+            for l in 0..n {
+                let steps = 40_000;
+                let r_max = 4.0 * f64::from(n * n) + 40.0;
+                let h = r_max / f64::from(steps);
+                let f = |r: f64| radial_probability_density(1, n, l, r).unwrap();
+                let mut acc = f(0.0) + f(r_max);
+                for k in 1..steps {
+                    acc += if k % 2 == 1 { 4.0 } else { 2.0 } * f(f64::from(k) * h);
+                }
+                let norm = acc * h / 3.0;
+                assert!((norm - 1.0).abs() < 1e-9, "n={n} l={l}: norm={norm}");
+            }
+        }
+    }
+
+    #[test]
+    fn radial_r31_matches_textbook() {
+        // R_31 = (8/(27√6)) (1 − r/6) r e^{−r/3} for Z = 1 (Griffiths eq. 4.89).
+        for r in [0.5, 2.0, 6.0, 9.0] {
+            let expected =
+                8.0 / (27.0 * libm::sqrt(6.0)) * (1.0 - r / 6.0) * r * libm::exp(-r / 3.0);
+            let got = radial_wavefunction(1, 3, 1, r).unwrap();
+            assert!((got - expected).abs() < 1e-15, "r={r}: {got} vs {expected}");
+        }
+    }
+
+    #[test]
+    fn einstein_a_matches_nist_with_reduced_mass() {
+        // NIST ASD hydrogen A-values (s⁻¹), which include the reduced mass.
+        let mu = reduced_mass_factor(1, 1).unwrap();
+        for (nu, lu, nl, ll, nist) in [
+            (2, 1, 1, 0, 6.2649e8),
+            (3, 1, 1, 0, 1.6725e8),
+            (3, 1, 2, 0, 2.2448e7),
+            (3, 0, 2, 1, 6.3143e6),
+            (3, 2, 2, 1, 6.4651e7),
+        ] {
+            let a = einstein_a_coefficient(1, nu, lu, nl, ll).unwrap() * mu;
+            assert!(
+                (a - nist).abs() / nist < 2e-4,
+                "{nu}{lu}->{nl}{ll}: {a} vs {nist}"
+            );
+        }
+    }
+
+    #[test]
+    fn einstein_a_scales_as_z4() {
+        let h = einstein_a_coefficient(1, 2, 1, 1, 0).unwrap();
+        let he = einstein_a_coefficient(2, 2, 1, 1, 0).unwrap();
+        assert!((he / h - 16.0).abs() < 1e-9, "ratio={}", he / h);
+    }
+
+    #[test]
+    fn vacuum_polarization_hydrogen_2s() {
+        // H 2S: leading Uehling term −27.13 MHz plus α(Zα)⁵ term +0.24 MHz.
+        let vp = mhz(vacuum_polarization_ev(1, 2, 0));
+        assert!((vp + 26.886).abs() < 0.01, "VP={vp} MHz");
+    }
+
+    #[test]
+    fn lamb_shift_hydrogen_classic() {
+        // 2S½ − 2P½ measured 1057.845 MHz; 1S Lamb shift 8172.9 MHz.
+        let split =
+            mhz(lamb_shift_nlj_ev(1, 2, 0, 1).unwrap() - lamb_shift_nlj_ev(1, 2, 1, 1).unwrap());
         assert!(
-            (de - (-0.00768)).abs() < 0.001,
-            "He Breit={de} eV, expected ~-0.00768"
+            (split - 1057.845).abs() / 1057.845 < 3e-3,
+            "2S-2P={split} MHz"
+        );
+        let one_s = mhz(lamb_shift_nlj_ev(1, 1, 0, 1).unwrap());
+        assert!((one_s - 8172.9).abs() / 8172.9 < 3e-3, "1S={one_s} MHz");
+        let p32 = mhz(lamb_shift_nlj_ev(1, 2, 1, 3).unwrap());
+        assert!((p32 - 12.8).abs() < 0.5, "2P3/2={p32} MHz");
+    }
+
+    #[test]
+    fn lamb_shift_helium_ion() {
+        // He⁺ 2S½ − 2P½ measured 14041.13 MHz.
+        let split =
+            mhz(lamb_shift_nlj_ev(2, 2, 0, 1).unwrap() - lamb_shift_nlj_ev(2, 2, 1, 1).unwrap());
+        assert!(
+            (split - 14_041.13).abs() / 14_041.13 < 0.04,
+            "He+ 2S-2P={split} MHz"
         );
     }
 
     #[test]
-    fn breit_scales_with_z4() {
-        let he = breit_interaction_ev(2).abs();
-        let li = breit_interaction_ev(3).abs();
-        let ratio = li / he;
-        let expected = 81.0 / 16.0; // 3^4 / 2^4
-        assert!(
-            (ratio - expected).abs() < 0.01,
-            "Breit Z⁴ scaling: ratio={ratio}, expected={expected}"
-        );
+    fn lamb_shift_rejects_untabulated() {
+        assert!(lamb_shift_nlj_ev(1, 5, 0, 1).is_err());
+        assert!(lamb_shift_nlj_ev(1, 2, 1, 5).is_err());
     }
 
     #[test]
-    fn breit_increases_with_z() {
-        let he = breit_interaction_ev(2).abs();
-        let c = breit_interaction_ev(6).abs();
-        assert!(c > he, "Breit |ΔE| should increase with Z");
+    fn hyperfine_deuterium_includes_spin_factor() {
+        let hfs = mhz(hyperfine_splitting_spin_ev(
+            1,
+            1,
+            crate::constants::DEUTERON_G_FACTOR,
+            1.0,
+        ));
+        assert!((hfs - 327.384).abs() / 327.384 < 1e-3, "D HFS={hfs} MHz");
+        let h = mhz(hyperfine_splitting_ev(
+            1,
+            1,
+            crate::constants::PROTON_G_FACTOR,
+        ));
+        assert!((h - 1420.406).abs() / 1420.406 < 1e-3, "H HFS={h} MHz");
+    }
+
+    #[test]
+    fn h_alpha_vacuum_with_reduced_mass() {
+        let lambda = spectral_line_vacuum_nm(1, 1, 2, 3).unwrap();
+        assert!((lambda - 656.4696).abs() < 1e-3, "Hα={lambda} nm");
+    }
+
+    #[test]
+    fn fine_structure_uses_codata_rydberg() {
+        let e = hydrogen_level_energy_ev(1, 1, 1).unwrap();
+        let dirac = -dirac_binding_energy_ev(1, 1, 1).unwrap();
+        assert!((e - dirac).abs() < 1e-8, "first-order {e} vs Dirac {dirac}");
+        assert!(hydrogen_level_energy_ev(1, 2, 2).is_err());
+    }
+
+    #[test]
+    fn dirac_rejects_j_above_n() {
+        assert!(dirac_energy_mev(1, 1, 3).is_err());
+    }
+
+    #[test]
+    fn ionization_energy_reference_values() {
+        // NIST ASD.
+        assert!((ionization_energy_ev(43).unwrap() - 7.119_38).abs() < 1e-9);
+        assert!((ionization_energy_ev(96).unwrap() - 5.992_241).abs() < 1e-9);
+        // Smits et al. 2023.
+        assert!((ionization_energy_ev(112).unwrap() - 12.02).abs() < 1e-9);
+    }
+
+    #[test]
+    fn electron_affinity_reference_values() {
+        assert_eq!(
+            electron_affinity(90).unwrap(),
+            ElectronAffinity::Bound(0.607_69)
+        );
+        assert_eq!(
+            electron_affinity(92).unwrap(),
+            ElectronAffinity::Bound(0.314_97)
+        );
+        assert_eq!(electron_affinity(2).unwrap(), ElectronAffinity::Unbound);
+        assert_eq!(electron_affinity(104).unwrap(), ElectronAffinity::Unknown);
+        assert!((electron_affinity_ev(59).unwrap() - 0.109_23).abs() < 1e-12);
+    }
+
+    #[test]
+    fn superheavy_configurations_follow_madelung() {
+        let ds = format_configuration_short(&electron_configuration(110).unwrap(), 110);
+        assert_eq!(ds, "[Rn] 7s2 5f14 6d8");
+        let rg = format_configuration_short(&electron_configuration(111).unwrap(), 111);
+        assert_eq!(rg, "[Rn] 7s2 5f14 6d9");
+    }
+
+    #[test]
+    fn stark_and_lande_reject_impossible_states() {
+        assert!(stark_shift_hydrogen_ev(2, 5, 1e6).abs() < 1e-30);
+        assert!(lande_g_factor(0, 3).abs() < 1e-30);
     }
 }

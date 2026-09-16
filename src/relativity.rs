@@ -58,8 +58,9 @@ impl FourMomentum {
     #[must_use]
     #[inline]
     pub fn invariant_mass(&self) -> f64 {
-        let m_sq =
-            self.energy * self.energy - self.px * self.px - self.py * self.py - self.pz * self.pz;
+        // (E − p)(E + p) avoids the cancellation in E² − p² when E ≫ m.
+        let p = self.momentum_magnitude();
+        let m_sq = (self.energy - p) * (self.energy + p);
         if m_sq < 0.0 {
             return 0.0; // spacelike (numerical noise for massless particles)
         }
@@ -70,7 +71,7 @@ impl FourMomentum {
     #[must_use]
     #[inline]
     pub fn momentum_magnitude(&self) -> f64 {
-        libm::sqrt(self.px * self.px + self.py * self.py + self.pz * self.pz)
+        libm::hypot(libm::hypot(self.px, self.py), self.pz)
     }
 
     /// Returns the velocity β = v/c (dimensionless).
@@ -99,7 +100,13 @@ impl FourMomentum {
     #[must_use]
     #[inline]
     pub fn kinetic_energy(&self) -> f64 {
-        self.energy - self.invariant_mass()
+        // T = E − m = p² / (E + m), without cancellation at low momentum.
+        let m = self.invariant_mass();
+        let p = self.momentum_magnitude();
+        if self.energy + m <= 0.0 {
+            return 0.0;
+        }
+        p * p / (self.energy + m)
     }
 }
 
@@ -119,14 +126,16 @@ impl core::ops::Add for FourMomentum {
 ///
 /// γ = 1 / √(1 - β²)
 ///
-/// Returns [`f64::INFINITY`] if β >= 1.
+/// Returns [`f64::INFINITY`] if |β| >= 1.
 #[must_use]
 #[inline]
 pub fn lorentz_gamma(beta: f64) -> f64 {
-    if beta >= 1.0 {
+    let b = libm::fabs(beta);
+    if b >= 1.0 {
         return f64::INFINITY;
     }
-    1.0 / libm::sqrt(1.0 - beta * beta)
+    // (1 − β)(1 + β) keeps full precision as β → 1.
+    1.0 / libm::sqrt((1.0 - b) * (1.0 + b))
 }
 
 /// Calculates the velocity β = v/c from the Lorentz factor γ.
@@ -138,16 +147,26 @@ pub fn gamma_to_beta(gamma: f64) -> f64 {
     if gamma <= 1.0 {
         return 0.0;
     }
-    libm::sqrt(1.0 - 1.0 / (gamma * gamma))
+    if gamma.is_infinite() {
+        return 1.0;
+    }
+    libm::sqrt((gamma - 1.0) * (gamma + 1.0)) / gamma
 }
 
-/// Relativistic velocity addition: β_total = (β1 + β2) / (1 + β1*β2).
+/// Relativistic velocity addition for collinear velocities:
+/// β_total = (β1 + β2) / (1 + β1*β2).
 ///
-/// Both velocities must be in units of c (dimensionless).
+/// Both velocities must be in units of c with |β| ≤ 1. Returns NaN when the
+/// result is undefined (|β| > 1, or light speeds in opposite directions,
+/// where 1 + β1β2 = 0).
 #[must_use]
 #[inline]
 pub fn velocity_addition(beta1: f64, beta2: f64) -> f64 {
-    (beta1 + beta2) / (1.0 + beta1 * beta2)
+    let denom = 1.0 + beta1 * beta2;
+    if libm::fabs(beta1) > 1.0 || libm::fabs(beta2) > 1.0 || denom == 0.0 {
+        return f64::NAN;
+    }
+    (beta1 + beta2) / denom
 }
 
 /// Calculates the relativistic total energy from mass and momentum.
@@ -183,9 +202,8 @@ pub fn de_broglie_wavelength_fm(momentum_mev: f64) -> f64 {
     if momentum_mev <= 0.0 {
         return f64::INFINITY;
     }
-    // hc = 197.3269804 MeV·fm, so λ = 2π × ħc / (pc)
-    let hbar_c = 197.326_980_4; // MeV·fm
-    2.0 * core::f64::consts::PI * hbar_c / momentum_mev
+    // λ = 2π ħc / (pc)
+    2.0 * core::f64::consts::PI * crate::constants::HBAR_C_MEV_FM / momentum_mev
 }
 
 /// Converts a velocity in m/s to β = v/c.
@@ -356,6 +374,23 @@ mod tests {
     #[test]
     fn de_broglie_zero_momentum() {
         assert!(de_broglie_wavelength_fm(0.0).is_infinite());
+    }
+
+    #[test]
+    fn invariant_mass_ultra_relativistic_electron() {
+        // 10 GeV/c electron: E² − p² would lose ~6 digits; (E − p)(E + p) keeps them.
+        let p = FourMomentum::from_mass_and_momentum(0.510_998_950_69, 1e4);
+        assert!((p.invariant_mass() - 0.510_998_950_69).abs() / 0.511 < 1e-6);
+        assert!((p.kinetic_energy() - (p.energy - 0.510_998_950_69)).abs() < 1e-7);
+    }
+
+    #[test]
+    fn gamma_symmetric_and_edge_cases() {
+        assert!((lorentz_gamma(-0.6) - 1.25).abs() < 1e-12);
+        assert!(lorentz_gamma(-1.5).is_infinite());
+        assert!(velocity_addition(1.0, -1.0).is_nan());
+        let beta = 1.0 - 1e-12;
+        assert!((gamma_to_beta(lorentz_gamma(beta)) - beta).abs() < 1e-15);
     }
 
     #[test]

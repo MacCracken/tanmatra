@@ -39,12 +39,19 @@ Untrusted ──> [Input validation] ──> [Pure computation] ──> [Result]
 ## Numeric Precision
 
 All computations use `f64` (IEEE 754 double precision, ~15-16 significant digits).
+Accuracies below were measured against reference data (see
+`docs/audit/2026-09-16-math-audit.md`).
 
-| Computation | Typical Error | Source of Error |
-|-------------|--------------|-----------------|
-| Binding energy (Bethe-Weizsacker) | ~1-2% for A > 20 | Semi-empirical formula limitations |
-| Binding energy (shell-corrected) | ~0.5-1% near magic numbers | Parameterized correction |
-| Spectral lines (Rydberg) | < 0.01% for hydrogen | Formula is exact for hydrogen-like |
-| Fine-structure correction | ~0.001% | First-order perturbation theory |
-| Rutherford scattering | Exact (classical limit) | Formula is exact for point Coulomb |
-| Bateman equations | < 0.01% | Numerical precision of exp() |
+| Computation | Accuracy | Limitation |
+|-------------|----------|------------|
+| Binding energy (Bethe-Weizsacker, AME2020 fit) | RMS 3.31 MeV over 2484 nuclides (A ≥ 16) | Liquid-drop model; no deformation |
+| Binding energy (+ Myers–Swiatecki shell term) | RMS 2.76 MeV | Spherical shell term only |
+| Spectral lines, `spectral_line_nm` | Exact Rydberg formula for infinite nuclear mass | Real lines are longer by 1 + m_e/M (5.4e-4 for H); use `spectral_line_vacuum_nm` |
+| Fine-structure energy (first order) | Agrees with the Dirac energy to O((Zα)⁴) | No QED, no reduced mass |
+| Einstein A (hydrogen-like) | Exact non-relativistic dipole rates; with μ/m_e matches NIST to < 2e-4 | No relativistic corrections |
+| Lamb shift (one loop, Zα expansion) | ≈0.2% for H, ≈3% for He⁺ | Not valid for high Z; n ≤ 4 |
+| Rutherford / Mott scattering | Exact for point charges (first Born for Mott) | No screening, recoil or finite size unless requested |
+| Pair production (Bethe–Heitler, Maximon) | Analytic unscreened Born result | No screening (≈30% high for Pb at 1 GeV), no Coulomb correction |
+| Bateman chains | Relative accuracy ~1e-12 for arbitrary (including equal) decay constants | Matrix-exponential cost O(n³ log(λt)) |
+| `AtomicInstant` arithmetic | Exact to 1 ns | Conversions to/from f64 seconds are limited by f64 resolution |
+| Julian dates (f64) | ≈40 µs resolution | Use `AtomicInstant` for sub-millisecond work |

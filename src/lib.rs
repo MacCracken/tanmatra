@@ -43,14 +43,18 @@
 //! |---------|---------|-------------|
 //! | `std` | Yes | Standard library support. Disable for `no_std` + `alloc` |
 //! | `logging` | No | Structured tracing via the `tracing` crate |
+//! | `optics` | No | prakash spectral power distributions (implies `std`) |
+//! | `soorat-compat` | No | Visualization data structures for soorat (implies `std`) |
 //! | `full` | No | Enables all optional features |
 //!
 //! ## Data Sources
 //!
 //! - **CODATA 2022**: Fundamental physical constants (NIST)
-//! - **PDG 2024**: Particle masses (Particle Data Group)
-//! - **NNDC/NUBASE**: Nuclear half-lives (National Nuclear Data Center)
+//! - **PDG 2024**: Particle masses and widths (Particle Data Group)
+//! - **AME2020 / NUBASE2020**: Atomic masses, half-lives, decay modes
 //! - **NIST ASD**: Ionization energies (Atomic Spectra Database)
+//! - **ENDF/B-VIII.0**: Thermal cross sections, resonance integrals, fission yields
+//! - **CIPM 2025, IERS Conventions 2010, IERS Bulletin C**: Timekeeping
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
@@ -91,15 +95,17 @@ pub mod optics;
 /// Prelude module — import everything commonly needed.
 pub mod prelude {
     pub use crate::atomic::{
-        OrbitalFilling, OrbitalType, QuantumNumbers, TransitionType, anomalous_zeeman_splitting_ev,
-        balmer_series, bound_electron_g_factor, brackett_series, breit_interaction_ev,
-        check_selection_rules, check_selection_rules_full, dirac_binding_energy_ev,
-        dirac_energy_mev, einstein_a_coefficient, einstein_b_coefficient, electron_affinity_ev,
-        electron_configuration, electron_g_factor, format_configuration,
-        format_configuration_short, hydrogen_level_energy_ev, hyperfine_splitting_ev,
-        ionization_energy_ev, lamb_shift_ev, lande_g_factor, lyman_series, paschen_series,
-        pfund_series, radial_probability_density, radial_wavefunction, relativistic_correction_ev,
-        spectral_line_fine_nm, spectral_line_nm, stark_shift_hydrogen_ev, vacuum_polarization_ev,
+        ElectronAffinity, OrbitalFilling, OrbitalType, QuantumNumbers, TransitionType,
+        anomalous_zeeman_splitting_ev, balmer_series, bound_electron_g_factor, brackett_series,
+        breit_interaction_ev, check_selection_rules, check_selection_rules_full,
+        dirac_binding_energy_ev, dirac_energy_mev, einstein_a_coefficient, einstein_b_coefficient,
+        electron_affinity, electron_affinity_ev, electron_configuration, electron_g_factor,
+        format_configuration, format_configuration_short, hydrogen_level_energy_ev,
+        hyperfine_splitting_ev, hyperfine_splitting_spin_ev, ionization_energy_ev, lamb_shift_ev,
+        lamb_shift_nlj_ev, lande_g_factor, lyman_series, paschen_series, pfund_series,
+        radial_probability_density, radial_wavefunction, reduced_mass_factor,
+        relativistic_correction_ev, spectral_line_fine_nm, spectral_line_nm,
+        spectral_line_vacuum_nm, stark_shift_hydrogen_ev, vacuum_polarization_ev,
         zeeman_splitting_ev,
     };
     pub use crate::bridge::{SimulationClock, TimeContext};
@@ -109,18 +115,21 @@ pub mod prelude {
         beta_plus_decay, decay_chain, decay_constant, known_isotopes, remaining_fraction,
     };
     pub use crate::error::TanmatraError;
+    #[allow(deprecated)]
+    pub use crate::nucleus::corrected_ft_value;
     pub use crate::nucleus::{
-        NuclearMoments, Nucleus, ShellLevel, SuperallowedDecay, corrected_ft_value,
-        ground_state_spin_parity, is_magic_number, next_shell_closure, shell_closure_below,
-        shell_model_levels, shell_occupation, superallowed_ft_values,
+        NuclearMoments, Nucleus, ShellLevel, SuperallowedDecay, ground_state_spin_parity,
+        is_magic_number, next_shell_closure, shell_closure_below, shell_model_levels,
+        shell_occupation, superallowed_average_ft, superallowed_ft_values,
     };
     pub use crate::particle::{Boson, FundamentalForce, Lepton, Quark};
     pub use crate::reaction::{
-        FissionYield, NuclearReaction, NucleosynthesisPathway, NucleosynthesisProcess,
-        NucleosynthesisStep, ThermalCrossSection, average_lethargy_gain,
+        CNO_NEUTRINO_LOSS_MEV, FissionYield, NuclearReaction, NucleosynthesisPathway,
+        NucleosynthesisProcess, NucleosynthesisStep, ThermalCrossSection, average_lethargy_gain,
         breit_wigner_cross_section, cno_cycle, collisions_to_thermalize, coulomb_barrier,
-        dd_fusion_he3, dd_fusion_t, dt_fusion, geometric_cross_section_barns,
-        max_energy_loss_fraction, moderating_ratio, pp_chain_step1, pu239_fission_yields, q_value,
+        dd_fusion_he3, dd_fusion_t, dt_fusion, fission_resonance_integral_barns,
+        geometric_cross_section_barns, max_energy_loss_fraction, moderating_ratio,
+        n_alpha_resonance_integral_barns, pp_chain_step1, pu239_fission_yields, q_value,
         r_process_main, resonance_integral_barns, s_process_main, thermal_neutron_cross_sections,
         triple_alpha, u235_fission, u235_fission_yields,
     };
@@ -130,18 +139,21 @@ pub mod prelude {
         velocity_to_beta,
     };
     pub use crate::scattering::{
-        born_screened_coulomb, compton_energy_ratio, distance_of_closest_approach,
-        klein_nishina_differential, klein_nishina_total, legendre_polynomial,
-        mott_correction_factor, mott_electron_differential, mott_electron_with_form_factor,
-        nuclear_form_factor_uniform, pair_production_cross_section, partial_wave_cross_section,
-        partial_wave_differential, rutherford_differential, rutherford_total_above_angle,
-        sommerfeld_parameter, thomas_fermi_screening_fm,
+        born_screened_coulomb, born_screened_coulomb_with_masses, compton_energy_ratio,
+        distance_of_closest_approach, klein_nishina_differential, klein_nishina_total,
+        legendre_polynomial, mott_correction_factor, mott_electron_differential,
+        mott_electron_with_form_factor, nuclear_form_factor_uniform, pair_production_cross_section,
+        partial_wave_cross_section, partial_wave_differential, rutherford_differential,
+        rutherford_total_above_angle, sommerfeld_parameter, thomas_fermi_screening_fm,
     };
     pub use crate::timekeeping::{
-        AtomicInstant, FrequencyStandard, TimeScale, all_frequency_standards, gps_to_tai,
-        gravitational_redshift, leap_seconds_at, sagnac_correction_ns,
-        schwarzschild_clock_correction_us_per_day, second_order_doppler_shift, tai_to_gps,
-        tai_to_tt, tai_to_utc_offset, tt_to_tai, utc_to_tai_offset,
+        AtomicInstant, FrequencyStandard, LB_RATE, LEAP_SECOND_TABLE_VALID_UNTIL, T0_JD, TDB0_S,
+        TimeScale, all_frequency_standards, gps_to_tai, gravitational_redshift, leap_seconds_at,
+        sagnac_correction_ns, sagnac_one_way_ns, schwarzschild_clock_correction_us_per_day,
+        second_order_doppler_shift, tai_minus_utc_seconds_mjd, tai_to_gps, tai_to_tt,
+        tai_to_utc_offset, tcb_minus_tcg_secular_seconds, tcb_to_tdb_jd, tcg_minus_tt_seconds,
+        tcg_to_tt_jd, tdb_to_tcb_jd, time_dilation_shift_exact, tt_to_tai, tt_to_tcg_jd,
+        utc_to_tai_offset,
     };
 }
 

@@ -9,10 +9,11 @@
 //!
 //! ## Data Sources
 //!
-//! - **BIPM/CIPM 2021**: Secondary representations of the SI second
+//! - **CIPM 2025** (CCTF Recommendation 24-2): recommended frequencies of
+//!   secondary representations of the SI second, in force since 2026-03-27
 //! - **CODATA 2022**: Fundamental constants
-//! - **IERS Bulletin C**: Leap second announcements
-//! - **IAU 2000/2006**: Time scale definitions (L_G, L_C)
+//! - **IERS Bulletin C** / USNO `tai-utc.dat`: TAI − UTC, including 1961–1971
+//! - **IERS Conventions (2010)**, Chapters 1 and 10: L_G, L_B, L_C, TDB0, T0
 
 use crate::constants::{C, EARTH_ROTATION_RAD_S, GM_EARTH, STANDARD_GRAVITY};
 use serde::{Deserialize, Serialize};
@@ -23,8 +24,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// Each variant represents a real atomic transition used in precision
 /// timekeeping. The cesium-133 hyperfine transition defines the SI second
-/// (CGPM 1967, reaffirmed 2019). The optical standards are BIPM 2021
-/// secondary representations of the second.
+/// (CGPM 1967, reaffirmed 2019). The Rb and optical standards are secondary
+/// representations of the second (CIPM 2025 recommended values).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum FrequencyStandard {
@@ -34,40 +35,43 @@ pub enum FrequencyStandard {
     Cesium133,
     /// Rubidium-87 hyperfine transition.
     ///
-    /// Transition: ⁵S₁/₂ (F=1 → F=2), frequency ≈ 6 834 682 610.904 312 Hz.
-    /// Reference: BIPM recommended value.
+    /// Transition: ⁵S₁/₂ (F=1 → F=2), frequency 6 834 682 610.904 312 9 Hz.
+    /// Reference: CIPM 2025 recommended value (u_r = 3.4e-16).
     Rubidium87,
     /// Hydrogen maser (1420 MHz, 21 cm line).
     ///
-    /// Transition: 1S₁/₂ (F=0 → F=1), frequency ≈ 1 420 405 751.768 Hz.
-    /// Reference: NIST.
+    /// Transition: 1S₁/₂ (F=0 → F=1), frequency 1 420 405 751.7667(9) Hz.
+    /// Reference: Hellwig et al., IEEE Trans. Instrum. Meas. IM-19, 200 (1970).
     HydrogenMaser,
-    /// Strontium-87 optical lattice clock (BIPM 2021 secondary representation).
+    /// Strontium-87 optical lattice clock (secondary representation of the second).
     ///
-    /// Transition: ¹S₀ → ³P₀, frequency ≈ 429 228 004 229 873.2 Hz.
-    /// Reference: BIPM CIPM 2021.
+    /// Transition: ¹S₀ → ³P₀, frequency 429 228 004 229 872.992 Hz.
+    /// Reference: CIPM 2025 recommended value (u_r = 1.7e-16).
     StrontiumOptical,
-    /// Ytterbium-171 optical lattice clock (BIPM 2021 secondary representation).
+    /// Ytterbium-171 optical lattice clock (secondary representation of the second).
     ///
-    /// Transition: ¹S₀ → ³P₀, frequency ≈ 518 295 836 590 863.6 Hz.
-    /// Reference: BIPM CIPM 2021.
+    /// Transition: ¹S₀ → ³P₀, frequency 518 295 836 590 863.632 Hz.
+    /// Reference: CIPM 2025 recommended value (u_r = 1.7e-16).
     YtterbiumOptical,
 }
 
 impl FrequencyStandard {
     /// Transition frequency in Hz.
     ///
-    /// For Cs-133, this is exact by definition (SI second).
-    /// Other values are from BIPM 2021 recommended values.
+    /// For Cs-133, this is exact by definition (SI second). Rb, Sr and Yb are
+    /// CIPM 2025 recommended values; H is Hellwig et al. (1970). The optical
+    /// values are stored at f64 resolution (0.0625 Hz, 1.5e-16 relative),
+    /// comparable to their recommended uncertainties.
     #[must_use]
     #[inline]
+    #[allow(clippy::excessive_precision)] // published CIPM digits, rounded by f64
     pub fn transition_frequency_hz(self) -> f64 {
         match self {
             Self::Cesium133 => 9_192_631_770.0,
-            Self::Rubidium87 => 6_834_682_610.904_312,
-            Self::HydrogenMaser => 1_420_405_751.768,
-            Self::StrontiumOptical => 429_228_004_229_873.2,
-            Self::YtterbiumOptical => 518_295_836_590_863.6,
+            Self::Rubidium87 => 6_834_682_610.904_312_9,
+            Self::HydrogenMaser => 1_420_405_751.766_7,
+            Self::StrontiumOptical => 429_228_004_229_872.992,
+            Self::YtterbiumOptical => 518_295_836_590_863.632,
         }
     }
 
@@ -78,11 +82,17 @@ impl FrequencyStandard {
         C / self.transition_frequency_hz()
     }
 
-    /// Approximate quality factor Q = f × τ_coherence.
+    /// Order-of-magnitude line quality factor for each clock technology.
     ///
-    /// These are order-of-magnitude values representative of each technology.
+    /// These are unsourced labels (10¹⁰ Cs and Rb, 10⁹ H maser, 10¹⁷ optical).
+    /// The line Q of a real clock is set by its interrogation linewidth; compute
+    /// it with [`FrequencyStandard::quality_factor_for_linewidth`].
     #[must_use]
     #[inline]
+    #[deprecated(
+        since = "1.3.0",
+        note = "unsourced order-of-magnitude values; use quality_factor_for_linewidth"
+    )]
     pub fn quality_factor(self) -> f64 {
         match self {
             Self::Cesium133 => 1e10,
@@ -93,18 +103,38 @@ impl FrequencyStandard {
         }
     }
 
-    /// Typical fractional stability (Allan deviation at 1 second).
+    /// Line quality factor Q = ν / Δν for a given observed linewidth (FWHM, Hz).
     ///
-    /// These are representative values for each clock technology.
+    /// For Ramsey interrogation with free-evolution time T the fringe width is
+    /// Δν ≈ 1/(2T). Returns 0.0 for a non-positive linewidth.
+    #[must_use]
+    #[inline]
+    pub fn quality_factor_for_linewidth(self, linewidth_hz: f64) -> f64 {
+        if linewidth_hz <= 0.0 {
+            return 0.0;
+        }
+        self.transition_frequency_hz() / linewidth_hz
+    }
+
+    /// Representative fractional frequency instability (Allan deviation) at
+    /// τ = 1 s for each clock technology.
+    ///
+    /// - Cs: commercial beam standard, Microchip 5071A standard tube ≤ 1.2e-11
+    ///   (high-performance tube ≤ 5e-12).
+    /// - Rb: commercial standard, SRS FS725 < 2e-11.
+    /// - H maser: active maser, Microchip MHM-2020, 1.5e-13.
+    /// - Sr lattice clock: 4.8e-17, two independent clocks (Oelker et al.,
+    ///   Nat. Photon. 13, 714 (2019)).
+    /// - Yb lattice clock: 1.4e-16 (Zhu et al., arXiv:2606.10514 (2026)).
     #[must_use]
     #[inline]
     pub fn fractional_stability(self) -> f64 {
         match self {
-            Self::Cesium133 => 1e-13,
-            Self::Rubidium87 => 1e-13,
-            Self::HydrogenMaser => 1e-15,
-            Self::StrontiumOptical => 1e-18,
-            Self::YtterbiumOptical => 1e-18,
+            Self::Cesium133 => 1.2e-11,
+            Self::Rubidium87 => 2e-11,
+            Self::HydrogenMaser => 1.5e-13,
+            Self::StrontiumOptical => 4.8e-17,
+            Self::YtterbiumOptical => 1.4e-16,
         }
     }
 }
@@ -151,15 +181,79 @@ pub const TAI_TT_OFFSET_S: f64 = 32.184;
 /// TAI − GPS offset in seconds (exact).
 pub const TAI_GPS_OFFSET_S: f64 = 19.0;
 
-/// TCG/TT rate difference L_G (IAU 2000 Resolution B1.9, defining constant).
-///
-/// dTCG/dTT = 1 + L_G.
+/// L_G (IAU 2000 Resolution B1.9, defining constant): dTT/dTCG = 1 − L_G.
 pub const LG_RATE: f64 = 6.969_290_134e-10;
 
-/// TCB/TCG rate difference L_C (IAU 2006 Resolution B3).
-///
-/// dTCB/dTCG ≈ 1 + L_C.
+/// L_C (IERS Conventions 2010, Table 1.1): average rate of TCB relative to TCG,
+/// ⟨dTCB/dTCG⟩ = 1 + L_C.
 pub const LC_RATE: f64 = 1.480_826_867_41e-8;
+
+/// L_B (IAU 2006 Resolution B3, defining constant): dTDB/dTCB = 1 − L_B.
+pub const LB_RATE: f64 = 1.550_519_768e-8;
+
+/// TDB0 (IAU 2006 Resolution B3, defining constant), in seconds.
+pub const TDB0_S: f64 = -6.55e-5;
+
+/// T0: 1977-01-01T00:00:00 TAI as a TT (= TCG = TCB) Julian date
+/// (IERS Conventions 2010, eq. 10.1).
+pub const T0_JD: f64 = 2_443_144.500_372_5;
+
+/// TCG − TT in seconds for a TT Julian date (IERS Conventions 2010, eq. 10.1):
+///
+/// TCG − TT = (L_G / (1 − L_G)) × (JD_TT − T0) × 86400 s.
+///
+/// f64 Julian dates resolve ≈ 40 µs, far finer than this difference changes.
+#[must_use]
+#[inline]
+pub fn tcg_minus_tt_seconds(jd_tt: f64) -> f64 {
+    LG_RATE / (1.0 - LG_RATE) * (jd_tt - T0_JD) * 86_400.0
+}
+
+/// Converts a TT Julian date to a TCG Julian date (IERS Conventions 2010, eq. 10.1).
+#[must_use]
+#[inline]
+pub fn tt_to_tcg_jd(jd_tt: f64) -> f64 {
+    jd_tt + tcg_minus_tt_seconds(jd_tt) / 86_400.0
+}
+
+/// Converts a TCG Julian date to a TT Julian date (inverse of [`tt_to_tcg_jd`]):
+/// JD_TT = JD_TCG − L_G (JD_TCG − T0).
+#[must_use]
+#[inline]
+pub fn tcg_to_tt_jd(jd_tcg: f64) -> f64 {
+    jd_tcg - LG_RATE * (jd_tcg - T0_JD)
+}
+
+/// Converts a TCB Julian date to a TDB Julian date (IAU 2006 Resolution B3,
+/// IERS Conventions 2010, eq. 10.3):
+///
+/// TDB = TCB − L_B × (JD_TCB − T0) × 86400 s + TDB0.
+#[must_use]
+#[inline]
+pub fn tcb_to_tdb_jd(jd_tcb: f64) -> f64 {
+    jd_tcb - LB_RATE * (jd_tcb - T0_JD) + TDB0_S / 86_400.0
+}
+
+/// Converts a TDB Julian date to a TCB Julian date (exact inverse of
+/// [`tcb_to_tdb_jd`]).
+#[must_use]
+#[inline]
+pub fn tdb_to_tcb_jd(jd_tdb: f64) -> f64 {
+    (jd_tdb - LB_RATE * T0_JD - TDB0_S / 86_400.0) / (1.0 - LB_RATE)
+}
+
+/// Secular part of TCB − TCG in seconds for a TT Julian date
+/// (IERS Conventions 2010, eq. 10.5):
+///
+/// TCB − TCG ≈ L_C × (JD_TT − T0) × 86400 s / (1 − L_B).
+///
+/// Omitted: the periodic terms P(TT) − P(T0) (amplitude ≈ 1.6 ms, which need
+/// a solar-system ephemeris) and the position-dependent term c⁻² v_e·(x − x_e).
+#[must_use]
+#[inline]
+pub fn tcb_minus_tcg_secular_seconds(jd_tt: f64) -> f64 {
+    LC_RATE * (jd_tt - T0_JD) * 86_400.0 / (1.0 - LB_RATE)
+}
 
 /// Convert TAI seconds to TT seconds.
 ///
@@ -206,8 +300,9 @@ pub fn gps_to_tai(gps_seconds: f64) -> f64 {
 /// - delta_at_after: TAI − UTC after the leap second (in whole seconds)
 ///
 /// Source: IERS Bulletin C, complete through 2017-01-01.
-/// As of IERS Bulletin C 69 (2025), no further leap seconds have been
-/// announced; TAI − UTC remains 37 s.
+/// As of IERS Bulletin C 72 (2026-07-06), no further leap seconds have been
+/// announced; TAI − UTC remains 37 s. The table is valid until
+/// [`LEAP_SECOND_TABLE_VALID_UNTIL`].
 const LEAP_SECONDS: &[(i32, u8, i32)] = &[
     (1972, 1, 10),
     (1972, 7, 11),
@@ -239,10 +334,81 @@ const LEAP_SECONDS: &[(i32, u8, i32)] = &[
     (2017, 1, 37),
 ];
 
-/// Returns TAI − UTC (ΔAT) in whole seconds for a given date.
+/// Date (year, month, day) until which the leap-second table is known to be
+/// complete: the expiry of the IANA `leap-seconds.list` published after
+/// IERS Bulletin C 72 (2026-06-28 + 1 y → 2027-06-28).
+pub const LEAP_SECOND_TABLE_VALID_UNTIL: (i32, u8, u8) = (2027, 6, 28);
+
+/// TAI − UTC rubber-second segments 1961–1971 from the USNO `tai-utc.dat`
+/// table: (MJD start, offset s, MJD reference, rate s/day), valid from the
+/// start until the next segment. TAI − UTC = offset + (MJD − MJD_ref) × rate.
+const TAI_UTC_PRE_1972: &[(f64, f64, f64, f64)] = &[
+    (37_300.0, 1.422_818_0, 37_300.0, 0.001_296),
+    (37_512.0, 1.372_818_0, 37_300.0, 0.001_296),
+    (37_665.0, 1.845_858_0, 37_665.0, 0.001_123_2),
+    (38_334.0, 1.945_858_0, 37_665.0, 0.001_123_2),
+    (38_395.0, 3.240_130_0, 38_761.0, 0.001_296),
+    (38_486.0, 3.340_130_0, 38_761.0, 0.001_296),
+    (38_639.0, 3.440_130_0, 38_761.0, 0.001_296),
+    (38_761.0, 3.540_130_0, 38_761.0, 0.001_296),
+    (38_820.0, 3.640_130_0, 38_761.0, 0.001_296),
+    (38_942.0, 3.740_130_0, 38_761.0, 0.001_296),
+    (39_004.0, 3.840_130_0, 38_761.0, 0.001_296),
+    (39_126.0, 4.313_170_0, 39_126.0, 0.002_592),
+    (39_887.0, 4.213_170_0, 39_126.0, 0.002_592),
+];
+
+/// MJD of 1972-01-01, when integer leap seconds began (TAI − UTC = 10 s).
+const MJD_1972: f64 = 41_317.0;
+
+/// Returns TAI − UTC in seconds for a UTC modified Julian date, including the
+/// fractional "rubber second" era 1961-01-01 to 1971-12-31 (USNO `tai-utc.dat`).
+///
+/// Returns 0.0 before 1961-01-01 (MJD 37300), when UTC was not defined
+/// against TAI.
+#[must_use]
+pub fn tai_minus_utc_seconds_mjd(mjd_utc: f64) -> f64 {
+    if mjd_utc < MJD_1972 {
+        let mut value = 0.0;
+        for &(start, offset, reference, rate) in TAI_UTC_PRE_1972 {
+            if mjd_utc >= start {
+                value = offset + (mjd_utc - reference) * rate;
+            } else {
+                break;
+            }
+        }
+        return value;
+    }
+    // Integer era: convert MJD to a calendar (year, month).
+    let (year, month) = mjd_to_year_month(mjd_utc);
+    f64::from(leap_seconds_at(year, month))
+}
+
+/// Converts a modified Julian date to its Gregorian (year, month).
+fn mjd_to_year_month(mjd: f64) -> (i32, u8) {
+    // Fliegel & Van Flandern (1968) algorithm on the integer Julian day number.
+    #[allow(clippy::cast_possible_truncation)]
+    let jdn = libm::floor(mjd + 2_400_001.0) as i64;
+    let l = jdn + 68_569;
+    let n = 4 * l / 146_097;
+    let l = l - (146_097 * n + 3) / 4;
+    let i = 4000 * (l + 1) / 1_461_001;
+    let l = l - 1461 * i / 4 + 31;
+    let j = 80 * l / 2447;
+    let l2 = j / 11;
+    let month = j + 2 - 12 * l2;
+    let year = 100 * (n - 49) + i + l2;
+    #[allow(clippy::cast_sign_loss)]
+    (year as i32, month as u8)
+}
+
+/// Returns TAI − UTC (ΔAT) in whole seconds for a given date in the
+/// integer-leap-second era (from 1972-01-01).
 ///
 /// Scans the leap second table to find the most recent entry at or before
-/// the given (year, month). Returns 0 for dates before 1972-01-01.
+/// the given (year, month). Returns 0 for dates before 1972-01-01, when
+/// TAI − UTC was not an integer; use [`tai_minus_utc_seconds_mjd`] for
+/// 1961–1971.
 ///
 /// # Arguments
 ///
@@ -296,11 +462,25 @@ pub fn utc_to_tai_offset(year: i32, month: u8) -> f64 {
 /// assert!(t.tai_seconds() > 999_999_999.0);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(from = "AtomicInstantRepr")]
 pub struct AtomicInstant {
     /// Whole seconds since 1958-01-01T00:00:00 TAI.
     seconds: i64,
     /// Sub-second nanoseconds \[0, 999_999_999\].
     nanos: u32,
+}
+
+/// Serialized form of [`AtomicInstant`]; deserialization normalizes nanoseconds.
+#[derive(Deserialize)]
+struct AtomicInstantRepr {
+    seconds: i64,
+    nanos: u32,
+}
+
+impl From<AtomicInstantRepr> for AtomicInstant {
+    fn from(raw: AtomicInstantRepr) -> Self {
+        Self::new(raw.seconds, raw.nanos)
+    }
 }
 
 /// Maximum valid nanosecond value.
@@ -328,16 +508,22 @@ impl AtomicInstant {
         }
     }
 
-    /// Creates an `AtomicInstant` from floating-point TAI seconds since epoch.
+    /// Creates an `AtomicInstant` from floating-point TAI seconds since epoch,
+    /// rounded to the nearest nanosecond.
+    ///
+    /// An f64 near today's epoch (≈ 2e9 s) resolves only ≈ 0.5 µs, so this
+    /// conversion cannot carry nanosecond information; use
+    /// [`AtomicInstant::new`] or [`AtomicInstant::add_nanoseconds`] for that.
     #[must_use]
     pub fn from_tai_seconds(s: f64) -> Self {
-        let whole = libm::floor(s) as i64;
-        let frac = s - libm::floor(s);
-        // frac is in [0.0, 1.0) after floor subtraction, so the cast is safe.
-        let nanos_f = frac * NANOS_PER_SEC;
+        if !s.is_finite() {
+            return Self::new(0, 0);
+        }
+        let whole = libm::floor(s);
+        let frac_ns = libm::round((s - whole) * NANOS_PER_SEC);
         #[allow(clippy::cast_sign_loss)]
-        let nanos = if nanos_f < 0.0 { 0u32 } else { nanos_f as u32 };
-        Self::new(whole, nanos)
+        let nanos = frac_ns.clamp(0.0, 1_000_000_000.0) as u32;
+        Self::new(whole as i64, nanos)
     }
 
     /// Returns the TAI time as floating-point seconds since epoch.
@@ -374,10 +560,53 @@ impl AtomicInstant {
         dsec as f64 + dnanos as f64 / NANOS_PER_SEC
     }
 
+    /// Returns the exact duration in nanoseconds between this instant and an
+    /// earlier one (negative if `earlier` is later).
+    #[must_use]
+    pub fn nanoseconds_since(&self, earlier: &Self) -> i128 {
+        (i128::from(self.seconds) - i128::from(earlier.seconds)) * 1_000_000_000
+            + (i128::from(self.nanos) - i128::from(earlier.nanos))
+    }
+
+    /// Returns a new instant advanced by an exact number of nanoseconds
+    /// (saturating at the i64 seconds range).
+    #[must_use]
+    pub fn add_nanoseconds(&self, dt_ns: i64) -> Self {
+        let total = i128::from(self.nanos) + i128::from(dt_ns);
+        let carry = total.div_euclid(1_000_000_000);
+        let nanos = total.rem_euclid(1_000_000_000);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let seconds = i128::from(self.seconds)
+            .saturating_add(carry)
+            .clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        Self {
+            seconds,
+            nanos: nanos as u32,
+        }
+    }
+
     /// Returns a new instant advanced by `dt` seconds.
+    ///
+    /// The offset is rounded to the nearest nanosecond and added in integer
+    /// arithmetic, so the stored nanoseconds are never degraded by the size of
+    /// the epoch. Non-finite `dt` returns `self` unchanged.
     #[must_use]
     pub fn add_seconds(&self, dt: f64) -> Self {
-        Self::from_tai_seconds(self.tai_seconds() + dt)
+        if !dt.is_finite() {
+            return *self;
+        }
+        let whole = libm::trunc(dt);
+        let frac_ns = libm::round((dt - whole) * NANOS_PER_SEC);
+        #[allow(clippy::cast_possible_truncation)]
+        let whole_i = whole.clamp(-9.0e18, 9.0e18) as i64;
+        #[allow(clippy::cast_possible_truncation)]
+        let frac_i = frac_ns as i64;
+        let shifted = Self {
+            seconds: self.seconds.saturating_add(whole_i),
+            nanos: self.nanos,
+        };
+        shifted.add_nanoseconds(frac_i)
     }
 }
 
@@ -388,7 +617,9 @@ impl AtomicInstant {
 /// Δf/f = −g Δh / c², where g = 9.80665 m/s² (standard gravity).
 ///
 /// A positive `delta_h_m` (receiver higher than emitter) gives a *negative*
-/// fractional shift (blueshift when received from below).
+/// fractional shift: light climbing out of the potential well is redshifted.
+/// Equivalently, a clock raised by Δh runs *fast* by +gΔh/c² relative to the
+/// lower clock. First order in Δh (uniform field g = 9.80665 m/s²).
 ///
 /// # Arguments
 ///
@@ -399,20 +630,19 @@ pub fn gravitational_redshift(delta_h_m: f64) -> f64 {
     -STANDARD_GRAVITY * delta_h_m / (C * C)
 }
 
-/// Mean Earth radius in meters (IERS 2010).
-const EARTH_MEAN_RADIUS_M: f64 = 6.371_000e6;
-
-/// Total relativistic clock correction for an orbiting satellite relative
-/// to a ground clock.
+/// Total relativistic clock-rate correction for a satellite in orbit relative
+/// to a clock on the geoid (i.e. to TT).
 ///
-/// Combines gravitational blueshift (satellite clock runs faster at higher
-/// gravitational potential) and velocity time dilation (moving clock runs
-/// slower):
+/// A clock on the geoid runs at dτ/dTCG = 1 − L_G with L_G = W₀/c²
+/// (W₀ = 62 636 856 m²/s², the geoid potential including Earth rotation). A
+/// satellite clock runs at dτ/dTCG = 1 − (GM/r + v²/2)/c². The difference, in
+/// µs/day, is
 ///
-/// - Gravitational: +GM/c² × (1/R_earth − 1/R_orbit) × 86400 × 10⁶ μs/day
-/// - Velocity: −v²/(2c²) × 86400 × 10⁶ μs/day
+/// - Gravitational: (L_G − GM/(c² r)) × 86400 × 10⁶
+/// - Velocity: −v²/(2c²) × 86400 × 10⁶
 ///
-/// Uses GM_earth = 3.986004418 × 10¹⁴ m³/s² (IERS 2010).
+/// (IERS Conventions 2010, eq. 10.9; Ashby, Living Rev. Relativ. 6, 1 (2003)).
+/// GM_earth = 3.986004418 × 10¹⁴ m³/s² (IERS 2010).
 ///
 /// # Arguments
 ///
@@ -426,8 +656,8 @@ const EARTH_MEAN_RADIUS_M: f64 = 6.371_000e6;
 ///
 /// # Example: GPS satellite
 ///
-/// R ≈ 26 560 km, v ≈ 3874 m/s → gravitational +45.85 μs/day,
-/// velocity −7.21 μs/day, net ≈ +38.6 μs/day.
+/// a = 26 561.75 km, v = √(GM/a) = 3873.8 m/s → gravitational +45.788 μs/day,
+/// velocity −7.213 μs/day, net +38.575 μs/day (4.4647e-10).
 #[must_use]
 pub fn schwarzschild_clock_correction_us_per_day(
     orbital_radius_m: f64,
@@ -437,19 +667,19 @@ pub fn schwarzschild_clock_correction_us_per_day(
     let seconds_per_day: f64 = 86400.0;
     let us_per_s: f64 = 1e6;
 
-    // Gravitational potential difference between ground and orbit
-    let grav = GM_EARTH / c2 * (1.0 / EARTH_MEAN_RADIUS_M - 1.0 / orbital_radius_m);
+    let grav = LG_RATE - GM_EARTH / (c2 * orbital_radius_m);
     let vel = orbital_velocity_m_s * orbital_velocity_m_s / (2.0 * c2);
 
     (grav - vel) * seconds_per_day * us_per_s
 }
 
-/// Second-order (transverse) Doppler shift.
+/// Second-order (transverse) Doppler shift, leading order in β.
 ///
 /// Δf/f = −β²/2, where β = v/c.
 ///
-/// This is the purely relativistic time dilation effect for a
-/// moving clock (no radial component needed).
+/// This is the purely relativistic time dilation effect for a moving clock.
+/// The exact value is √(1 − β²) − 1 ([`time_dilation_shift_exact`]); the
+/// leading-order form is 2.5e-5 relatively off at β = 0.01 and 6.7% at β = 0.5.
 ///
 /// # Arguments
 ///
@@ -460,26 +690,57 @@ pub fn second_order_doppler_shift(beta: f64) -> f64 {
     -beta * beta / 2.0
 }
 
-/// Sagnac effect correction for a signal traversing a path on a rotating Earth.
+/// Exact fractional frequency shift of a moving clock, √(1 − β²) − 1.
 ///
-/// Δt = 4 Ω A sin(φ) / c², where:
-/// - Ω = 7.2921150 × 10⁻⁵ rad/s (Earth rotation rate)
-/// - A = projected area enclosed by the signal path (m²)
-/// - φ = geodetic latitude (rad)
+/// Computed as −β²/(1 + √(1 − β²)) to avoid cancellation at small β.
+/// Returns −1.0 for |β| ≥ 1.
+#[must_use]
+#[inline]
+pub fn time_dilation_shift_exact(beta: f64) -> f64 {
+    let b2 = beta * beta;
+    if b2.is_nan() || b2 >= 1.0 {
+        return -1.0;
+    }
+    -b2 / (1.0 + libm::sqrt(1.0 - b2))
+}
+
+/// Sagnac time difference of a closed-loop interferometer (ring laser or
+/// fibre gyroscope) lying horizontally on the rotating Earth, in nanoseconds.
+///
+/// Δt = 4 Ω A sin(φ) / c²
+///
+/// between the two counter-propagating beams, where A is the loop area and
+/// Ω sin φ the component of Earth's rotation normal to it at latitude φ.
+/// For one-way signal time transfer use [`sagnac_one_way_ns`].
 ///
 /// # Arguments
 ///
 /// * `latitude_rad` — Geodetic latitude in radians.
-/// * `area_m2` — Area enclosed by the signal path in m².
-///
-/// # Returns
-///
-/// Sagnac correction in nanoseconds.
+/// * `area_m2` — Area enclosed by the loop in m².
 #[must_use]
 pub fn sagnac_correction_ns(latitude_rad: f64, area_m2: f64) -> f64 {
     let c2 = C * C;
     let dt_s = 4.0 * EARTH_ROTATION_RAD_S * area_m2 * libm::sin(latitude_rad) / c2;
     dt_s * 1e9
+}
+
+/// Sagnac correction for a one-way signal between two points given in an
+/// Earth-fixed frame, in nanoseconds.
+///
+/// Δt = 2 Ω A_z / c² = Ω (x₁ y₂ − y₁ x₂) / c²
+///
+/// where A_z is the area swept by the position vector projected on the
+/// equatorial plane (Ashby, Living Rev. Relativ. 6, 1 (2003), eq. 32).
+/// Positive when the signal travels eastward (with the rotation). A signal
+/// once around the equator takes 207.4 ns longer eastward.
+///
+/// # Arguments
+///
+/// * `x1_m`, `y1_m` — equatorial components of the transmitter position (m).
+/// * `x2_m`, `y2_m` — equatorial components of the receiver position (m).
+#[must_use]
+pub fn sagnac_one_way_ns(x1_m: f64, y1_m: f64, x2_m: f64, y2_m: f64) -> f64 {
+    EARTH_ROTATION_RAD_S * (x1_m * y2_m - y1_m * x2_m) / (C * C) * 1e9
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -551,6 +812,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn quality_factors_reasonable() {
         assert!(FrequencyStandard::Cesium133.quality_factor() > 1e9);
         assert!(FrequencyStandard::StrontiumOptical.quality_factor() > 1e16);
@@ -812,7 +1074,7 @@ mod tests {
 
     #[test]
     fn gravitational_redshift_sign() {
-        // Higher receiver: negative shift (blueshift)
+        // Higher receiver: negative shift (redshift of light climbing out)
         let shift = gravitational_redshift(100.0);
         assert!(shift < 0.0);
     }
@@ -863,11 +1125,15 @@ mod tests {
     }
 
     #[test]
-    fn schwarzschild_surface_zero_velocity() {
-        // At Earth surface with zero velocity → no difference from ground clock
-        let earth_radius = 6.371e6;
-        let correction = schwarzschild_clock_correction_us_per_day(earth_radius, 0.0);
-        assert!(correction.abs() < 0.01);
+    fn schwarzschild_gps_iers_reference() {
+        // IERS Conventions 2010 eq. 10.9 / Ashby 2003: a = 26 561.75 km,
+        // net +38.575 µs/day (gravitational +45.788, velocity −7.213).
+        let a = 26_561_750.0;
+        let v = libm::sqrt(GM_EARTH / a);
+        let net = schwarzschild_clock_correction_us_per_day(a, v);
+        assert!((net - 38.575).abs() < 1e-3, "net={net}");
+        let grav_only = schwarzschild_clock_correction_us_per_day(a, 0.0);
+        assert!((grav_only - 45.788).abs() < 1e-3, "grav={grav_only}");
     }
 
     #[test]
@@ -897,6 +1163,108 @@ mod tests {
         // β = 0.01 → Δf/f = -5e-5
         let shift = second_order_doppler_shift(0.01);
         assert!((shift - (-5e-5)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn sagnac_one_way_equatorial_loop() {
+        // Eastward signal once around the equator: 2Ω(πR²)/c² = 207.39 ns,
+        // summed from short one-way hops.
+        let r = 6_378_137.0;
+        let steps = 3600;
+        let mut total = 0.0;
+        for k in 0..steps {
+            let a1 = 2.0 * core::f64::consts::PI * f64::from(k) / f64::from(steps);
+            let a2 = 2.0 * core::f64::consts::PI * f64::from(k + 1) / f64::from(steps);
+            total += sagnac_one_way_ns(
+                r * libm::cos(a1),
+                r * libm::sin(a1),
+                r * libm::cos(a2),
+                r * libm::sin(a2),
+            );
+        }
+        let exact = 2.0 * EARTH_ROTATION_RAD_S * core::f64::consts::PI * r * r / (C * C) * 1e9;
+        assert!((exact - 207.39).abs() < 0.01, "exact={exact}");
+        assert!((total - exact).abs() / exact < 1e-5, "total={total}");
+    }
+
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn cipm_2025_frequencies() {
+        assert!(
+            (FrequencyStandard::StrontiumOptical.transition_frequency_hz()
+                - 429_228_004_229_872.992)
+                .abs()
+                < 0.07
+        );
+        assert!(
+            (FrequencyStandard::YtterbiumOptical.transition_frequency_hz()
+                - 518_295_836_590_863.632)
+                .abs()
+                < 0.07
+        );
+        assert!(
+            (FrequencyStandard::Rubidium87.transition_frequency_hz() - 6_834_682_610.904_312_9)
+                .abs()
+                < 1e-6
+        );
+        let q = FrequencyStandard::Cesium133.quality_factor_for_linewidth(1.0);
+        assert!((q - 9_192_631_770.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn tcg_and_tdb_at_j2000() {
+        let jd = 2_451_545.0;
+        // TCG − TT at J2000 ≈ 0.505833 s.
+        assert!((tcg_minus_tt_seconds(jd) - 0.505_833).abs() < 1e-6);
+        assert!((tcg_to_tt_jd(tt_to_tcg_jd(jd)) - jd).abs() < 1e-9);
+        // TDB − TCB at J2000 ≈ −11.2537 s.
+        let tdb = tcb_to_tdb_jd(jd);
+        assert!(
+            ((tdb - jd) * 86_400.0 + 11.253_7).abs() < 1e-3,
+            "{}",
+            (tdb - jd) * 86_400.0
+        );
+        assert!((tdb_to_tcb_jd(tdb) - jd).abs() < 1e-9);
+        assert!(tcg_minus_tt_seconds(T0_JD).abs() < 1e-12);
+        assert!(tcb_minus_tcg_secular_seconds(T0_JD).abs() < 1e-12);
+    }
+
+    #[test]
+    fn tai_minus_utc_rubber_second_era() {
+        assert!((tai_minus_utc_seconds_mjd(37_300.0) - 1.422_818).abs() < 1e-9);
+        // End of 1971: 4.2131700 + (41317 − 39126) × 0.002592 = 9.892242 s.
+        assert!((tai_minus_utc_seconds_mjd(41_316.999) - 9.892_239).abs() < 1e-5);
+        assert!((tai_minus_utc_seconds_mjd(41_317.0) - 10.0).abs() < 1e-12);
+        assert!((tai_minus_utc_seconds_mjd(57_754.0) - 37.0).abs() < 1e-12); // 2017-01-01
+        assert!((tai_minus_utc_seconds_mjd(57_753.0) - 36.0).abs() < 1e-12); // 2016-12-31
+        assert!(tai_minus_utc_seconds_mjd(30_000.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn atomic_instant_exact_at_modern_epoch() {
+        let t0 = AtomicInstant::new(2_100_000_000, 123_456_789);
+        assert_eq!(t0.add_seconds(0.0), t0);
+        let t1 = t0.add_seconds(1e-9);
+        assert_eq!(t1.nanoseconds_since(&t0), 1);
+        let t2 = t0.add_seconds(-2.5);
+        assert_eq!(t2.nanoseconds_since(&t0), -2_500_000_000);
+        let t3 = t0.add_nanoseconds(900_000_000);
+        assert_eq!((t3.seconds, t3.nanos), (2_100_000_001, 23_456_789));
+        assert_eq!(AtomicInstant::from_tai_seconds(0.3).nanos, 300_000_000);
+    }
+
+    #[test]
+    fn atomic_instant_serde_normalizes() {
+        let t: AtomicInstant = serde_json::from_str(r#"{"seconds":5,"nanos":4000000000}"#).unwrap();
+        assert_eq!((t.seconds, t.nanos), (9, 0));
+        assert!(t > AtomicInstant::new(8, 0));
+    }
+
+    #[test]
+    fn time_dilation_exact_vs_leading_order() {
+        let exact = time_dilation_shift_exact(0.5);
+        assert!((exact - (libm::sqrt(0.75) - 1.0)).abs() < 1e-15);
+        assert!((second_order_doppler_shift(1e-4) - time_dilation_shift_exact(1e-4)).abs() < 1e-16);
     }
 
     #[test]

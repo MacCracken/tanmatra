@@ -10,45 +10,75 @@ use serde::{Deserialize, Serialize};
 
 /// Convert electron orbital energy (eV) to photon emission wavelength (nm).
 ///
-/// λ = hc / E, where hc ≈ 1239.842 eV·nm.
+/// λ = hc / E, where hc = 1239.841984 eV·nm (CODATA 2022, exact).
+/// Returns 0.0 for non-positive energies.
 #[must_use]
 #[inline]
 pub fn energy_to_wavelength_nm(energy_ev: f64) -> f64 {
     if energy_ev <= 0.0 {
         return 0.0;
     }
-    1239.842 / energy_ev
+    crate::constants::HC_EV_NM / energy_ev
 }
 
 /// Convert nuclear charge number (Z) to Coulomb field strength (V/m)
 /// at distance r (m).
 ///
-/// E = k × Z × e / r², where k = 8.9876e9, e = 1.602e-19 C.
+/// E = Z e / (4πε₀ r²) with CODATA 2022 ε₀ and exact e.
 #[must_use]
 #[inline]
 pub fn nuclear_charge_field(atomic_number: u32, distance_m: f64) -> f64 {
-    const COULOMB_K: f64 = 8.987_551_792e9;
-    const E_CHARGE: f64 = 1.602_176_634e-19;
     if distance_m <= 0.0 {
         return 0.0;
     }
-    COULOMB_K * atomic_number as f64 * E_CHARGE / (distance_m * distance_m)
+    crate::constants::COULOMB_K_SI * atomic_number as f64 * crate::constants::ELEMENTARY_CHARGE
+        / (distance_m * distance_m)
 }
 
 // ── Kimiya bridges (chemistry) ─────────────────────────────────────────────
 
-/// Convert atomic number to number of valence electrons (main-group simplified).
+/// Convert atomic number to the number of valence electrons.
+///
+/// Counted from the NIST ground-state configuration as the electrons outside
+/// the preceding noble-gas core, excluding completely filled d¹⁰ and f¹⁴
+/// subshells. Main-group elements give their group number (1–2, 13–18 → 3–8;
+/// He → 2); d-block elements give s + d electrons (Fe → 8, Cu → 1, Zn → 2).
+/// Returns 0 for Z = 0 or Z > 118.
 #[must_use]
 pub fn atomic_number_to_valence(atomic_number: u8) -> u8 {
-    match atomic_number {
-        1 => 1,
-        2 => 2,
-        3..=4 => atomic_number - 2,
-        5..=10 => atomic_number - 2,
-        11..=12 => atomic_number - 10,
-        13..=18 => atomic_number - 10,
-        _ => 2, // transition metals: conventional
+    let z = u32::from(atomic_number);
+    let Ok(config) = crate::atomic::electron_configuration(z) else {
+        return 0;
+    };
+    let core = match z {
+        0..=2 => 0,
+        3..=10 => 2,
+        11..=18 => 10,
+        19..=36 => 18,
+        37..=54 => 36,
+        55..=86 => 54,
+        _ => 86,
+    };
+    // Electrons beyond the noble-gas core, in filling order.
+    let mut counted = 0u32;
+    let mut valence = 0u32;
+    for shell in &config {
+        let before = counted;
+        counted += shell.electrons;
+        if counted <= core {
+            continue;
+        }
+        let outside = counted - before.max(core);
+        let filled = shell.electrons == shell.orbital.max_electrons();
+        let inner = matches!(
+            shell.orbital,
+            crate::atomic::OrbitalType::D | crate::atomic::OrbitalType::F
+        );
+        if !(filled && inner) {
+            valence += outside;
+        }
     }
+    u8::try_from(valence).unwrap_or(u8::MAX)
 }
 
 /// Convert atomic number and mass number to neutron count.
@@ -60,19 +90,18 @@ pub fn neutron_count(atomic_number: u32, mass_number: u32) -> u32 {
 
 /// Convert isotope mass (u) to nuclear binding energy deficit (MeV).
 ///
-/// ΔE = (Z×m_p + N×m_n - M) × 931.494 MeV/u
+/// ΔE = (Z×M(¹H) + N×m_n − M) × 931.49410372 MeV/u
 /// `mass_u`: atomic mass in unified atomic mass units.
+///
+/// Uses the H-1 atomic mass (AME2020) for Z (proton + electron) pairs, which
+/// accounts for the hydrogen electron binding, and CODATA 2022 m_n and u.
 #[must_use]
 pub fn mass_to_binding_deficit_mev(atomic_number: u32, mass_number: u32, mass_u: f64) -> f64 {
-    const M_PROTON: f64 = 1.007_276_47;
-    const M_NEUTRON: f64 = 1.008_664_92;
-    const M_ELECTRON: f64 = 0.000_548_58;
-    const MEV_PER_U: f64 = 931.494;
-
     let z = atomic_number as f64;
     let n = mass_number.saturating_sub(atomic_number) as f64;
-    let constituents = z * (M_PROTON + M_ELECTRON) + n * M_NEUTRON;
-    (constituents - mass_u) * MEV_PER_U
+    let constituents =
+        z * crate::constants::HYDROGEN_ATOM_MASS_U + n * crate::constants::NEUTRON_MASS_U;
+    (constituents - mass_u) * crate::constants::AMU_MEV
 }
 
 /// Convert half-life (seconds) to decay probability per unit time (1/s).
@@ -92,28 +121,30 @@ pub fn half_life_to_decay_constant(half_life_s: f64) -> f64 {
 /// Convert energy level transitions to spectral line wavelengths (nm).
 ///
 /// Given a list of transition energies (eV), returns corresponding wavelengths.
+/// Non-positive energies are skipped, so the output can be shorter than the input.
 #[must_use]
 pub fn transitions_to_wavelengths(transition_energies_ev: &[f64]) -> Vec<f64> {
     transition_energies_ev
         .iter()
         .filter(|&&e| e > 0.0)
-        .map(|&e| 1239.842 / e)
+        .map(|&e| crate::constants::HC_EV_NM / e)
         .collect()
 }
 
-/// Convert nuclear spin quantum number to hyperfine splitting factor.
+/// Convert nuclear spin I to the factor multiplying the magnetic hyperfine
+/// constant A in the splitting of a J = 1/2 level.
 ///
-/// The hyperfine splitting scales with the nuclear magnetic moment,
-/// which is roughly proportional to I (nuclear spin).
-/// Returns a dimensionless scaling factor.
+/// The F = I + 1/2 and F = I − 1/2 levels are separated by ΔE = A (I + 1/2),
+/// so this returns I + 1/2 (the constant A itself is proportional to the
+/// nuclear g-factor g_I = μ_I/(I μ_N)). Returns 0.0 for I ≤ 0 (no hyperfine
+/// splitting).
 #[must_use]
 #[inline]
 pub fn nuclear_spin_to_hyperfine_scale(spin_i: f64) -> f64 {
     if spin_i <= 0.0 {
         return 0.0;
     }
-    // Hyperfine splitting ∝ (2I+1) states
-    2.0 * spin_i + 1.0
+    spin_i + 0.5
 }
 
 // ── Jyotish bridges (astronomy/time) ──────────────────────────────────────
@@ -136,7 +167,10 @@ pub fn tai_to_tt(tai_seconds: f64) -> f64 {
 /// `chrono::DateTime<Utc>` by adding this offset to the UTC epoch seconds.
 ///
 /// `year`: Gregorian year. `month`: 1–12.
-/// Returns ΔAT = TAI − UTC in whole seconds (0 before 1972).
+/// Returns ΔAT = TAI − UTC in whole seconds (0 before 1972; for 1961–1971 use
+/// [`crate::timekeeping::tai_minus_utc_seconds_mjd`]). Unix-epoch seconds must
+/// first be shifted by the 378 691 200 s between 1970-01-01 and 1958-01-01
+/// to be used with this crate's TAI epoch.
 #[must_use]
 #[inline]
 pub fn utc_date_to_tai_offset(year: i32, month: u8) -> i32 {
@@ -171,7 +205,9 @@ pub fn utc_to_tai_seconds(utc_seconds: f64, year: i32, month: u8) -> f64 {
 /// runs faster than ground). Wraps the Schwarzschild correction from
 /// [`crate::timekeeping`].
 ///
-/// For GPS orbit: returns ≈ +4.465e-10 (≈ +38.6 μs/day).
+/// Includes both the gravitational and the velocity (time-dilation) terms, as
+/// [`crate::timekeeping::schwarzschild_clock_correction_us_per_day`].
+/// For a GPS orbit (a = 26 561.75 km): +4.4647e-10 (+38.575 μs/day).
 #[must_use]
 #[inline]
 pub fn gravitational_time_dilation(orbital_radius_m: f64, orbital_velocity_m_s: f64) -> f64 {
@@ -505,9 +541,33 @@ mod tests {
 
     #[test]
     fn hyperfine_hydrogen() {
-        // Hydrogen: I = 1/2 → 2 states
-        let s = nuclear_spin_to_hyperfine_scale(0.5);
-        assert!((s - 2.0).abs() < 0.01);
+        // ΔE = A (I + 1/2): hydrogen (I = 1/2) → 1, deuterium (I = 1) → 3/2.
+        assert!((nuclear_spin_to_hyperfine_scale(0.5) - 1.0).abs() < f64::EPSILON);
+        assert!((nuclear_spin_to_hyperfine_scale(1.0) - 1.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn valence_from_configuration() {
+        for (z, v) in [
+            (1, 1),
+            (2, 2),
+            (8, 6),
+            (10, 8),
+            (19, 1),
+            (26, 8),
+            (29, 1),
+            (30, 2),
+            (31, 3),
+            (35, 7),
+            (36, 8),
+            (53, 7),
+            (55, 1),
+            (82, 4),
+            (86, 8),
+        ] {
+            assert_eq!(atomic_number_to_valence(z), v, "Z={z}");
+        }
+        assert_eq!(atomic_number_to_valence(0), 0);
     }
 
     #[test]
@@ -595,7 +655,7 @@ mod tests {
     fn j2000_epoch_check() {
         // J2000.0 = JD 2451545.0 (TT). TAI seconds for that:
         let j2000_tai = jd_tt_to_tai_seconds(2_451_545.0);
-        // Should be ~1325376000 - 32.184 ≈ positive large number (post-1958)
+        // J2000.0 (JD 2451545.0 TT) is 1 325 419 167.816 s of TAI after 1958-01-01.
         assert!(j2000_tai > 0.0, "J2000 TAI = {j2000_tai}");
         // Roundtrip
         let jd_back = tai_seconds_to_jd_tt(j2000_tai);

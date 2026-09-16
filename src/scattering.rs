@@ -5,7 +5,7 @@
 //! Klein-Nishina Compton scattering, and Bethe-Heitler pair production.
 
 use crate::constants::{
-    AMU_MEV, CLASSICAL_ELECTRON_RADIUS_FM, ELECTRON_MASS_MEV, FINE_STRUCTURE, PROTON_MASS_MEV,
+    BOHR_RADIUS, CLASSICAL_ELECTRON_RADIUS_FM, ELECTRON_MASS_MEV, FINE_STRUCTURE, HBAR_C_MEV_FM,
 };
 
 /// Calculates the Rutherford differential cross-section dσ/dΩ in fm².
@@ -43,21 +43,20 @@ pub fn rutherford_differential(
     }
 
     // a = Z₁ Z₂ α ħc / (4 T_cm), where ħc = 197.3269804 MeV·fm
-    let hbar_c = 197.326_980_4;
-    let a_param = z_proj as f64 * z_target as f64 * FINE_STRUCTURE * hbar_c / (4.0 * energy_cm_mev);
+    let a_param =
+        z_proj as f64 * z_target as f64 * FINE_STRUCTURE * HBAR_C_MEV_FM / (4.0 * energy_cm_mev);
 
     (a_param * a_param) / sin4
 }
 
-/// Calculates the Mott scattering correction factor for identical particles.
+/// Calculates the Mott spin factor for a relativistic spin-1/2 projectile
+/// scattering off a spinless, infinitely heavy point charge.
 ///
-/// The Mott correction accounts for quantum mechanical exchange effects
-/// when identical particles scatter (e.g., proton-proton). The cross-section
-/// is modified to:
+/// dσ/dΩ_Mott = dσ/dΩ_Ruth × [1 − β² sin²(θ/2)]
 ///
-/// dσ/dΩ_Mott = dσ/dΩ_Ruth × [1 - β² sin²(θ/2)]
-///
-/// for spin-0 identical particles (approximation), where β = v/c.
+/// This accounts for the projectile's magnetic moment (e.g. electrons on
+/// nuclei); it is not the identical-particle exchange correction. Nuclear
+/// recoil and the finite nuclear size are neglected.
 ///
 /// Parameters:
 /// - `beta`: v/c of the projectile in the CM frame
@@ -71,11 +70,11 @@ pub fn mott_correction_factor(beta: f64, theta_rad: f64) -> f64 {
     1.0 - beta * beta * sin_half * sin_half
 }
 
-/// Calculates the Rutherford cross-section integrated over a minimum angle.
+/// Calculates the Rutherford cross-section integrated over all angles above θ_min.
 ///
-/// σ(θ > θ_min) = π (a/2)² / tan²(θ_min/2)
+/// σ(θ > θ_min) = π b² = π (Z₁ Z₂ e² / (2 T_cm))² cot²(θ_min/2)
 ///
-/// where a = Z₁ Z₂ e² / (2 T_cm).
+/// where b is the impact parameter that scatters to θ_min.
 ///
 /// Returns total cross-section in fm² for scattering beyond θ_min.
 #[must_use]
@@ -90,8 +89,8 @@ pub fn rutherford_total_above_angle(
         return f64::INFINITY;
     }
 
-    let hbar_c = 197.326_980_4;
-    let a_param = z_proj as f64 * z_target as f64 * FINE_STRUCTURE * hbar_c / (4.0 * energy_cm_mev);
+    let a_param =
+        z_proj as f64 * z_target as f64 * FINE_STRUCTURE * HBAR_C_MEV_FM / (4.0 * energy_cm_mev);
 
     let tan_half = libm::tan(theta_min_rad / 2.0);
     let tan2 = tan_half * tan_half;
@@ -99,22 +98,24 @@ pub fn rutherford_total_above_angle(
         return f64::INFINITY;
     }
 
-    core::f64::consts::PI * a_param * a_param / tan2
+    // a_param = Z₁Z₂e²/(4T), so (Z₁Z₂e²/(2T))² = 4 a_param².
+    4.0 * core::f64::consts::PI * a_param * a_param / tan2
 }
 
-/// Calculates the distance of closest approach for Coulomb scattering (fm).
+/// Calculates the distance of closest approach for a head-on Coulomb
+/// collision (θ = π), in fm.
 ///
-/// d = Z₁ Z₂ e² / (2 T_cm) = Z₁ Z₂ α ħc / (2 T_cm)
+/// d = Z₁ Z₂ e² / T_cm = Z₁ Z₂ α ħc / T_cm
 ///
-/// This is the classical turning point for a head-on collision (θ = π).
+/// All centre-of-mass kinetic energy is converted to Coulomb potential energy
+/// at the classical turning point (5 MeV α on Au: ≈ 45.5 fm).
 #[must_use]
 #[inline]
 pub fn distance_of_closest_approach(z_proj: u32, z_target: u32, energy_cm_mev: f64) -> f64 {
     if energy_cm_mev <= 0.0 {
         return f64::INFINITY;
     }
-    let hbar_c = 197.326_980_4;
-    z_proj as f64 * z_target as f64 * FINE_STRUCTURE * hbar_c / (2.0 * energy_cm_mev)
+    z_proj as f64 * z_target as f64 * FINE_STRUCTURE * HBAR_C_MEV_FM / energy_cm_mev
 }
 
 /// Calculates the Sommerfeld parameter η for Coulomb scattering.
@@ -212,9 +213,9 @@ pub fn partial_wave_differential(k_inv_fm: f64, phase_shifts: &[f64], theta_rad:
 
 /// Thomas-Fermi screening length in femtometers.
 ///
-/// a_TF = 0.8853 × a₀ / Z^(1/3)
+/// a_TF = (9π²/128)^(1/3) × a₀ / Z^(1/3) = 0.88534 × a₀ / Z^(1/3)
 ///
-/// where a₀ = 52917.72 fm (Bohr radius in fm).
+/// where a₀ = 52917.72 fm (Bohr radius in fm, CODATA 2022).
 ///
 /// Reference: Thomas-Fermi model, see e.g. Ziegler, Biersack & Littmark (1985).
 #[must_use]
@@ -223,25 +224,59 @@ pub fn thomas_fermi_screening_fm(z: u32) -> f64 {
     if z == 0 {
         return 0.0;
     }
-    // Bohr radius in fm: 5.29177210903e-11 m * 1e15 fm/m = 52917.72 fm
-    let a0_fm = 52_917.72;
-    0.8853 * a0_fm / libm::cbrt(z as f64)
+    let a0_fm = BOHR_RADIUS * 1e15;
+    0.885_34 * a0_fm / libm::cbrt(z as f64)
 }
 
 /// Born approximation differential cross-section for screened Coulomb (Yukawa)
-/// potential in fm²/sr.
+/// potential in fm²/sr, non-relativistic.
 ///
-/// V(r) = (Z₁ Z₂ α ħc / r) exp(-r/a)
+/// V(r) = (Z₁ Z₂ α ħc / r) exp(−r/a)
 ///
-/// dσ/dΩ = [2μ Z₁ Z₂ α ħc / (ħ² (q² + 1/a²))]²
-///       = [Z₁ Z₂ α ħc / (2E_cm)]² × 1 / [sin²(θ/2) + (ħ/(2ka))²]²
-///       (after simplification with ħ²k² = 2μE)
+/// dσ/dΩ = [2μ Z₁ Z₂ α ħc / ((ħc)² (q² + 1/a²))]²
+///       = [Z₁ Z₂ α ħc / (4 E_cm)]² / [sin²(θ/2) + 1/(4k²a²)]²
+///
+/// with ħ²k² = 2μE_cm and q = 2k sin(θ/2). As a → ∞ it reduces to Rutherford.
 ///
 /// Parameters:
 /// - `z_proj`, `z_target`: atomic numbers
+/// - `mass_proj_mev`, `mass_target_mev`: rest masses in MeV/c² (used for the
+///   reduced mass μ)
 /// - `energy_cm_mev`: center-of-mass kinetic energy in MeV
-/// - `theta_rad`: scattering angle in radians
+/// - `theta_rad`: scattering angle in radians (CM)
 /// - `screening_fm`: screening length a in fm
+#[must_use]
+pub fn born_screened_coulomb_with_masses(
+    z_proj: u32,
+    z_target: u32,
+    mass_proj_mev: f64,
+    mass_target_mev: f64,
+    energy_cm_mev: f64,
+    theta_rad: f64,
+    screening_fm: f64,
+) -> f64 {
+    if energy_cm_mev <= 0.0 || screening_fm <= 0.0 || mass_proj_mev <= 0.0 || mass_target_mev <= 0.0
+    {
+        return 0.0;
+    }
+    let mu = mass_proj_mev * mass_target_mev / (mass_proj_mev + mass_target_mev);
+    let sin_half = libm::sin(theta_rad / 2.0);
+    let k2 = 2.0 * mu * energy_cm_mev / (HBAR_C_MEV_FM * HBAR_C_MEV_FM);
+    let q2 = 4.0 * k2 * sin_half * sin_half;
+    let denom = q2 + 1.0 / (screening_fm * screening_fm);
+    if denom < 1e-30 {
+        return f64::INFINITY;
+    }
+    let numer = 2.0 * mu * z_proj as f64 * z_target as f64 * FINE_STRUCTURE / HBAR_C_MEV_FM;
+    (numer * numer) / (denom * denom)
+}
+
+/// Born approximation for screened Coulomb scattering with nuclear masses
+/// estimated from Z.
+///
+/// Masses are taken as m_p for Z = 1 and 2Z·u otherwise, which is only a
+/// rough estimate for heavy nuclei (Au: A ≈ 158 instead of 197). Prefer
+/// [`born_screened_coulomb_with_masses`], which takes the masses explicitly.
 #[must_use]
 pub fn born_screened_coulomb(
     z_proj: u32,
@@ -250,53 +285,39 @@ pub fn born_screened_coulomb(
     theta_rad: f64,
     screening_fm: f64,
 ) -> f64 {
-    if energy_cm_mev <= 0.0 || screening_fm <= 0.0 {
-        return 0.0;
-    }
-
-    let hbar_c = 197.326_980_4; // MeV·fm
-
-    // Reduced mass approximation: A ~ 2Z for Z > 1, proton mass for Z = 1.
-    let mass_proj = if z_proj <= 1 {
-        PROTON_MASS_MEV
-    } else {
-        z_proj as f64 * 2.0 * AMU_MEV
+    let estimate = |z: u32| {
+        if z <= 1 {
+            crate::constants::PROTON_MASS_MEV
+        } else {
+            z as f64 * 2.0 * crate::constants::AMU_MEV
+        }
     };
-    let mass_target = if z_target <= 1 {
-        PROTON_MASS_MEV
-    } else {
-        z_target as f64 * 2.0 * AMU_MEV
-    };
-    let mu = mass_proj * mass_target / (mass_proj + mass_target);
-
-    let sin_half = libm::sin(theta_rad / 2.0);
-    let sin2_half = sin_half * sin_half;
-
-    // k² = 2μE/(ħc)²
-    let k2 = 2.0 * mu * energy_cm_mev / (hbar_c * hbar_c);
-    // q² = 4k² sin²(θ/2)
-    let q2 = 4.0 * k2 * sin2_half;
-    // Screening: q² + 1/a²
-    let inv_a2 = 1.0 / (screening_fm * screening_fm);
-    let denom = q2 + inv_a2;
-    if denom < 1e-30 {
-        return f64::INFINITY;
-    }
-
-    // dσ/dΩ = (2μ Z1 Z2 α / ((ħc)(q²+1/a²)))²
-    let numer = 2.0 * mu * z_proj as f64 * z_target as f64 * FINE_STRUCTURE / hbar_c;
-    (numer * numer) / (denom * denom)
+    born_screened_coulomb_with_masses(
+        z_proj,
+        z_target,
+        estimate(z_proj),
+        estimate(z_target),
+        energy_cm_mev,
+        theta_rad,
+        screening_fm,
+    )
 }
 
 // ─── Electron-Atom Elastic Scattering (Mott with Form Factor) ────────────────
 
-/// Mott differential cross-section for relativistic electrons on a point nucleus.
+/// Mott differential cross-section for electrons on a spinless, infinitely
+/// heavy point nucleus, in fm²/sr.
 ///
-/// dσ/dΩ = (Z α ħc / (2E))² × cos²(θ/2) / sin⁴(θ/2)
+/// dσ/dΩ = (Z α ħc / (2 p c β))² × [1 − β² sin²(θ/2)] / sin⁴(θ/2)
+///
+/// with pc and β computed exactly from the kinetic energy, so the formula is
+/// valid from non-relativistic to ultra-relativistic energies (first Born
+/// approximation, Zα ≪ 1; recoil neglected). In the ultra-relativistic limit
+/// it becomes (Zαħc/(2E))² cos²(θ/2)/sin⁴(θ/2).
 ///
 /// Parameters:
 /// - `z_target`: target atomic number
-/// - `electron_energy_mev`: electron kinetic energy in MeV (relativistic)
+/// - `electron_energy_mev`: electron **kinetic** energy in MeV
 /// - `theta_rad`: scattering angle in radians
 ///
 /// Returns dσ/dΩ in fm²/sr.
@@ -306,22 +327,25 @@ pub fn mott_electron_differential(z_target: u32, electron_energy_mev: f64, theta
     if electron_energy_mev <= 0.0 {
         return 0.0;
     }
-    let hbar_c = 197.326_980_4;
     let sin_half = libm::sin(theta_rad / 2.0);
-    let cos_half = libm::cos(theta_rad / 2.0);
-    let sin4 = sin_half * sin_half * sin_half * sin_half;
+    let sin2 = sin_half * sin_half;
+    let sin4 = sin2 * sin2;
     if sin4 < 1e-30 {
         return f64::INFINITY;
     }
-    let a_param = z_target as f64 * FINE_STRUCTURE * hbar_c / (2.0 * electron_energy_mev);
-    a_param * a_param * cos_half * cos_half / sin4
+    let t = electron_energy_mev;
+    let total = t + ELECTRON_MASS_MEV;
+    let pc = libm::sqrt(t * (t + 2.0 * ELECTRON_MASS_MEV));
+    let beta = pc / total;
+    let a_param = z_target as f64 * FINE_STRUCTURE * HBAR_C_MEV_FM / (2.0 * pc * beta);
+    a_param * a_param * (1.0 - beta * beta * sin2) / sin4
 }
 
 /// Nuclear form factor for a uniform charge distribution (sphere of radius R).
 ///
 /// F(q) = 3 [sin(qR) - qR cos(qR)] / (qR)³
 ///
-/// Returns 1.0 for qR < 1e-6 to avoid division by zero.
+/// Uses the Taylor series for |qR| < 0.5, where the closed form cancels.
 ///
 /// Parameters:
 /// - `q_inv_fm`: momentum transfer in fm⁻¹
@@ -330,8 +354,19 @@ pub fn mott_electron_differential(z_target: u32, electron_energy_mev: f64, theta
 #[inline]
 pub fn nuclear_form_factor_uniform(q_inv_fm: f64, radius_fm: f64) -> f64 {
     let qr = q_inv_fm * radius_fm;
-    if libm::fabs(qr) < 1e-6 {
-        return 1.0;
+    if libm::fabs(qr) < 0.5 {
+        // Series F(x) = Σ (−1)ⁿ 3(2n+2) x²ⁿ / (2n+3)!, avoiding the
+        // cancellation in sin x − x cos x ≈ x³/3.
+        let x2 = qr * qr;
+        let mut term = 1.0;
+        let mut sum = 1.0;
+        for n in 1..=10_u32 {
+            let nf = f64::from(n);
+            // term_n / term_(n−1) = −x² / ((2n)(2n+3))
+            term *= -x2 / ((2.0 * nf) * (2.0 * nf + 3.0));
+            sum += term;
+        }
+        return sum;
     }
     let sin_qr = libm::sin(qr);
     let cos_qr = libm::cos(qr);
@@ -343,13 +378,13 @@ pub fn nuclear_form_factor_uniform(q_inv_fm: f64, radius_fm: f64) -> f64 {
 ///
 /// dσ/dΩ = dσ/dΩ_Mott × |F(q)|²
 ///
-/// Uses nuclear radius R = 1.2 × A^(1/3) fm and momentum transfer
-/// q = 2E sin(θ/2) / (ħc) for relativistic electrons.
+/// Uses the equivalent uniform-sphere radius R = 1.2 × A^(1/3) fm and the
+/// momentum transfer q = 2 p sin(θ/2) / (ħc), with p from the kinetic energy.
 ///
 /// Parameters:
 /// - `z_target`: target atomic number
 /// - `a_target`: target mass number
-/// - `electron_energy_mev`: electron energy in MeV
+/// - `electron_energy_mev`: electron kinetic energy in MeV
 /// - `theta_rad`: scattering angle in radians
 ///
 /// Returns dσ/dΩ in fm²/sr.
@@ -360,12 +395,11 @@ pub fn mott_electron_with_form_factor(
     electron_energy_mev: f64,
     theta_rad: f64,
 ) -> f64 {
-    let hbar_c = 197.326_980_4;
     let mott = mott_electron_differential(z_target, electron_energy_mev, theta_rad);
 
-    // Momentum transfer for relativistic electrons: q = 2E sin(θ/2) / ħc
     let sin_half = libm::sin(theta_rad / 2.0);
-    let q = 2.0 * electron_energy_mev * sin_half / hbar_c;
+    let pc = libm::sqrt(electron_energy_mev * (electron_energy_mev + 2.0 * ELECTRON_MASS_MEV));
+    let q = 2.0 * pc * sin_half / HBAR_C_MEV_FM;
 
     // Nuclear radius: R = 1.2 * A^(1/3) fm
     let radius = 1.2 * libm::cbrt(a_target as f64);
@@ -427,9 +461,14 @@ pub fn klein_nishina_total(photon_energy_mev: f64) -> f64 {
     let re2 = CLASSICAL_ELECTRON_RADIUS_FM * CLASSICAL_ELECTRON_RADIUS_FM;
     let gamma = photon_energy_mev / ELECTRON_MASS_MEV;
 
-    // For very low photon energies, use Thomson limit to avoid numerical issues
-    if gamma < 1e-6 {
-        return 8.0 * core::f64::consts::PI * re2 / 3.0;
+    // Low-energy series σ = σ_T (1 − 2γ + 26γ²/5 − 133γ³/10 + 1144γ⁴/35),
+    // used where the closed form suffers cancellation.
+    if gamma < 1e-2 {
+        let thomson = 8.0 * core::f64::consts::PI * re2 / 3.0;
+        return thomson
+            * (1.0 - 2.0 * gamma + 26.0 / 5.0 * gamma * gamma
+                - 133.0 / 10.0 * gamma * gamma * gamma
+                + 1144.0 / 35.0 * gamma * gamma * gamma * gamma);
     }
 
     let g2 = gamma * gamma;
@@ -446,29 +485,60 @@ pub fn klein_nishina_total(photon_energy_mev: f64) -> f64 {
 
 // ─── Pair Production (Bethe-Heitler) ─────────────────────────────────────────
 
-/// Bethe-Heitler pair production cross-section (high-energy asymptotic limit).
+/// Apéry's constant ζ(3).
+const ZETA3: f64 = 1.202_056_903_159_594_2;
+
+/// Pair production cross-section in the nuclear Coulomb field, in fm² per atom.
 ///
-/// σ_pair ≈ α r_e² Z² [28/9 ln(2E/(m_e c²)) - 218/27]
+/// Bethe–Heitler (first Born approximation, unscreened point nucleus) total
+/// cross section in the analytic forms of Maximon, J. Res. NBS 72B, 79 (1968),
+/// as tabulated by Hubbell, Gimm & Øverbø, J. Phys. Chem. Ref. Data 9, 1023
+/// (1980), with k = E_γ/(m_e c²):
 ///
-/// Valid for E_γ >> 2 m_e c² = 1.022 MeV. Returns 0.0 below threshold.
+/// - 2 < k < 4: σ = (2π/3) Z² α r_e² ((k−2)/k)³ [1 + ε/2 + 23ε²/40 + 11ε³/60 + 29ε⁴/960],
+///   ε = (2k − 4)/(2 + k + 2√(2k))
+/// - k ≥ 4: σ = Z² α r_e² { (28/9) ln 2k − 218/27 + (2/k)² [6 ln 2k − 7/2 + (2/3) ln³ 2k
+///   − ln² 2k − (π²/3) ln 2k + 2ζ(3) + π²/6] − (2/k)⁴ [(3/16) ln 2k + 1/8]
+///   − (2/k)⁶ [(29/2304) ln 2k − 77/13824] }
+///
+/// The two branches join continuously at k = 4 and the result is positive
+/// for every energy above threshold. Not included: atomic screening (which
+/// lowers σ for k ≫ 1/(αZ^(1/3)), e.g. ≈ 30% for Pb at 1 GeV), the Coulomb
+/// correction for high Z, and pair production in the atomic electron field
+/// (triplet production, roughly σ/Z). Returns 0.0 at or below threshold.
 ///
 /// Parameters:
 /// - `z_target`: target atomic number
 /// - `photon_energy_mev`: photon energy in MeV
-///
-/// Returns cross-section in fm² per atom.
 #[must_use]
 pub fn pair_production_cross_section(z_target: u32, photon_energy_mev: f64) -> f64 {
-    let threshold = 2.0 * ELECTRON_MASS_MEV; // 1.021998 MeV
-    if photon_energy_mev <= threshold {
+    let k = photon_energy_mev / ELECTRON_MASS_MEV;
+    if k.is_nan() || k <= 2.0 {
         return 0.0;
     }
-    let re2 = CLASSICAL_ELECTRON_RADIUS_FM * CLASSICAL_ELECTRON_RADIUS_FM;
+    let pi = core::f64::consts::PI;
     let z2 = (z_target as f64) * (z_target as f64);
-    let ratio = 2.0 * photon_energy_mev / ELECTRON_MASS_MEV;
-    let ln_ratio = libm::log(ratio);
-
-    FINE_STRUCTURE * re2 * z2 * (28.0 / 9.0 * ln_ratio - 218.0 / 27.0)
+    let prefactor =
+        z2 * FINE_STRUCTURE * CLASSICAL_ELECTRON_RADIUS_FM * CLASSICAL_ELECTRON_RADIUS_FM;
+    if k < 4.0 {
+        let eps = (2.0 * k - 4.0) / (2.0 + k + 2.0 * libm::sqrt(2.0 * k));
+        let ratio = (k - 2.0) / k;
+        let series = 1.0
+            + eps / 2.0
+            + 23.0 * eps * eps / 40.0
+            + 11.0 * eps * eps * eps / 60.0
+            + 29.0 * eps * eps * eps * eps / 960.0;
+        return prefactor * (2.0 * pi / 3.0) * ratio * ratio * ratio * series;
+    }
+    let l = libm::log(2.0 * k);
+    let r2 = (2.0 / k) * (2.0 / k);
+    let bracket = 28.0 / 9.0 * l - 218.0 / 27.0
+        + r2 * (6.0 * l - 3.5 + 2.0 / 3.0 * l * l * l - l * l - pi * pi / 3.0 * l
+            + 2.0 * ZETA3
+            + pi * pi / 6.0)
+        - r2 * r2 * (3.0 / 16.0 * l + 0.125)
+        - r2 * r2 * r2 * (29.0 / 2304.0 * l - 77.0 / 13_824.0);
+    prefactor * bracket
 }
 
 #[cfg(test)]
@@ -524,10 +594,13 @@ mod tests {
 
     #[test]
     fn closest_approach_gold_alpha() {
-        // 5 MeV alpha on Au-197: d ≈ Z1*Z2*alpha*hbar_c/(2*T_cm)
-        // ≈ 2*79*0.00730*197.3/(2*5) ≈ 2*79*1.44/10 ≈ 22.8 fm
+        // 5 MeV alpha on Au: d = Z1*Z2*e²/T = 2*79*1.4399645/5 = 45.503 fm
         let dist = distance_of_closest_approach(2, 79, 5.0);
-        assert!(dist > 20.0 && dist < 50.0, "d={dist} fm");
+        assert!(
+            (dist - 2.0 * 79.0 * crate::constants::COULOMB_MEV_FM / 5.0).abs() < 1e-6,
+            "d={dist} fm"
+        );
+        assert!((dist - 45.503).abs() < 1e-3);
     }
 
     #[test]
@@ -538,9 +611,24 @@ mod tests {
     }
 
     #[test]
-    fn rutherford_total_finite_above_angle() {
-        let sigma = rutherford_total_above_angle(2, 79, 5.0, 0.1);
-        assert!(sigma > 0.0 && sigma.is_finite(), "σ={sigma} fm²");
+    fn rutherford_total_matches_integral_of_differential() {
+        let th_min = 0.1;
+        let total = rutherford_total_above_angle(2, 79, 5.0, th_min);
+        let n = 200_000;
+        let h = (core::f64::consts::PI - th_min) / n as f64;
+        let f = |t: f64| {
+            rutherford_differential(2, 79, 5.0, t) * 2.0 * core::f64::consts::PI * libm::sin(t)
+        };
+        let mut acc = f(th_min) + f(core::f64::consts::PI);
+        for i in 1..n {
+            let t = th_min + i as f64 * h;
+            acc += if i % 2 == 1 { 4.0 } else { 2.0 } * f(t);
+        }
+        let numeric = acc * h / 3.0;
+        assert!(
+            (total - numeric).abs() / numeric < 1e-6,
+            "{total} vs {numeric}"
+        );
     }
 
     #[test]
@@ -706,9 +794,9 @@ mod tests {
 
     #[test]
     fn thomas_fermi_hydrogen() {
-        // Z=1: a_TF = 0.8853 * a0 ≈ 0.8853 * 52917.72 ≈ 46,847 fm
+        // Z=1: a_TF = 0.88534 * a0 = 0.88534 * 52917.72105 fm
         let a = thomas_fermi_screening_fm(1);
-        let expected = 0.8853 * 52_917.72;
+        let expected = 0.885_34 * 52_917.721_054_4;
         assert!(
             (a - expected).abs() / expected < 1e-6,
             "a(Z=1)={a}, expected≈{expected}"
@@ -898,6 +986,84 @@ mod tests {
     fn pair_production_positive_above_threshold() {
         let sigma = pair_production_cross_section(82, 10.0);
         assert!(sigma > 0.0 && sigma.is_finite(), "σ={sigma}");
+    }
+
+    #[test]
+    fn pair_production_positive_and_continuous() {
+        let m = ELECTRON_MASS_MEV;
+        let mut k = 2.001;
+        while k < 2000.0 {
+            let s = pair_production_cross_section(82, k * m);
+            assert!(s > 0.0, "k={k}: σ={s}");
+            k *= 1.01;
+        }
+        let below = pair_production_cross_section(82, 4.0 * m * (1.0 - 1e-12));
+        let above = pair_production_cross_section(82, 4.0 * m * (1.0 + 1e-12));
+        assert!((below - above).abs() / above < 1e-3, "{below} vs {above}");
+    }
+
+    #[test]
+    fn pair_production_reference_values() {
+        // Hubbell, Gimm & Øverbø (1980) nuclear-field Bethe–Heitler σ/(Z² α r_e²):
+        // high-energy branch at k = 100 gives 8.44398.
+        let k = 100.0;
+        let unit = 82.0
+            * 82.0
+            * FINE_STRUCTURE
+            * CLASSICAL_ELECTRON_RADIUS_FM
+            * CLASSICAL_ELECTRON_RADIUS_FM;
+        let s = pair_production_cross_section(82, k * ELECTRON_MASS_MEV) / unit;
+        assert!((s - 8.44398).abs() < 1e-4, "reduced σ={s}");
+    }
+
+    #[test]
+    fn klein_nishina_total_matches_integral_small_gamma() {
+        for e in [5.11e-6, 1e-5, 1e-4, 5e-3, 1e-2, 1e-1] {
+            let n = 20_000;
+            let h = core::f64::consts::PI / n as f64;
+            let f = |t: f64| {
+                klein_nishina_differential(e, t) * 2.0 * core::f64::consts::PI * libm::sin(t)
+            };
+            let mut acc = f(0.0) + f(core::f64::consts::PI);
+            for i in 1..n {
+                acc += if i % 2 == 1 { 4.0 } else { 2.0 } * f(i as f64 * h);
+            }
+            let numeric = acc * h / 3.0;
+            let total = klein_nishina_total(e);
+            assert!(
+                (total - numeric).abs() / numeric < 1e-8,
+                "E={e}: {total} vs {numeric}"
+            );
+        }
+    }
+
+    #[test]
+    fn form_factor_small_qr_no_cancellation() {
+        for x in [1e-6_f64, 1e-5, 1e-4, 1e-3, 9.9e-3] {
+            let series = 1.0 - x * x / 10.0 + x.powi(4) / 280.0;
+            assert!((nuclear_form_factor_uniform(x, 1.0) - series).abs() < 1e-14);
+        }
+        // Continuity across the switch.
+        let a = nuclear_form_factor_uniform(0.5 * (1.0 - 1e-12), 1.0);
+        let b = nuclear_form_factor_uniform(0.5 * (1.0 + 1e-12), 1.0);
+        assert!((a - b).abs() < 1e-13, "{a} vs {b}");
+    }
+
+    #[test]
+    fn mott_electron_low_energy_uses_momentum() {
+        // 1 MeV kinetic electron on Au at θ = 1 rad: point-nucleus Mott value.
+        let t = 1.0;
+        let pc = libm::sqrt(t * (t + 2.0 * ELECTRON_MASS_MEV));
+        let beta = pc / (t + ELECTRON_MASS_MEV);
+        let s = libm::sin(0.5);
+        let expected = (79.0 * FINE_STRUCTURE * HBAR_C_MEV_FM / (2.0 * pc * beta)).powi(2)
+            * (1.0 - beta * beta * s * s)
+            / s.powi(4);
+        let got = mott_electron_differential(79, t, 1.0);
+        assert!(
+            (got - expected).abs() / expected < 1e-12,
+            "{got} vs {expected}"
+        );
     }
 
     #[test]

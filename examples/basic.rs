@@ -42,7 +42,7 @@ fn main() {
     // --- Radioactive decay ---
     let isotopes = known_isotopes();
     let c14 = isotopes.iter().find(|i| i.name == "C-14").unwrap();
-    let years = c14.half_life_seconds / (365.25 * 24.0 * 3600.0);
+    let years = c14.half_life_seconds / (365.2422 * 24.0 * 3600.0); // NUBASE2020 year
     println!("C-14 half-life: {years:.0} years");
 
     let frac = remaining_fraction(c14.half_life_seconds, 2.0 * c14.half_life_seconds);

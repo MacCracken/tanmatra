@@ -9,22 +9,22 @@ use serde::{Deserialize, Serialize};
 
 /// Quark flavors of the Standard Model.
 ///
-/// Masses are current quark masses (MSbar scheme) from PDG 2024,
-/// except top which is the pole mass.
+/// Masses are MS-bar current masses from PDG 2024 (u, d, s at μ = 2 GeV;
+/// c, b at μ = m), except top, which is the PDG 2024 average of direct measurements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Quark {
     /// Up quark (charge +2/3, mass ~2.16 MeV).
     Up,
-    /// Down quark (charge -1/3, mass ~4.67 MeV).
+    /// Down quark (charge -1/3, mass ~4.70 MeV).
     Down,
-    /// Charm quark (charge +2/3, mass ~1270 MeV).
+    /// Charm quark (charge +2/3, mass ~1273 MeV).
     Charm,
-    /// Strange quark (charge -1/3, mass ~93.4 MeV).
+    /// Strange quark (charge -1/3, mass ~93.5 MeV).
     Strange,
     /// Top quark (charge +2/3, mass ~172570 MeV).
     Top,
-    /// Bottom quark (charge -1/3, mass ~4180 MeV).
+    /// Bottom quark (charge -1/3, mass ~4183 MeV).
     Bottom,
 }
 
@@ -34,11 +34,11 @@ impl Quark {
     pub const fn mass_mev(self) -> f64 {
         match self {
             Self::Up => 2.16,
-            Self::Down => 4.67,
-            Self::Charm => 1_270.0,
-            Self::Strange => 93.4,
+            Self::Down => 4.70,
+            Self::Charm => 1_273.0,
+            Self::Strange => 93.5,
             Self::Top => 172_570.0,
-            Self::Bottom => 4_180.0,
+            Self::Bottom => 4_183.0,
         }
     }
 
@@ -68,7 +68,7 @@ impl Quark {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Lepton {
-    /// Electron (charge -1, mass 0.51099895 MeV).
+    /// Electron (charge -1, mass 0.51099895069 MeV).
     Electron,
     /// Electron neutrino (charge 0, mass < 0.8 eV).
     ElectronNeutrino,
@@ -89,7 +89,7 @@ impl Lepton {
     #[must_use]
     pub const fn mass_mev(self) -> f64 {
         match self {
-            Self::Electron => 0.510_998_950,
+            Self::Electron => crate::constants::ELECTRON_MASS_MEV,
             Self::ElectronNeutrino => 0.0,
             Self::Muon => 105.658_375_5,
             Self::MuonNeutrino => 0.0,
@@ -165,13 +165,13 @@ pub enum Boson {
     Photon,
     /// Gluon (massless, mediates strong force).
     Gluon,
-    /// W+ boson (mass 80369 MeV).
+    /// W+ boson (mass 80369.2 MeV).
     WPlus,
-    /// W- boson (mass 80369 MeV).
+    /// W- boson (mass 80369.2 MeV).
     WMinus,
     /// Z boson (mass 91188 MeV).
     Z,
-    /// Higgs boson (mass 125250 MeV).
+    /// Higgs boson (mass 125200 MeV).
     Higgs,
 }
 
@@ -181,9 +181,9 @@ impl Boson {
     pub const fn mass_mev(self) -> f64 {
         match self {
             Self::Photon | Self::Gluon => 0.0,
-            Self::WPlus | Self::WMinus => 80_369.0,
+            Self::WPlus | Self::WMinus => 80_369.2,
             Self::Z => 91_188.0,
-            Self::Higgs => 125_250.0,
+            Self::Higgs => 125_200.0,
         }
     }
 
@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn boson_higgs_mass() {
-        assert!((Boson::Higgs.mass_mev() - 125_250.0).abs() < 1.0);
+        assert!((Boson::Higgs.mass_mev() - 125_200.0).abs() < 1.0);
     }
 
     #[test]

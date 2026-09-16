@@ -9,15 +9,18 @@ tanmatra/
     error.rs        -- TanmatraError (6 variants, thiserror)
     constants.rs    -- CODATA 2022 physical constants (17 constants)
     particle.rs     -- Standard Model: quarks, leptons, bosons, forces (PDG 2024)
-    nucleus.rs      -- Bethe-Weizsacker, shell model, Strutinsky correction
+    nucleus.rs      -- Bethe-Weizsacker (AME2020 fit), Myers-Swiatecki shell term, shell model
     decay.rs        -- Radioactive decay, 114 isotopes, Bateman equations
     atomic.rs       -- Electron config, spectral series, Zeeman/Stark, QED, wavefunctions
     reaction.rs     -- Q-values, cross-sections, fission yields, moderation, nucleosynthesis
     relativity.rs   -- Four-momentum, Lorentz transformations, de Broglie
-    scattering.rs   -- Rutherford/Mott scattering cross-sections
+    scattering.rs   -- Rutherford/Mott/Born/Klein-Nishina/pair production cross-sections
+    timekeeping.rs  -- Frequency standards, TAI/UTC/TT/GPS/TCG/TCB/TDB, clock corrections
+    bridge.rs       -- Primitive-value bridges for other AGNOS crates
+    integration/    -- soorat visualization data (feature-gated: "soorat-compat")
     optics.rs       -- prakash integration (feature-gated: "optics")
   benches/
-    benchmarks.rs   -- Criterion benchmarks (11 suites)
+    benchmarks.rs   -- Criterion benchmarks (19 suites)
   examples/
     basic.rs        -- Core module demonstration
     nuclear.rs      -- Nuclear physics: binding energy, shell model, decay chains
@@ -76,7 +79,7 @@ See [docs/decisions/](decisions/) for full ADRs.
 2. **Real data only** (ADR-002): All values from CODATA, PDG, NIST, NNDC
 3. **`no_std` first** (ADR-003): Core functionality works without `std`
 4. **Feature-gated optics** (ADR-004): prakash integration behind `optics` feature
-5. **Semi-empirical + corrections** (ADR-005): Bethe-Weizsacker + Strutinsky shell correction
+5. **Semi-empirical + corrections** (ADR-005): AME2020-fitted Bethe-Weizsacker + Myers–Swiatecki shell correction
 
 ## Public Types
 
@@ -85,7 +88,9 @@ See [docs/decisions/](decisions/) for full ADRs.
 | `particle` | `Quark`, `Lepton`, `Boson`, `FundamentalForce` | Serialize, Deserialize, Copy, Hash |
 | `nucleus` | `Nucleus`, `ShellLevel` | Serialize, Deserialize, Copy, Hash |
 | `decay` | `DecayMode`, `Isotope` | Serialize, Deserialize, Clone |
-| `atomic` | `OrbitalType`, `QuantumNumbers`, `OrbitalFilling`, `TransitionType` | Serialize, Deserialize |
+| `atomic` | `OrbitalType`, `QuantumNumbers`, `OrbitalFilling`, `TransitionType`, `ElectronAffinity` | Serialize, Deserialize |
+| `timekeeping` | `FrequencyStandard`, `TimeScale`, `AtomicInstant` | Serialize, Deserialize |
+| `bridge` | `SimulationClock`, `TimeContext` | Serialize, Deserialize |
 | `reaction` | `NuclearReaction`, `ThermalCrossSection`, `FissionYield`, `NucleosynthesisProcess`, `NucleosynthesisStep`, `NucleosynthesisPathway` | Serialize, Deserialize |
 | `relativity` | `FourMomentum` | Serialize, Deserialize, Copy, Add |
 | `error` | `TanmatraError` | Serialize, Deserialize, thiserror::Error |

@@ -5,6 +5,55 @@ All notable changes to tanmatra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] — 2026-09-16
+
+Repairs every finding of the 2026-09-16 math and data audit
+(`docs/audit/2026-09-16-math-audit.md`). Every data table was regenerated from
+its primary source and every formula fix is pinned by a reference-value test.
+Major version: `NuclearReaction` gained fields and `projectile` became
+`Option<Nucleus>`; several functions now return physically different values.
+
+### Breaking
+- **reaction**: `NuclearReaction.projectile` is `Option<Nucleus>` (`None` for neutron-induced reactions); new fields `neutrons_in`, `neutrons_out`, `leptons_out`; `nuclear_charge_change()`, `baryon_number_change()`. `u235_fission` no longer uses H-1 as the neutron.
+- **bridge**: `nuclear_spin_to_hyperfine_scale` returns I + 1/2 (was 2I + 1); `atomic_number_to_valence` is derived from the ground-state configuration (was 2 for every Z ≥ 19).
+- **nucleus**: `binding_energy()` uses AME2020-fitted coefficients; `binding_energy_shell_corrected()` uses the Myers–Swiatecki shell term; `atomic_mass_amu()` now includes electrons (use `nuclear_mass_amu()` for the nucleus).
+- **atomic**: `electron_affinity_ev` table replaced; `lamb_shift_ev`, `vacuum_polarization_ev`, `einstein_a_coefficient`, `breit_interaction_ev`, `radial_wavefunction` return corrected values (see Fixed).
+
+### Fixed — formulas
+- **scattering**: `distance_of_closest_approach` was 2× too small; `rutherford_total_above_angle` was 4× too small; `pair_production_cross_section` was negative from threshold to 3.42 MeV (now Maximon's full-range Bethe–Heitler formulas); `mott_electron_differential` uses pc·β from the kinetic energy; Klein–Nishina total and uniform form factor use series where the closed forms cancel; `mott_correction_factor` documented as the spin-½ Mott factor.
+- **atomic**: R₃₁ was 6× too large — radial functions are now exact for any n ≤ 60; Einstein A is the exact hydrogenic dipole rate (was off by 0.025–21×, scaled as Z¹⁰); vacuum polarization coefficient 4/15 (was 1/3); Lamb shift from the one-loop Zα expansion with Bethe logarithms (was a Z⁴ scaling with an invented p-state factor); hyperfine splitting includes (I + ½); Breit interaction is the leading α²Z³/4 E_h Breit–Pauli term (was an unsourced Z⁴ formula); fine structure uses the CODATA Rydberg energy (was 13.6 eV); Ds and Rg configurations follow the relativistic predictions (6d⁸7s², 6d⁹7s²); invalid quantum numbers are rejected.
+- **nucleus**: odd-odd nuclei no longer get half-integer spins (Brennan–Bernstein coupling rules); empirical proton/neutron level orders (odd-A agreement 38% → 49%); `corrected_ft_value` deprecated (it ignored its argument).
+- **decay**: `bateman_chain` is a non-negative scaling-and-squaring matrix exponential — exact for equal decay constants, independent of the time unit, accurate for trace daughters; `decay_chain` no longer loops on isomeric transitions; Bi-212 follows its β⁻ branch.
+- **timekeeping**: `AtomicInstant::add_seconds` is exact to 1 ns (was lossy through f64, −73 ns at today's epoch); serde normalizes nanoseconds; Sagnac documented as the closed-loop formula plus new one-way `sagnac_one_way_ns`; GPS correction references the geoid potential (38.575 µs/day); `fractional_stability` values sourced.
+- **relativity**: `lorentz_gamma` symmetric in β; precision-preserving forms for γ ↔ β, invariant mass and kinetic energy; `velocity_addition` returns NaN only when undefined.
+- **optics**: `lines_to_spd` validates its range (no panic on step 0); Balmer intensities are Storey & Hummer (1995) Case B; series intensities from exact A-values.
+- **soorat**: orbital slices use exact R_nl and |Y_l0|² (radial nodes, angular shape); protons and neutrons interleaved.
+
+### Fixed — data
+- **constants**: CODATA 2022 values (were CODATA 2018; ħ in MeV·s was 2014, g_p 2010).
+- **particle**: PDG 2024 quark masses and Higgs mass (were PDG 2022/2023).
+- **nucleus**: AME2020 mass excesses regenerated (17 of 32 were wrong by up to 7.3 keV); F-19 quadrupole moment 0 (spin ½); Ni-58 radius; moments from INDC(NDS)-0794 (2019) and -0833 (2021); superallowed ft and Ft from Hardy & Towner 2020 (were the 2009/2015 surveys).
+- **decay**: half-lives regenerated from NUBASE2020 with 1 y = 365.2422 d (62 of 114 differed); Ta-180m has no observed decay (was a lower limit stored as a half-life); Cu-64 dominant mode EC.
+- **reaction**: ENDF/B-VIII.0 thermal cross sections with free-atom scattering (H-1 was the 82 b bound value); capture, fission and (n,α) resonance integrals separated (U-235 and B-10 "capture" values were fission and (n,α)); ENDF/B-VIII.0 chain yields; Q-values from AME2020 (U-235 channel 173.28 MeV, CNO 26.731 MeV); r-process third peak Pt-195.
+- **atomic**: ionization energies from NIST ASD (Tc was 0.16 eV off; superheavy values from Smits et al. 2023); electron affinities from AHH99 plus later measurements, with an explicit `ElectronAffinity` type distinguishing bound, unbound and unknown.
+- **timekeeping**: CIPM 2025 recommended frequencies; TAI−UTC for 1961–1971; leap-second table validity date.
+
+### Added
+- **atomic**: `spectral_line_vacuum_nm`, `reduced_mass_factor`, `lamb_shift_nlj_ev`, `hyperfine_splitting_spin_ev`, `electron_affinity`, `ElectronAffinity`.
+- **nucleus**: `nuclear_mass_amu`, `SuperallowedDecay::corrected_ft_seconds`, `superallowed_average_ft`.
+- **reaction**: `fission_resonance_integral_barns`, `n_alpha_resonance_integral_barns`, `CNO_NEUTRINO_LOSS_MEV`.
+- **scattering**: `born_screened_coulomb_with_masses`.
+- **timekeeping**: `tcg_minus_tt_seconds`, `tt_to_tcg_jd`, `tcg_to_tt_jd`, `tcb_to_tdb_jd`, `tdb_to_tcb_jd`, `tcb_minus_tcg_secular_seconds`, `LB_RATE`, `TDB0_S`, `T0_JD`, `tai_minus_utc_seconds_mjd`, `LEAP_SECOND_TABLE_VALID_UNTIL`, `sagnac_one_way_ns`, `time_dilation_shift_exact`, `AtomicInstant::add_nanoseconds`, `AtomicInstant::nanoseconds_since`, `FrequencyStandard::quality_factor_for_linewidth`.
+- **constants**: `HBAR_C_MEV_FM`, `HC_EV_NM`, `RYDBERG_EV`, `ELECTRON_MASS_U`, `PROTON_MASS_U`, `NEUTRON_MASS_U`, `HYDROGEN_ATOM_MASS_U`, `NUCLEAR_MAGNETON_EV_T`, `DEUTERON_G_FACTOR`, `ATOMIC_UNIT_TIME_S`, `COULOMB_K_SI`.
+- 8 benchmarks (19 total); reference-value tests (476 unit + 20 integration + 2 doc).
+
+### Deprecated
+- `nucleus::corrected_ft_value` (ignored its argument).
+- `FrequencyStandard::quality_factor` (unsourced order-of-magnitude values).
+
+### Security
+- crossbeam-epoch 0.9.18 → 0.9.21 (dev dependency via criterion; RUSTSEC-2026-0204).
+
 ## [1.2.0]
 
 ### Added
