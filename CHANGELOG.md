@@ -145,6 +145,34 @@ The Rust library and its behavior are unchanged, and `VERSION` stays 1.3.0 until
 - **Bench.** `atomic_instant_add_seconds_1000`: 33.1 µs vs Rust's 12.9 µs.
 - **Generator.** snake() keeps acronyms whole (`TimeScale::TAI` → `TM_TIME_SCALE_TAI`); every earlier generated file is byte-identical. The parity report's function column is wider.
 
+### Port — M3 Atomic (2026-11-08)
+- **`src/atomic_data.cyr`** (generated):
+  - `enum TmOrbitalType` (with its l, capacity and symbol columns), `enum TmTransitionType`, and `enum TmElectronAffinity`, the bound / unbound / unknown kind;
+  - the 118 first ionization energies and 118 electron affinities, through the public API, each labelled with its citation from the Rust source;
+  - the Aufbau filling order and the Bethe logarithms (Drake & Swainson 1990), extracted;
+  - the 20 NIST ground-state exceptions, **derived from the public `electron_configuration`** as each element's two subshell changes from the Madelung filling.
+  - The configurations are proven for Z = 0–120 and u32::MAX, and the Bethe logarithms by recomputing `lamb_shift_nlj_ev` over Z = 0–118 and every (n ≤ 6, l, 2j). A 1-ulp nudge or a dropped exception is refused.
+- **`src/atomic_config.cyr`:**
+  - the `OrbitalType` properties;
+  - `struct TmQuantumNumbers`, validated by `TmQuantumNumbers_new(n, l, ml, ms, out)`;
+  - `struct TmOrbitalFilling`, Rust's `OrbitalFilling` with its public fields. A 21-bit packed word failed the golden rows for n = electrons = 2³⁰, so configurations are struct arrays;
+  - `electron_configuration` into a caller array, and `format_configuration(_short)`;
+  - `ionization_energy_ev`, `electron_affinity` (the kind) and `electron_affinity_ev`.
+- **`src/atomic_hydrogenic.cyr`:** Rydberg and reduced-mass lines, first-order fine structure, the five named series (caller buffers), Landé g, Zeeman and Stark, the radial wavefunctions to n = 60, the E1 selection rules, and Einstein A/B from the exact radial dipole integral.
+- **`src/atomic_qed.cyr`:** the Lamb shift with Bethe logarithms, vacuum polarization, the Dirac energies, hyperfine splitting, the free and bound g-factors, the strong-field Zeeman shift and Breit.
+- **Integer arguments** outside Rust's u32 / i32 give the function's Err, NaN, or `FORBIDDEN`. Where Rust's u32 arithmetic would overflow (`2n − 1` for n ≥ 2³¹), the port is exact in i64.
+- **Golden.** `tests/golden/atomic.tsv` has 43,309 rows. **Every class A/B row, and every Einstein A/B row (class D), is 0 ulp on x86_64 ELF, x86_64 PE and aarch64.**
+  - Class-C bounds by the port-parity rule, measured by perturbation before the first comparison: `lamb_shift_nlj_ev` and `lamb_shift_ev` K = 10 (S = 4), `radial_wavefunction` K = 6 (S = 2), `radial_probability_density` K = 18 (S = 8).
+  - Measured: Lamb ≤ 2 ulp on x86_64 and ≤ 1 on aarch64; R_nl ≤ 2 and R²r² ≤ 7 on x86_64, 0 on aarch64.
+  - Dirac turned out class B (sqrt only), a tightening of the plan's C.
+  - The whole corpus: 165,272 ok, 0 failed, 0 pending, 1 accepted, on all three targets.
+- **`scripts/oracle/validate.py`** independently recomputes the 2,679 class-B line and level rows bit for bit, and checks that every configuration holds Z electrons and is Madelung except at the 20 NIST exceptions.
+- **Tests.** `tests/atomic.tcyr` ports 110 of the 114 Rust tests (597 assertions), among them the NIST A-values, the measured Lamb shifts and the radial normalization; the 4 serde round-trips are not carried over.
+- **Benches.** 7, mirroring Rust's: 1.9–3.3× Rust for the computed bodies (configurations, radial functions, Einstein A), 6–43× for the call-bound ones (`spectral_line_1000`, `ionization_energy_118`, `lamb_shift_nlj_all_n4`). Two measured optimizations: `#inline` branch-free range checks (`spectral_line_1000` 14.8 → 11.9 µs), and the dipole integral's pow factors and factorial products hoisted out of the double sum, with the same operations and bits (36.1 → 25.4 µs).
+- **Surface parity** 41/41 for atomic, 206/206 in total.
+- **Generator.** `rust_src.rs` reads `(integer, Enum::Variant)` tables, a pure lookup function's match arms, and per-entry citation comments; a const now ends at its first `;` outside a comment.
+- **`src/error.cyr`**'s header no longer promises an `err_out` detail pointer (decided against in M2).
+
 ## [1.3.0] — 2026-09-16
 
 Repairs every finding of the 2026-09-16 math and data audit

@@ -1,0 +1,1234 @@
+# atomic.tcyr — the reference-value tests of rust-old/src/atomic.rs, ported one for one, in
+# order (each test_group is the Rust test's name). Not carried over (port plan §1): the four
+# serde round-trip tests serde_roundtrip_orbital_type, serde_roundtrip_quantum_numbers,
+# serde_roundtrip_orbital_filling and serde_roundtrip_transition_type (none of the four types is
+# an M7 exchange type). Each Rust `.unwrap()` is an assert on the Ok tag before the payload is
+# read. The golden corpus separately checks every function against the oracle on the M3 grid,
+# in its tolerance class (tests/parity.tcyr).
+
+include "tests/ulp.cyr"
+include "src/error.cyr"
+include "src/numerics.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
+include "src/decay_data.cyr"
+include "src/decay.cyr"
+include "src/atomic_data.cyr"
+include "src/atomic_config.cyr"
+include "src/atomic_hydrogenic.cyr"
+include "src/atomic_qed.cyr"
+
+alloc_init();
+
+# 1 if |a - b| < eps.
+#must_use
+fn near(a: f64, b: f64, eps: f64): i64 {
+    if (f64_abs(a - b) < eps) { return 1; }
+    return 0;
+}
+
+# 1 if a == b as f64s: rust's `==` on an f64 payload.
+#must_use
+fn _f64_eq(a: f64, b: f64): i64 {
+    if (a == b) { return 1; }
+    return 0;
+}
+
+# The Rust test module's mhz(ev): ev / H_EV_S / 1e6.
+#must_use
+fn _mhz(ev: f64): f64 {
+    var m: f64 = (ev / TM_H_EV_S) / 1000000.0;
+    return m;
+}
+
+# format_configuration(&electron_configuration(z).unwrap()), the unwrap an assert on the Ok.
+#must_use
+fn _config_full(z): Str {
+    var cfg: TmOrbitalFilling[20];
+    var t, n = electron_configuration(z, &cfg, 20);
+    assert_eq(is_ok(t), 1, "electron_configuration Ok");
+    if (is_ok(t) != 1) { n = 0; }
+    return format_configuration(&cfg, n);
+}
+
+# format_configuration_short(&electron_configuration(z).unwrap(), z), the unwrap an assert on
+# the Ok.
+#must_use
+fn _config_short(z): Str {
+    var cfg: TmOrbitalFilling[20];
+    var t, n = electron_configuration(z, &cfg, 20);
+    assert_eq(is_ok(t), 1, "electron_configuration Ok");
+    if (is_ok(t) != 1) { n = 0; }
+    return format_configuration_short(&cfg, n, z);
+}
+
+# radial_probability_density(1, n, l, r).unwrap() for the normalization integral: an Err gives
+# NaN, which fails that (n, l)'s norm assert as Rust's unwrap would fail the test (one assert
+# per (n, l), not one per sample).
+#must_use
+fn _density(n, l, r: f64): f64 {
+    var t, v = radial_probability_density(1, n, l, r);
+    if (is_ok(t) != 1) { return _tm_nan(); }
+    var p: f64 = v;
+    return p;
+}
+
+fn _t_h_alpha_wavelength() {
+    test_group("h_alpha_wavelength");
+    var t, v = spectral_line_nm(1, 2, 3);
+    assert_eq(is_ok(t), 1, "H-alpha Ok");
+    var lambda: f64 = v;
+    assert(near(lambda, 656.3, 1.0), "H-alpha ~656.3 nm");
+}
+
+fn _t_lyman_alpha() {
+    test_group("lyman_alpha");
+    var t, v = spectral_line_nm(1, 1, 2);
+    assert_eq(is_ok(t), 1, "Lyman-alpha Ok");
+    var lambda: f64 = v;
+    assert(near(lambda, 121.6, 0.5), "Lyman-alpha ~121.6 nm");
+}
+
+fn _t_spectral_line_invalid() {
+    test_group("spectral_line_invalid");
+    assert_eq(is_err_result(spectral_line_nm(1, 0, 2)), 1, "n1 = 0 is Err");
+    assert_eq(is_err_result(spectral_line_nm(1, 2, 2)), 1, "n1 = n2 is Err");
+}
+
+fn _t_iron_electron_config() {
+    test_group("iron_electron_config");
+    var full = _config_full(26);
+    assert_eq(str_eq_cstr(full, "1s2 2s2 2p6 3s2 3p6 4s2 3d6"), 1, "Fe 1s2 2s2 2p6 3s2 3p6 4s2 3d6");
+}
+
+fn _t_iron_short_config() {
+    test_group("iron_short_config");
+    var short = _config_short(26);
+    assert_eq(str_eq_cstr(short, "[Ar] 4s2 3d6"), 1, "Fe [Ar] 4s2 3d6");
+}
+
+fn _t_chromium_exception() {
+    test_group("chromium_exception");
+    var short = _config_short(24);
+    assert_eq(str_eq_cstr(short, "[Ar] 4s1 3d5"), 1, "Cr [Ar] 4s1 3d5");
+}
+
+fn _t_copper_exception() {
+    test_group("copper_exception");
+    var short = _config_short(29);
+    assert_eq(str_eq_cstr(short, "[Ar] 4s1 3d10"), 1, "Cu [Ar] 4s1 3d10");
+}
+
+fn _t_hydrogen_config() {
+    test_group("hydrogen_config");
+    var cfg: TmOrbitalFilling[20];
+    var t, n = electron_configuration(1, &cfg, 20);
+    assert_eq(is_ok(t), 1, "H configuration Ok");
+    assert_eq(n, 1, "one subshell");
+    var e: *TmOrbitalFilling = &cfg;
+    assert_eq(e.n, 1, "config[0].n = 1");
+    assert_eq(e.orbital, TM_ORBITAL_TYPE_S, "config[0].orbital = S");
+    assert_eq(e.electrons, 1, "config[0].electrons = 1");
+}
+
+fn _t_helium_config() {
+    test_group("helium_config");
+    var full = _config_full(2);
+    assert_eq(str_eq_cstr(full, "1s2"), 1, "He 1s2");
+}
+
+fn _t_noble_gas_neon() {
+    test_group("noble_gas_neon");
+    var full = _config_full(10);
+    assert_eq(str_eq_cstr(full, "1s2 2s2 2p6"), 1, "Ne 1s2 2s2 2p6");
+}
+
+fn _t_total_electrons_match_z() {
+    test_group("total_electrons_match_z");
+    var cfg: TmOrbitalFilling[20];
+    var base: *TmOrbitalFilling = &cfg;
+    var z = 1;
+    while (z <= 118) {
+        var t, n = electron_configuration(z, base, 20);
+        assert_eq(is_ok(t), 1, "electron_configuration Ok");
+        var total = 0;
+        var k = 0;
+        while (k < n) {
+            var e: *TmOrbitalFilling = base + k;
+            total = total + e.electrons;
+            k = k + 1;
+        }
+        assert_eq(total, z, "total electrons = Z");
+        z = z + 1;
+    }
+}
+
+fn _t_niobium_exception() {
+    test_group("niobium_exception");
+    var short = _config_short(41);
+    assert_eq(str_eq_cstr(short, "[Kr] 5s1 4d4"), 1, "Nb [Kr] 5s1 4d4");
+}
+
+fn _t_palladium_exception() {
+    test_group("palladium_exception");
+    var short = _config_short(46);
+    assert_eq(str_eq_cstr(short, "[Kr] 4d10"), 1, "Pd [Kr] 4d10");
+}
+
+fn _t_lanthanum_exception() {
+    test_group("lanthanum_exception");
+    var short = _config_short(57);
+    assert_eq(str_eq_cstr(short, "[Xe] 6s2 5d1"), 1, "La [Xe] 6s2 5d1");
+}
+
+fn _t_gadolinium_exception() {
+    test_group("gadolinium_exception");
+    var short = _config_short(64);
+    assert_eq(str_eq_cstr(short, "[Xe] 6s2 4f7 5d1"), 1, "Gd [Xe] 6s2 4f7 5d1");
+}
+
+fn _t_thorium_exception() {
+    test_group("thorium_exception");
+    var short = _config_short(90);
+    assert_eq(str_eq_cstr(short, "[Rn] 7s2 6d2"), 1, "Th [Rn] 7s2 6d2");
+}
+
+fn _t_uranium_exception() {
+    test_group("uranium_exception");
+    var short = _config_short(92);
+    assert_eq(str_eq_cstr(short, "[Rn] 7s2 5f3 6d1"), 1, "U [Rn] 7s2 5f3 6d1");
+}
+
+fn _t_ionization_energy_hydrogen() {
+    test_group("ionization_energy_hydrogen");
+    var t, v = ionization_energy_ev(1);
+    assert_eq(is_ok(t), 1, "H IE Ok");
+    var ie: f64 = v;
+    assert(near(ie, 13.598, 0.01), "H IE ~13.598 eV");
+}
+
+fn _t_ionization_energy_helium() {
+    test_group("ionization_energy_helium");
+    var t, v = ionization_energy_ev(2);
+    assert_eq(is_ok(t), 1, "He IE Ok");
+    var ie: f64 = v;
+    assert(near(ie, 24.587, 0.01), "He IE ~24.587 eV");
+}
+
+fn _t_ionization_energy_noble_gases_high() {
+    test_group("ionization_energy_noble_gases_high");
+    var t1, v1 = ionization_energy_ev(10);
+    assert_eq(is_ok(t1), 1, "Ne IE Ok");
+    var ne: f64 = v1;
+    var t2, v2 = ionization_energy_ev(11);
+    assert_eq(is_ok(t2), 1, "Na IE Ok");
+    var na: f64 = v2;
+    assert(ne > na, "Ne IE should be > Na IE");
+    var t3, v3 = ionization_energy_ev(18);
+    assert_eq(is_ok(t3), 1, "Ar IE Ok");
+    var ar: f64 = v3;
+    var t4, v4 = ionization_energy_ev(19);
+    assert_eq(is_ok(t4), 1, "K IE Ok");
+    var k: f64 = v4;
+    assert(ar > k, "Ar IE should be > K IE");
+}
+
+fn _t_ionization_energy_invalid() {
+    test_group("ionization_energy_invalid");
+    assert_eq(is_err_result(ionization_energy_ev(0)), 1, "Z = 0 is Err");
+    assert_eq(is_err_result(ionization_energy_ev(119)), 1, "Z = 119 is Err");
+}
+
+fn _t_ionization_energy_cesium_lowest_alkali() {
+    test_group("ionization_energy_cesium_lowest_alkali");
+    var t, v = ionization_energy_ev(55);
+    assert_eq(is_ok(t), 1, "Cs IE Ok");
+    var cs: f64 = v;
+    assert(cs < 4.0, "Cs IE should be < 4 eV");
+}
+
+fn _t_ionization_energy_noble_gas_trend() {
+    test_group("ionization_energy_noble_gas_trend");
+    var t1, v1 = ionization_energy_ev(86);
+    assert_eq(is_ok(t1), 1, "Rn IE Ok");
+    var rn: f64 = v1;
+    var t2, v2 = ionization_energy_ev(87);
+    assert_eq(is_ok(t2), 1, "Fr IE Ok");
+    var fr: f64 = v2;
+    assert(rn > fr, "Rn IE should be > Fr IE");
+}
+
+fn _t_ionization_energy_lanthanide_range() {
+    test_group("ionization_energy_lanthanide_range");
+    var z = 57;
+    while (z <= 71) {
+        var t, v = ionization_energy_ev(z);
+        assert_eq(is_ok(t), 1, "lanthanide IE Ok");
+        var ie: f64 = v;
+        var in_range = 0;
+        if (ie > 5.0 && ie < 6.5) { in_range = 1; }
+        assert(in_range, "lanthanide IE in (5.0, 6.5) eV");
+        z = z + 1;
+    }
+}
+
+fn _t_quantum_numbers_valid() {
+    test_group("quantum_numbers_valid");
+    var q: TmQuantumNumbers;
+    assert_eq(is_ok(TmQuantumNumbers_new(1, 0, 0, 1, &q)), 1, "(1, 0, 0, +1/2) Ok");
+    assert_eq(is_ok(TmQuantumNumbers_new(2, 1, 0 - 1, 0 - 1, &q)), 1, "(2, 1, -1, -1/2) Ok");
+    assert_eq(is_ok(TmQuantumNumbers_new(3, 2, 2, 1, &q)), 1, "(3, 2, 2, +1/2) Ok");
+}
+
+fn _t_quantum_numbers_invalid() {
+    test_group("quantum_numbers_invalid");
+    var q: TmQuantumNumbers;
+    assert_eq(is_err_result(TmQuantumNumbers_new(0, 0, 0, 1, &q)), 1, "n = 0 is Err");
+    assert_eq(is_err_result(TmQuantumNumbers_new(1, 1, 0, 1, &q)), 1, "l >= n is Err");
+    assert_eq(is_err_result(TmQuantumNumbers_new(2, 1, 2, 1, &q)), 1, "|ml| > l is Err");
+    assert_eq(is_err_result(TmQuantumNumbers_new(1, 0, 0, 2, &q)), 1, "ms not +/-1 is Err");
+}
+
+fn _t_orbital_max_electrons() {
+    test_group("orbital_max_electrons");
+    assert_eq(orbital_type_max_electrons(TM_ORBITAL_TYPE_S), 2, "s holds 2");
+    assert_eq(orbital_type_max_electrons(TM_ORBITAL_TYPE_P), 6, "p holds 6");
+    assert_eq(orbital_type_max_electrons(TM_ORBITAL_TYPE_D), 10, "d holds 10");
+    assert_eq(orbital_type_max_electrons(TM_ORBITAL_TYPE_F), 14, "f holds 14");
+}
+
+fn _t_hydrogen_ground_state_energy() {
+    test_group("hydrogen_ground_state_energy");
+    var t, v = hydrogen_level_energy_ev(1, 1, 1);
+    assert_eq(is_ok(t), 1, "H 1s1/2 Ok");
+    var e: f64 = v;
+    assert(near(e, -13.6, 0.01), "H 1s1/2 ~-13.6 eV");
+}
+
+fn _t_fine_structure_splits_levels() {
+    test_group("fine_structure_splits_levels");
+    var t1, v1 = hydrogen_level_energy_ev(1, 2, 1);
+    assert_eq(is_ok(t1), 1, "2s1/2 Ok");
+    var e_s: f64 = v1;
+    var t2, v2 = hydrogen_level_energy_ev(1, 2, 3);
+    assert_eq(is_ok(t2), 1, "2p3/2 Ok");
+    var e_p32: f64 = v2;
+    var d: f64 = f64_abs(e_s - e_p32);
+    assert(d > 0.000001, "Fine structure should split n=2 levels");
+}
+
+fn _t_h_alpha_fine_structure() {
+    test_group("h_alpha_fine_structure");
+    var t, v = spectral_line_fine_nm(1, 2, 3, 3, 5);
+    assert_eq(is_ok(t), 1, "2p3/2 - 3d5/2 Ok");
+    var lambda: f64 = v;
+    assert(near(lambda, 656.3, 2.0), "H-alpha fine ~656 nm");
+}
+
+fn _t_fine_structure_invalid() {
+    test_group("fine_structure_invalid");
+    assert_eq(is_err_result(hydrogen_level_energy_ev(1, 0, 1)), 1, "n = 0 is Err");
+    assert_eq(is_err_result(hydrogen_level_energy_ev(1, 1, 3)), 1, "j = 3/2 at n = 1 is Err");
+}
+
+fn _t_lande_g_s_electron() {
+    test_group("lande_g_s_electron");
+    var g: f64 = lande_g_factor(0, 1);
+    assert(near(g, 2.0, 0.0000000001), "g(1s1/2) = 2");
+}
+
+fn _t_lande_g_p32() {
+    test_group("lande_g_p32");
+    var g: f64 = lande_g_factor(1, 3);
+    var expected: f64 = 4.0 / 3.0;
+    assert(near(g, expected, 0.0000000001), "g(2p3/2) = 4/3");
+}
+
+fn _t_zeeman_zero_field() {
+    test_group("zeeman_zero_field");
+    var de: f64 = zeeman_splitting_ev(0, 1, 1, 0.0);
+    var a: f64 = f64_abs(de);
+    assert(a < 0.000000000000000000000000000001, "No splitting in zero field");
+}
+
+fn _t_zeeman_proportional_to_field() {
+    test_group("zeeman_proportional_to_field");
+    var de1: f64 = zeeman_splitting_ev(0, 1, 1, 1.0);
+    var de2: f64 = zeeman_splitting_ev(0, 1, 1, 2.0);
+    var d: f64 = f64_abs(de2 - (2.0 * de1));
+    assert(d < 0.000000000000001, "Zeeman should be linear in B");
+}
+
+fn _t_stark_zero_field() {
+    test_group("stark_zero_field");
+    var de: f64 = stark_shift_hydrogen_ev(2, 1, 0.0);
+    var a: f64 = f64_abs(de);
+    assert(a < 0.000000000000000000000000000001, "no Stark shift in zero field");
+}
+
+fn _t_stark_proportional_to_field() {
+    test_group("stark_proportional_to_field");
+    var de1: f64 = stark_shift_hydrogen_ev(2, 1, 1000000.0);
+    var de2: f64 = stark_shift_hydrogen_ev(2, 1, 2000000.0);
+    var d: f64 = f64_abs(de2 - (2.0 * de1));
+    assert(d < 0.00000000000000000001, "Stark should be linear in F");
+}
+
+fn _t_stark_increases_with_n() {
+    test_group("stark_increases_with_n");
+    var s2: f64 = stark_shift_hydrogen_ev(2, 1, 100000000.0);
+    var de2: f64 = f64_abs(s2);
+    var s5: f64 = stark_shift_hydrogen_ev(5, 4, 100000000.0);
+    var de5: f64 = f64_abs(s5);
+    assert(de5 > de2, "n=5 Stark should be larger than n=2");
+}
+
+fn _t_electron_affinity_fluorine_highest() {
+    test_group("electron_affinity_fluorine_highest");
+    var t, v = electron_affinity_ev(9);
+    assert_eq(is_ok(t), 1, "F EA Ok");
+    var ea_f: f64 = v;
+    assert(ea_f > 3.0, "F EA > 3 eV");
+}
+
+fn _t_electron_affinity_chlorine() {
+    test_group("electron_affinity_chlorine");
+    var t, v = electron_affinity_ev(17);
+    assert_eq(is_ok(t), 1, "Cl EA Ok");
+    var ea_cl: f64 = v;
+    assert(near(ea_cl, 3.613, 0.01), "Cl EA ~3.613 eV");
+}
+
+fn _t_electron_affinity_noble_gases_zero() {
+    test_group("electron_affinity_noble_gases_zero");
+    var zs[48];
+    store64(&zs, 2);
+    store64(&zs + 8, 10);
+    store64(&zs + 16, 18);
+    store64(&zs + 24, 36);
+    store64(&zs + 32, 54);
+    store64(&zs + 40, 86);
+    var k = 0;
+    while (k < 6) {
+        var z = load64(&zs + k * 8);
+        var t, v = electron_affinity_ev(z);
+        assert_eq(is_ok(t), 1, "noble gas EA Ok");
+        var ea: f64 = v;
+        var a: f64 = f64_abs(ea);
+        assert(a < 0.0000000001, "Noble gas should have EA=0");
+        k = k + 1;
+    }
+}
+
+fn _t_electron_affinity_gold_high() {
+    test_group("electron_affinity_gold_high");
+    var t, v = electron_affinity_ev(79);
+    assert_eq(is_ok(t), 1, "Au EA Ok");
+    var ea_au: f64 = v;
+    assert(ea_au > 2.0, "Au EA > 2 eV");
+}
+
+fn _t_electron_affinity_invalid() {
+    test_group("electron_affinity_invalid");
+    assert_eq(is_err_result(electron_affinity_ev(0)), 1, "Z = 0 is Err");
+    assert_eq(is_err_result(electron_affinity_ev(119)), 1, "Z = 119 is Err");
+}
+
+fn _t_radial_1s_at_origin() {
+    test_group("radial_1s_at_origin");
+    var t, v = radial_wavefunction(1, 1, 0, 0.0);
+    assert_eq(is_ok(t), 1, "R_10(0) Ok");
+    var r: f64 = v;
+    assert(near(r, 2.0, 0.0000000001), "R_10(0) = 2");
+}
+
+fn _t_radial_1s_decays() {
+    test_group("radial_1s_decays");
+    var t1, v1 = radial_wavefunction(1, 1, 0, 1.0);
+    assert_eq(is_ok(t1), 1, "R_10(1) Ok");
+    var w1: f64 = v1;
+    var r1: f64 = f64_abs(w1);
+    var t5, v5 = radial_wavefunction(1, 1, 0, 5.0);
+    assert_eq(is_ok(t5), 1, "R_10(5) Ok");
+    var w5: f64 = v5;
+    var r5: f64 = f64_abs(w5);
+    assert(r1 > r5, "R_10 should decay with distance");
+}
+
+fn _t_radial_2s_has_node() {
+    test_group("radial_2s_has_node");
+    var t, v = radial_wavefunction(1, 2, 0, 2.0);
+    assert_eq(is_ok(t), 1, "R_20(2) Ok");
+    var r: f64 = v;
+    var a: f64 = f64_abs(r);
+    assert(a < 0.1, "R_20 should be near zero at r=2a0");
+}
+
+fn _t_probability_density_positive() {
+    test_group("probability_density_positive");
+    var t, v = radial_probability_density(1, 1, 0, 1.0);
+    assert_eq(is_ok(t), 1, "P_10(1) Ok");
+    var pd: f64 = v;
+    assert(pd > 0.0, "Probability density must be positive");
+}
+
+fn _t_radial_invalid_quantum_numbers() {
+    test_group("radial_invalid_quantum_numbers");
+    assert_eq(is_err_result(radial_wavefunction(1, 0, 0, 1.0)), 1, "n = 0 is Err");
+    assert_eq(is_err_result(radial_wavefunction(1, 1, 1, 1.0)), 1, "l >= n is Err");
+    assert_eq(is_err_result(radial_wavefunction(1, 61, 0, 1.0)), 1, "n > 60 is Err");
+    assert_eq(is_err_result(radial_wavefunction(0, 1, 0, 1.0)), 1, "Z = 0 is Err");
+}
+
+fn _t_selection_rules_allowed() {
+    test_group("selection_rules_allowed");
+    assert_eq(check_selection_rules(0, 1), TM_TRANSITION_TYPE_ELECTRIC_DIPOLE, "l 0 -> 1 is E1");
+    assert_eq(check_selection_rules(1, 2), TM_TRANSITION_TYPE_ELECTRIC_DIPOLE, "l 1 -> 2 is E1");
+    assert_eq(check_selection_rules(2, 1), TM_TRANSITION_TYPE_ELECTRIC_DIPOLE, "l 2 -> 1 is E1");
+}
+
+fn _t_selection_rules_forbidden() {
+    test_group("selection_rules_forbidden");
+    assert_eq(check_selection_rules(0, 0), TM_TRANSITION_TYPE_FORBIDDEN, "l 0 -> 0 is forbidden");
+    assert_eq(check_selection_rules(0, 2), TM_TRANSITION_TYPE_FORBIDDEN, "l 0 -> 2 is forbidden");
+    assert_eq(check_selection_rules(1, 3), TM_TRANSITION_TYPE_FORBIDDEN, "l 1 -> 3 is forbidden");
+}
+
+fn _t_selection_rules_full_with_ml() {
+    test_group("selection_rules_full_with_ml");
+    assert_eq(check_selection_rules_full(0, 0, 1, 0), TM_TRANSITION_TYPE_ELECTRIC_DIPOLE, "dl = 1, dml = 0 is E1");
+    assert_eq(check_selection_rules_full(1, 0, 1, 0), TM_TRANSITION_TYPE_FORBIDDEN, "dl = 0 is forbidden");
+    assert_eq(check_selection_rules_full(0, 0, 1, 2), TM_TRANSITION_TYPE_FORBIDDEN, "dml = 2 is forbidden");
+}
+
+fn _t_einstein_a_lyman_alpha() {
+    test_group("einstein_a_lyman_alpha");
+    var t, v = einstein_a_coefficient(1, 2, 1, 1, 0);
+    assert_eq(is_ok(t), 1, "Lyman-alpha A Ok");
+    var a21: f64 = v;
+    assert(a21 > 10000000.0, "Lyman-alpha A should be ~6e8");
+    assert(a21 < 10000000000.0, "Lyman-alpha A too large");
+}
+
+fn _t_einstein_a_forbidden_transition() {
+    test_group("einstein_a_forbidden_transition");
+    assert_eq(is_err_result(einstein_a_coefficient(1, 2, 0, 1, 0)), 1, "2s -> 1s is Err");
+}
+
+fn _t_einstein_b_positive() {
+    test_group("einstein_b_positive");
+    var t, v = einstein_b_coefficient(1, 2, 1, 1, 0);
+    assert_eq(is_ok(t), 1, "Lyman-alpha B Ok");
+    var b21: f64 = v;
+    assert(b21 > 0.0, "Einstein B should be positive");
+}
+
+fn _t_lamb_shift_hydrogen_2s() {
+    test_group("lamb_shift_hydrogen_2s");
+    var shift: f64 = lamb_shift_ev(1, 2, 0);
+    assert(near(shift, 0.00000437, 0.0000001), "H 2S Lamb shift ~4.37e-6 eV");
+}
+
+fn _t_lamb_shift_grows_with_z() {
+    test_group("lamb_shift_grows_with_z");
+    var he: f64 = lamb_shift_ev(2, 2, 0);
+    var h: f64 = lamb_shift_ev(1, 2, 0);
+    assert(he > h, "He+ 2S Lamb shift > H 2S");
+}
+
+fn _t_lamb_shift_p_smaller_than_s() {
+    test_group("lamb_shift_p_smaller_than_s");
+    var s_shift: f64 = lamb_shift_ev(1, 2, 0);
+    var p_shift: f64 = lamb_shift_ev(1, 2, 1);
+    assert(s_shift > p_shift, "s-state Lamb shift should be larger than p-state");
+}
+
+fn _t_vacuum_polarization_negative() {
+    test_group("vacuum_polarization_negative");
+    var vp: f64 = vacuum_polarization_ev(1, 1, 0);
+    assert(vp < 0.0, "VP should be negative (downward shift)");
+}
+
+fn _t_vacuum_polarization_small_vs_lamb() {
+    test_group("vacuum_polarization_small_vs_lamb");
+    var lamb: f64 = lamb_shift_ev(1, 2, 0);
+    var v: f64 = vacuum_polarization_ev(1, 2, 0);
+    var vp: f64 = f64_abs(v);
+    assert(vp < lamb, "VP should be smaller than Lamb shift");
+}
+
+fn _t_lyman_series_hydrogen() {
+    test_group("lyman_series_hydrogen");
+    var ns[512];
+    var nm[512];
+    var t, cnt = lyman_series(1, 6, &ns, &nm, 64);
+    assert_eq(is_ok(t), 1, "Lyman series Ok");
+    assert_eq(cnt, 5, "n = 2..=6: five lines");
+    var first: f64 = load64(&nm);
+    assert(near(first, 121.6, 0.5), "Ly-alpha ~121.6 nm");
+    var last: f64 = load64(&nm + (cnt - 1) * 8);
+    assert(last > 91.0, "converges toward the 91.2 nm limit");
+}
+
+fn _t_balmer_series_hydrogen() {
+    test_group("balmer_series_hydrogen");
+    var ns[512];
+    var nm[512];
+    var t, cnt = balmer_series(1, 8, &ns, &nm, 64);
+    assert_eq(is_ok(t), 1, "Balmer series Ok");
+    assert_eq(cnt, 6, "n = 3..=8: six lines");
+    var h_alpha: f64 = load64(&nm);
+    assert(near(h_alpha, 656.3, 1.0), "H-alpha ~656.3 nm");
+    var h_beta: f64 = load64(&nm + 8);
+    assert(near(h_beta, 486.1, 1.0), "H-beta ~486.1 nm");
+}
+
+fn _t_paschen_series_hydrogen() {
+    test_group("paschen_series_hydrogen");
+    var ns[512];
+    var nm[512];
+    var t, cnt = paschen_series(1, 7, &ns, &nm, 64);
+    assert_eq(is_ok(t), 1, "Paschen series Ok");
+    assert_eq(cnt, 4, "n = 4..=7: four lines");
+    var first: f64 = load64(&nm);
+    assert(near(first, 1875.0, 10.0), "Pa-alpha ~1875 nm");
+}
+
+fn _t_brackett_series_hydrogen() {
+    test_group("brackett_series_hydrogen");
+    var ns[512];
+    var nm[512];
+    var t, cnt = brackett_series(1, 8, &ns, &nm, 64);
+    assert_eq(is_ok(t), 1, "Brackett series Ok");
+    assert_eq(cnt, 4, "n = 5..=8: four lines");
+    var first: f64 = load64(&nm);
+    assert(near(first, 4051.0, 20.0), "Br-alpha ~4051 nm");
+}
+
+fn _t_pfund_series_hydrogen() {
+    test_group("pfund_series_hydrogen");
+    var ns[512];
+    var nm[512];
+    var t, cnt = pfund_series(1, 9, &ns, &nm, 64);
+    assert_eq(is_ok(t), 1, "Pfund series Ok");
+    assert_eq(cnt, 4, "n = 6..=9: four lines");
+    var first: f64 = load64(&nm);
+    assert(near(first, 7460.0, 50.0), "Pf-alpha ~7460 nm");
+}
+
+fn _t_series_wavelengths_decrease_with_n() {
+    test_group("series_wavelengths_decrease_with_n");
+    var ns[512];
+    var nm[512];
+    var t, cnt = balmer_series(1, 10, &ns, &nm, 64);
+    assert_eq(is_ok(t), 1, "Balmer series Ok");
+    var i = 1;
+    while (i < cnt) {
+        var cur: f64 = load64(&nm + i * 8);
+        var prev: f64 = load64(&nm + (i - 1) * 8);
+        assert(cur < prev, "Wavelength should decrease");
+        i = i + 1;
+    }
+}
+
+fn _t_series_invalid_n_max() {
+    test_group("series_invalid_n_max");
+    var ns[512];
+    var nm[512];
+    assert_eq(is_err_result(lyman_series(1, 1, &ns, &nm, 64)), 1, "Lyman n_max = 1 is Err");
+    assert_eq(is_err_result(balmer_series(1, 2, &ns, &nm, 64)), 1, "Balmer n_max = 2 is Err");
+    assert_eq(is_err_result(paschen_series(1, 3, &ns, &nm, 64)), 1, "Paschen n_max = 3 is Err");
+    assert_eq(is_err_result(brackett_series(1, 4, &ns, &nm, 64)), 1, "Brackett n_max = 4 is Err");
+    assert_eq(is_err_result(pfund_series(1, 5, &ns, &nm, 64)), 1, "Pfund n_max = 5 is Err");
+}
+
+fn _t_dirac_energy_hydrogen_1s() {
+    test_group("dirac_energy_hydrogen_1s");
+    var t, v = dirac_energy_mev(1, 1, 1);
+    assert_eq(is_ok(t), 1, "H 1s1/2 Dirac Ok");
+    var e: f64 = v;
+    var me: f64 = TM_ELECTRON_MASS_MEV;
+    assert(e < me, "Dirac energy should be less than rest mass");
+    assert(e > 0.5109, "Dirac energy should be close to rest mass");
+}
+
+fn _t_dirac_binding_hydrogen_1s() {
+    test_group("dirac_binding_hydrogen_1s");
+    var t, v = dirac_binding_energy_ev(1, 1, 1);
+    assert_eq(is_ok(t), 1, "H 1s1/2 binding Ok");
+    var binding: f64 = v;
+    assert(near(binding, 13.6, 0.1), "H 1s binding ~13.6 eV");
+}
+
+fn _t_dirac_binding_hydrogen_2s_2p() {
+    test_group("dirac_binding_hydrogen_2s_2p");
+    var t1, v1 = dirac_energy_mev(1, 2, 1);
+    assert_eq(is_ok(t1), 1, "2s1/2 Ok");
+    var e_2s: f64 = v1;
+    var t2, v2 = dirac_energy_mev(1, 2, 1);
+    assert_eq(is_ok(t2), 1, "2p1/2 Ok");
+    var e_2p: f64 = v2;
+    assert(near(e_2s, e_2p, 0.000000000000001), "2s1/2 and 2p1/2 have same Dirac energy");
+    var t3, v3 = dirac_energy_mev(1, 2, 3);
+    assert_eq(is_ok(t3), 1, "2p3/2 Ok");
+    var e_2p32: f64 = v3;
+    var d: f64 = f64_abs(e_2s - e_2p32);
+    assert(d > 0.000000000001, "2s1/2 and 2p3/2 should differ");
+}
+
+fn _t_dirac_binding_scales_with_z() {
+    test_group("dirac_binding_scales_with_z");
+    var t1, v1 = dirac_binding_energy_ev(1, 1, 1);
+    assert_eq(is_ok(t1), 1, "H binding Ok");
+    var h: f64 = v1;
+    var t2, v2 = dirac_binding_energy_ev(2, 1, 1);
+    assert_eq(is_ok(t2), 1, "He+ binding Ok");
+    var he: f64 = v2;
+    var ratio: f64 = he / h;
+    assert(near(ratio, 4.0, 0.01), "He/H binding ratio ~4");
+}
+
+fn _t_dirac_energy_invalid_n() {
+    test_group("dirac_energy_invalid_n");
+    assert_eq(is_err_result(dirac_energy_mev(1, 0, 1)), 1, "n = 0 is Err");
+}
+
+fn _t_dirac_energy_invalid_two_j_even() {
+    test_group("dirac_energy_invalid_two_j_even");
+    assert_eq(is_err_result(dirac_energy_mev(1, 1, 2)), 1, "2j even is Err");
+}
+
+fn _t_dirac_energy_invalid_two_j_zero() {
+    test_group("dirac_energy_invalid_two_j_zero");
+    assert_eq(is_err_result(dirac_energy_mev(1, 1, 0)), 1, "2j = 0 is Err");
+}
+
+fn _t_dirac_energy_high_z() {
+    test_group("dirac_energy_high_z");
+    var t, v = dirac_energy_mev(92, 1, 1);
+    assert_eq(is_ok(t), 1, "U91+ 1s1/2 Ok");
+    var e: f64 = v;
+    var me: f64 = TM_ELECTRON_MASS_MEV;
+    assert(e < me, "Bound state energy < rest mass");
+    assert(e > 0.0, "Energy should be positive");
+}
+
+fn _t_relativistic_correction_hydrogen_positive() {
+    test_group("relativistic_correction_hydrogen_positive");
+    var t, v = relativistic_correction_ev(1, 1, 1);
+    assert_eq(is_ok(t), 1, "H 1s correction Ok");
+    var corr: f64 = v;
+    var a: f64 = f64_abs(corr);
+    assert(a < 0.01, "H 1s correction should be small");
+}
+
+fn _t_relativistic_correction_increases_with_z() {
+    test_group("relativistic_correction_increases_with_z");
+    var t1, v1 = relativistic_correction_ev(1, 1, 1);
+    assert_eq(is_ok(t1), 1, "H correction Ok");
+    var c1: f64 = v1;
+    var corr_h: f64 = f64_abs(c1);
+    var t2, v2 = relativistic_correction_ev(26, 1, 1);
+    assert_eq(is_ok(t2), 1, "Fe25+ correction Ok");
+    var c2: f64 = v2;
+    var corr_fe: f64 = f64_abs(c2);
+    assert(corr_fe > corr_h, "Relativistic correction should increase with Z");
+}
+
+fn _t_relativistic_correction_small_for_hydrogen() {
+    test_group("relativistic_correction_small_for_hydrogen");
+    var t, v = relativistic_correction_ev(1, 1, 1);
+    assert_eq(is_ok(t), 1, "H correction Ok");
+    var corr: f64 = v;
+    var a: f64 = f64_abs(corr);
+    assert(a < 1.0, "H correction should be << 13.6 eV");
+}
+
+fn _t_relativistic_correction_invalid() {
+    test_group("relativistic_correction_invalid");
+    assert_eq(is_err_result(relativistic_correction_ev(1, 0, 1)), 1, "n = 0 is Err");
+}
+
+fn _t_hyperfine_hydrogen_1s_21cm() {
+    test_group("hyperfine_hydrogen_1s_21cm");
+    var g_p: f64 = TM_PROTON_G_FACTOR;
+    var hfs: f64 = hyperfine_splitting_ev(1, 1, g_p);
+    var in_range = 0;
+    if (hfs > 0.000001 && hfs < 0.00001) { in_range = 1; }
+    assert(in_range, "H 1s HFS ~5.88e-6 eV");
+}
+
+fn _t_hyperfine_scales_with_z3() {
+    test_group("hyperfine_scales_with_z3");
+    var g_p: f64 = TM_PROTON_G_FACTOR;
+    var h: f64 = hyperfine_splitting_ev(1, 1, g_p);
+    var he: f64 = hyperfine_splitting_ev(2, 1, g_p);
+    var ratio: f64 = he / h;
+    assert(near(ratio, 8.0, 0.1), "HFS Z^3 scaling: ratio 8");
+}
+
+fn _t_hyperfine_decreases_with_n() {
+    test_group("hyperfine_decreases_with_n");
+    var g_p: f64 = TM_PROTON_G_FACTOR;
+    var n1: f64 = hyperfine_splitting_ev(1, 1, g_p);
+    var n2: f64 = hyperfine_splitting_ev(1, 2, g_p);
+    assert(n1 > n2, "HFS should decrease with n");
+}
+
+fn _t_hyperfine_zero_n() {
+    test_group("hyperfine_zero_n");
+    var hfs: f64 = hyperfine_splitting_ev(1, 0, 5.0);
+    var a: f64 = f64_abs(hfs);
+    assert(a < 0.000000000000000000000000000001, "n=0 should return 0");
+}
+
+fn _t_electron_g_factor_value() {
+    test_group("electron_g_factor_value");
+    var g: f64 = electron_g_factor();
+    assert(near(g, 2.002319304, 0.000001), "g_e ~2.00232");
+}
+
+fn _t_electron_g_factor_greater_than_2() {
+    test_group("electron_g_factor_greater_than_2");
+    var g: f64 = electron_g_factor();
+    assert(g > 2.0, "g_e should be > 2 due to QED corrections");
+}
+
+fn _t_bound_g_factor_hydrogen() {
+    test_group("bound_g_factor_hydrogen");
+    var g_bound: f64 = bound_electron_g_factor(1);
+    var g_free: f64 = electron_g_factor();
+    assert(near(g_bound, g_free, 0.001), "H bound g ~ free g");
+}
+
+fn _t_bound_g_factor_decreases_with_z() {
+    test_group("bound_g_factor_decreases_with_z");
+    var g1: f64 = bound_electron_g_factor(1);
+    var g50: f64 = bound_electron_g_factor(50);
+    assert(g1 > g50, "Bound g-factor should decrease with Z");
+}
+
+fn _t_bound_g_factor_supercritical() {
+    test_group("bound_g_factor_supercritical");
+    var g: f64 = bound_electron_g_factor(200);
+    var a: f64 = f64_abs(g);
+    assert(a < 0.000000000000000000000000000001, "Supercritical should return 0");
+}
+
+fn _t_anomalous_zeeman_zero_field() {
+    test_group("anomalous_zeeman_zero_field");
+    var de: f64 = anomalous_zeeman_splitting_ev(0.0, 0, 1);
+    var a: f64 = f64_abs(de);
+    assert(a < 0.000000000000000000000000000001, "No splitting in zero field");
+}
+
+fn _t_anomalous_zeeman_proportional_to_field() {
+    test_group("anomalous_zeeman_proportional_to_field");
+    var de1: f64 = anomalous_zeeman_splitting_ev(1.0, 0, 1);
+    var de2: f64 = anomalous_zeeman_splitting_ev(2.0, 0, 1);
+    var d: f64 = f64_abs(de2 - (2.0 * de1));
+    assert(d < 0.000000000000001, "Anomalous Zeeman should be linear in B");
+}
+
+fn _t_anomalous_zeeman_differs_from_normal() {
+    test_group("anomalous_zeeman_differs_from_normal");
+    var anom: f64 = anomalous_zeeman_splitting_ev(1.0, 0, 1);
+    var mu_b: f64 = TM_BOHR_MAGNETON_EV_T;
+    var normal: f64 = ((0.0 + (2.0 * 0.5)) * mu_b) * 1.0;
+    var d: f64 = f64_abs(anom - normal);
+    assert(d > 0.00000001, "Anomalous should differ from normal Zeeman");
+}
+
+fn _t_anomalous_zeeman_spin_up_vs_down() {
+    test_group("anomalous_zeeman_spin_up_vs_down");
+    var up: f64 = anomalous_zeeman_splitting_ev(1.0, 0, 1);
+    var down: f64 = anomalous_zeeman_splitting_ev(1.0, 0, 0 - 1);
+    var d: f64 = f64_abs(up + down);
+    assert(d < 0.000000000000001, "Spin-up and spin-down should be symmetric for ml=0");
+}
+
+fn _t_breit_leading_order_value() {
+    test_group("breit_leading_order_value");
+    var de: f64 = breit_interaction_ev(2);
+    var expected: f64 = (((2.0 * TM_FINE_STRUCTURE) * TM_FINE_STRUCTURE) * 2.0) * TM_RYDBERG_EV;
+    assert(near(de, expected, 0.000000000000001), "He Breit = 2 alpha^2 E_h");
+    assert(de > 0.0, "He Breit positive");
+}
+
+fn _t_breit_scales_with_z3() {
+    test_group("breit_scales_with_z3");
+    var b20: f64 = breit_interaction_ev(20);
+    var b10: f64 = breit_interaction_ev(10);
+    var ratio: f64 = b20 / b10;
+    assert(near(ratio, 8.0, 0.000000000001), "Breit Z^3 scaling: ratio 8");
+}
+
+fn _t_breit_below_total_two_electron_energy_uranium() {
+    test_group("breit_below_total_two_electron_energy_uranium");
+    var de: f64 = breit_interaction_ev(92);
+    assert(de < 2248.0, "He-like U Breit < 2248 eV measured two-electron total");
+}
+
+fn _t_radial_wavefunctions_normalized() {
+    test_group("radial_wavefunctions_normalized");
+    var n = 1;
+    while (n <= 10) {
+        var l = 0;
+        while (l < n) {
+            var steps = 40000;
+            var fsteps: f64 = f64_from(steps);
+            var nn: f64 = f64_from(n * n);
+            var r_max: f64 = (4.0 * nn) + 40.0;
+            var h: f64 = r_max / fsteps;
+            var f0: f64 = _density(n, l, 0.0);
+            var fm: f64 = _density(n, l, r_max);
+            var acc: f64 = f0 + fm;
+            var k = 1;
+            while (k < steps) {
+                var w: f64 = 2.0;
+                if ((k & 1) == 1) { w = 4.0; }
+                var fk: f64 = f64_from(k);
+                var fx: f64 = _density(n, l, fk * h);
+                acc = acc + (w * fx);
+                k = k + 1;
+            }
+            var norm: f64 = (acc * h) / 3.0;
+            assert(near(norm, 1.0, 0.000000001), "Simpson norm of R_nl^2 r^2 = 1 (n <= 10, l < n)");
+            l = l + 1;
+        }
+        n = n + 1;
+    }
+}
+
+fn _t_radial_r31_matches_textbook() {
+    test_group("radial_r31_matches_textbook");
+    var rs[32];
+    store64(&rs, 0.5);
+    store64(&rs + 8, 2.0);
+    store64(&rs + 16, 6.0);
+    store64(&rs + 24, 9.0);
+    var k = 0;
+    while (k < 4) {
+        var r: f64 = load64(&rs + k * 8);
+        var root6: f64 = f64_sqrt(6.0);
+        var mr: f64 = -r;
+        var ex: f64 = f64_exp(mr / 3.0);
+        var expected: f64 = (((8.0 / (27.0 * root6)) * (1.0 - (r / 6.0))) * r) * ex;
+        var t, v = radial_wavefunction(1, 3, 1, r);
+        assert_eq(is_ok(t), 1, "R_31(r) Ok");
+        var got: f64 = v;
+        assert(near(got, expected, 0.000000000000001), "R_31 = Griffiths eq. 4.89");
+        k = k + 1;
+    }
+}
+
+# One row of einstein_a_matches_nist_with_reduced_mass: A(nu lu -> nl ll) * mu within 2e-4 of
+# the NIST value.
+fn _einstein_a_nist_row(mu: f64, nu, lu, nl, ll, nist: f64) {
+    var t, v = einstein_a_coefficient(1, nu, lu, nl, ll);
+    assert_eq(is_ok(t), 1, "Einstein A Ok");
+    var a0: f64 = v;
+    var a: f64 = a0 * mu;
+    var d: f64 = f64_abs(a - nist);
+    var rel: f64 = d / nist;
+    assert(rel < 0.0002, "A * mu matches NIST ASD to 2e-4");
+}
+
+fn _t_einstein_a_matches_nist_with_reduced_mass() {
+    test_group("einstein_a_matches_nist_with_reduced_mass");
+    var t, v = reduced_mass_factor(1, 1);
+    assert_eq(is_ok(t), 1, "reduced_mass_factor(1, 1) Ok");
+    var mu: f64 = v;
+    _einstein_a_nist_row(mu, 2, 1, 1, 0, 626490000.0);
+    _einstein_a_nist_row(mu, 3, 1, 1, 0, 167250000.0);
+    _einstein_a_nist_row(mu, 3, 1, 2, 0, 22448000.0);
+    _einstein_a_nist_row(mu, 3, 0, 2, 1, 6314300.0);
+    _einstein_a_nist_row(mu, 3, 2, 2, 1, 64651000.0);
+}
+
+fn _t_einstein_a_scales_as_z4() {
+    test_group("einstein_a_scales_as_z4");
+    var t1, v1 = einstein_a_coefficient(1, 2, 1, 1, 0);
+    assert_eq(is_ok(t1), 1, "H Lyman-alpha A Ok");
+    var h: f64 = v1;
+    var t2, v2 = einstein_a_coefficient(2, 2, 1, 1, 0);
+    assert_eq(is_ok(t2), 1, "He+ Lyman-alpha A Ok");
+    var he: f64 = v2;
+    var ratio: f64 = he / h;
+    assert(near(ratio, 16.0, 0.000000001), "A Z^4 scaling: ratio 16");
+}
+
+fn _t_vacuum_polarization_hydrogen_2s() {
+    test_group("vacuum_polarization_hydrogen_2s");
+    var ev: f64 = vacuum_polarization_ev(1, 2, 0);
+    var vp: f64 = _mhz(ev);
+    var d: f64 = f64_abs(vp + 26.886);
+    assert(d < 0.01, "H 2S VP -26.886 MHz");
+}
+
+fn _t_lamb_shift_hydrogen_classic() {
+    test_group("lamb_shift_hydrogen_classic");
+    var t1, v1 = lamb_shift_nlj_ev(1, 2, 0, 1);
+    assert_eq(is_ok(t1), 1, "2S1/2 Ok");
+    var s12: f64 = v1;
+    var t2, v2 = lamb_shift_nlj_ev(1, 2, 1, 1);
+    assert_eq(is_ok(t2), 1, "2P1/2 Ok");
+    var p12: f64 = v2;
+    var split: f64 = _mhz(s12 - p12);
+    var d1: f64 = f64_abs(split - 1057.845);
+    assert(d1 / 1057.845 < 0.003, "2S1/2 - 2P1/2 = 1057.845 MHz to 3e-3");
+    var t3, v3 = lamb_shift_nlj_ev(1, 1, 0, 1);
+    assert_eq(is_ok(t3), 1, "1S1/2 Ok");
+    var e1s: f64 = v3;
+    var one_s: f64 = _mhz(e1s);
+    var d2: f64 = f64_abs(one_s - 8172.9);
+    assert(d2 / 8172.9 < 0.003, "1S Lamb shift = 8172.9 MHz to 3e-3");
+    var t4, v4 = lamb_shift_nlj_ev(1, 2, 1, 3);
+    assert_eq(is_ok(t4), 1, "2P3/2 Ok");
+    var e2p32: f64 = v4;
+    var p32: f64 = _mhz(e2p32);
+    assert(near(p32, 12.8, 0.5), "2P3/2 ~12.8 MHz");
+}
+
+fn _t_lamb_shift_helium_ion() {
+    test_group("lamb_shift_helium_ion");
+    var t1, v1 = lamb_shift_nlj_ev(2, 2, 0, 1);
+    assert_eq(is_ok(t1), 1, "He+ 2S1/2 Ok");
+    var s12: f64 = v1;
+    var t2, v2 = lamb_shift_nlj_ev(2, 2, 1, 1);
+    assert_eq(is_ok(t2), 1, "He+ 2P1/2 Ok");
+    var p12: f64 = v2;
+    var split: f64 = _mhz(s12 - p12);
+    var d: f64 = f64_abs(split - 14041.13);
+    assert(d / 14041.13 < 0.04, "He+ 2S1/2 - 2P1/2 = 14041.13 MHz to 4%");
+}
+
+fn _t_lamb_shift_rejects_untabulated() {
+    test_group("lamb_shift_rejects_untabulated");
+    assert_eq(is_err_result(lamb_shift_nlj_ev(1, 5, 0, 1)), 1, "n = 5 is Err");
+    assert_eq(is_err_result(lamb_shift_nlj_ev(1, 2, 1, 5)), 1, "j = 5/2 at l = 1 is Err");
+}
+
+fn _t_hyperfine_deuterium_includes_spin_factor() {
+    test_group("hyperfine_deuterium_includes_spin_factor");
+    var ed: f64 = hyperfine_splitting_spin_ev(1, 1, TM_DEUTERON_G_FACTOR, 1.0);
+    var hfs: f64 = _mhz(ed);
+    var d1: f64 = f64_abs(hfs - 327.384);
+    assert(d1 / 327.384 < 0.001, "D HFS = 327.384 MHz to 1e-3");
+    var eh: f64 = hyperfine_splitting_ev(1, 1, TM_PROTON_G_FACTOR);
+    var h: f64 = _mhz(eh);
+    var d2: f64 = f64_abs(h - 1420.406);
+    assert(d2 / 1420.406 < 0.001, "H HFS = 1420.406 MHz to 1e-3");
+}
+
+fn _t_h_alpha_vacuum_with_reduced_mass() {
+    test_group("h_alpha_vacuum_with_reduced_mass");
+    var t, v = spectral_line_vacuum_nm(1, 1, 2, 3);
+    assert_eq(is_ok(t), 1, "H-alpha vacuum Ok");
+    var lambda: f64 = v;
+    assert(near(lambda, 656.4696, 0.001), "H-alpha 656.4696 nm");
+}
+
+fn _t_fine_structure_uses_codata_rydberg() {
+    test_group("fine_structure_uses_codata_rydberg");
+    var t1, v1 = hydrogen_level_energy_ev(1, 1, 1);
+    assert_eq(is_ok(t1), 1, "H 1s1/2 first-order Ok");
+    var e: f64 = v1;
+    var t2, v2 = dirac_binding_energy_ev(1, 1, 1);
+    assert_eq(is_ok(t2), 1, "H 1s1/2 Dirac binding Ok");
+    var b: f64 = v2;
+    var dirac: f64 = -b;
+    assert(near(e, dirac, 0.00000001), "first-order = Dirac to 1e-8 eV");
+    assert_eq(is_err_result(hydrogen_level_energy_ev(1, 2, 2)), 1, "2j = 2 is Err");
+}
+
+fn _t_dirac_rejects_j_above_n() {
+    test_group("dirac_rejects_j_above_n");
+    assert_eq(is_err_result(dirac_energy_mev(1, 1, 3)), 1, "j = 3/2 at n = 1 is Err");
+}
+
+fn _t_ionization_energy_reference_values() {
+    test_group("ionization_energy_reference_values");
+    var t1, v1 = ionization_energy_ev(43);
+    assert_eq(is_ok(t1), 1, "Tc IE Ok");
+    var tc: f64 = v1;
+    assert(near(tc, 7.11938, 0.000000001), "Tc IE 7.11938 eV (NIST ASD)");
+    var t2, v2 = ionization_energy_ev(96);
+    assert_eq(is_ok(t2), 1, "Cm IE Ok");
+    var cm: f64 = v2;
+    assert(near(cm, 5.992241, 0.000000001), "Cm IE 5.992241 eV (NIST ASD)");
+    var t3, v3 = ionization_energy_ev(112);
+    assert_eq(is_ok(t3), 1, "Cn IE Ok");
+    var cn: f64 = v3;
+    assert(near(cn, 12.02, 0.000000001), "Cn IE 12.02 eV (Smits et al. 2023)");
+}
+
+fn _t_electron_affinity_reference_values() {
+    test_group("electron_affinity_reference_values");
+    var t1, k1 = electron_affinity(90);
+    assert_eq(is_ok(t1), 1, "Th EA Ok");
+    assert_eq(k1, TM_ELECTRON_AFFINITY_BOUND, "Th EA is Bound");
+    var e1, v1 = electron_affinity_ev(90);
+    assert_eq(is_ok(e1), 1, "Th EA value Ok");
+    var th: f64 = v1;
+    assert(_f64_eq(th, 0.60769), "Th EA Bound(0.60769)");
+    var t2, k2 = electron_affinity(92);
+    assert_eq(is_ok(t2), 1, "U EA Ok");
+    assert_eq(k2, TM_ELECTRON_AFFINITY_BOUND, "U EA is Bound");
+    var e2, v2 = electron_affinity_ev(92);
+    assert_eq(is_ok(e2), 1, "U EA value Ok");
+    var u: f64 = v2;
+    assert(_f64_eq(u, 0.31497), "U EA Bound(0.31497)");
+    var t3, k3 = electron_affinity(2);
+    assert_eq(is_ok(t3), 1, "He EA Ok");
+    assert_eq(k3, TM_ELECTRON_AFFINITY_UNBOUND, "He EA is Unbound");
+    var t4, k4 = electron_affinity(104);
+    assert_eq(is_ok(t4), 1, "Rf EA Ok");
+    assert_eq(k4, TM_ELECTRON_AFFINITY_UNKNOWN, "Rf EA is Unknown");
+    var t5, v5 = electron_affinity_ev(59);
+    assert_eq(is_ok(t5), 1, "Pr EA Ok");
+    var pr: f64 = v5;
+    assert(near(pr, 0.10923, 0.000000000001), "Pr EA 0.10923 eV");
+}
+
+fn _t_superheavy_configurations_follow_madelung() {
+    test_group("superheavy_configurations_follow_madelung");
+    var ds = _config_short(110);
+    assert_eq(str_eq_cstr(ds, "[Rn] 7s2 5f14 6d8"), 1, "Ds [Rn] 7s2 5f14 6d8");
+    var rg = _config_short(111);
+    assert_eq(str_eq_cstr(rg, "[Rn] 7s2 5f14 6d9"), 1, "Rg [Rn] 7s2 5f14 6d9");
+}
+
+fn _t_stark_and_lande_reject_impossible_states() {
+    test_group("stark_and_lande_reject_impossible_states");
+    var s: f64 = stark_shift_hydrogen_ev(2, 5, 1000000.0);
+    var sa: f64 = f64_abs(s);
+    assert(sa < 0.000000000000000000000000000001, "|k| > n - 1: no Stark shift");
+    var g: f64 = lande_g_factor(0, 3);
+    var ga: f64 = f64_abs(g);
+    assert(ga < 0.000000000000000000000000000001, "j = 3/2 at l = 0: g = 0");
+}
+
+# Runs every test and returns the failure count.
+fn main(): i64 {
+    _t_h_alpha_wavelength();
+    _t_lyman_alpha();
+    _t_spectral_line_invalid();
+    _t_iron_electron_config();
+    _t_iron_short_config();
+    _t_chromium_exception();
+    _t_copper_exception();
+    _t_hydrogen_config();
+    _t_helium_config();
+    _t_noble_gas_neon();
+    _t_total_electrons_match_z();
+    _t_niobium_exception();
+    _t_palladium_exception();
+    _t_lanthanum_exception();
+    _t_gadolinium_exception();
+    _t_thorium_exception();
+    _t_uranium_exception();
+    _t_ionization_energy_hydrogen();
+    _t_ionization_energy_helium();
+    _t_ionization_energy_noble_gases_high();
+    _t_ionization_energy_invalid();
+    _t_ionization_energy_cesium_lowest_alkali();
+    _t_ionization_energy_noble_gas_trend();
+    _t_ionization_energy_lanthanide_range();
+    _t_quantum_numbers_valid();
+    _t_quantum_numbers_invalid();
+    _t_orbital_max_electrons();
+    _t_hydrogen_ground_state_energy();
+    _t_fine_structure_splits_levels();
+    _t_h_alpha_fine_structure();
+    _t_fine_structure_invalid();
+    _t_lande_g_s_electron();
+    _t_lande_g_p32();
+    _t_zeeman_zero_field();
+    _t_zeeman_proportional_to_field();
+    _t_stark_zero_field();
+    _t_stark_proportional_to_field();
+    _t_stark_increases_with_n();
+    _t_electron_affinity_fluorine_highest();
+    _t_electron_affinity_chlorine();
+    _t_electron_affinity_noble_gases_zero();
+    _t_electron_affinity_gold_high();
+    _t_electron_affinity_invalid();
+    _t_radial_1s_at_origin();
+    _t_radial_1s_decays();
+    _t_radial_2s_has_node();
+    _t_probability_density_positive();
+    _t_radial_invalid_quantum_numbers();
+    _t_selection_rules_allowed();
+    _t_selection_rules_forbidden();
+    _t_selection_rules_full_with_ml();
+    _t_einstein_a_lyman_alpha();
+    _t_einstein_a_forbidden_transition();
+    _t_einstein_b_positive();
+    _t_lamb_shift_hydrogen_2s();
+    _t_lamb_shift_grows_with_z();
+    _t_lamb_shift_p_smaller_than_s();
+    _t_vacuum_polarization_negative();
+    _t_vacuum_polarization_small_vs_lamb();
+    _t_lyman_series_hydrogen();
+    _t_balmer_series_hydrogen();
+    _t_paschen_series_hydrogen();
+    _t_brackett_series_hydrogen();
+    _t_pfund_series_hydrogen();
+    _t_series_wavelengths_decrease_with_n();
+    _t_series_invalid_n_max();
+    _t_dirac_energy_hydrogen_1s();
+    _t_dirac_binding_hydrogen_1s();
+    _t_dirac_binding_hydrogen_2s_2p();
+    _t_dirac_binding_scales_with_z();
+    _t_dirac_energy_invalid_n();
+    _t_dirac_energy_invalid_two_j_even();
+    _t_dirac_energy_invalid_two_j_zero();
+    _t_dirac_energy_high_z();
+    _t_relativistic_correction_hydrogen_positive();
+    _t_relativistic_correction_increases_with_z();
+    _t_relativistic_correction_small_for_hydrogen();
+    _t_relativistic_correction_invalid();
+    _t_hyperfine_hydrogen_1s_21cm();
+    _t_hyperfine_scales_with_z3();
+    _t_hyperfine_decreases_with_n();
+    _t_hyperfine_zero_n();
+    _t_electron_g_factor_value();
+    _t_electron_g_factor_greater_than_2();
+    _t_bound_g_factor_hydrogen();
+    _t_bound_g_factor_decreases_with_z();
+    _t_bound_g_factor_supercritical();
+    _t_anomalous_zeeman_zero_field();
+    _t_anomalous_zeeman_proportional_to_field();
+    _t_anomalous_zeeman_differs_from_normal();
+    _t_anomalous_zeeman_spin_up_vs_down();
+    _t_breit_leading_order_value();
+    _t_breit_scales_with_z3();
+    _t_breit_below_total_two_electron_energy_uranium();
+    _t_radial_wavefunctions_normalized();
+    _t_radial_r31_matches_textbook();
+    _t_einstein_a_matches_nist_with_reduced_mass();
+    _t_einstein_a_scales_as_z4();
+    _t_vacuum_polarization_hydrogen_2s();
+    _t_lamb_shift_hydrogen_classic();
+    _t_lamb_shift_helium_ion();
+    _t_lamb_shift_rejects_untabulated();
+    _t_hyperfine_deuterium_includes_spin_factor();
+    _t_h_alpha_vacuum_with_reduced_mass();
+    _t_fine_structure_uses_codata_rydberg();
+    _t_dirac_rejects_j_above_n();
+    _t_ionization_energy_reference_values();
+    _t_electron_affinity_reference_values();
+    _t_superheavy_configurations_follow_madelung();
+    _t_stark_and_lande_reject_impossible_states();
+    return assert_summary();
+}
+
+var exit_code = main();
+if (exit_code > 0) { exit_code = 1; }
+sys_exit_group(exit_code);

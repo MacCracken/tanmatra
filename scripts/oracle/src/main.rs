@@ -14,11 +14,12 @@
 //! `tests/golden/` has no emitter.
 //!
 //! Modules are added at the start of their milestone, with the golden grid from the port
-//! plan §3. M1 so far: constants, particle, relativity; plus `libm`, the math-function
-//! reference for the M0 step 8 baselines.
+//! plan §3: constants, particle and relativity (M1), nucleus and decay (M2), timekeeping (M5),
+//! atomic (M3); plus `libm`, the math-function reference for the M0 step 8 baselines.
 
 mod cyr;
 mod grids;
+mod m_atomic;
 mod m_constants;
 mod m_decay;
 mod m_libm;
@@ -27,6 +28,7 @@ mod m_particle;
 mod m_relativity;
 mod m_timekeeping;
 mod rust_src;
+mod t_atomic;
 mod t_constants;
 mod t_decay;
 mod t_nucleus;
@@ -42,6 +44,7 @@ use std::process::ExitCode;
 /// Every golden emitter, in file-name order.
 fn golden_modules() -> Vec<tsv::Module> {
     vec![
+        m_atomic::emit(),
         m_constants::emit(),
         m_decay::emit(),
         m_libm::emit(),
@@ -92,6 +95,10 @@ fn cyrius_outputs(root: &Path, prov: &str) -> Result<Vec<Output>, String> {
     push(
         "src/timekeeping_data.cyr",
         t_timekeeping::emit(&rust("timekeeping")?, prov)?,
+    );
+    push(
+        "src/atomic_data.cyr",
+        t_atomic::emit(&rust("atomic")?, prov)?,
     );
     Ok(out)
 }

@@ -30,6 +30,7 @@ MODULES = {
     "nucleus": {"values": {"Nucleus", "ShellLevel"}, "structs": {"SuperallowedDecay"}},
     "decay": {"values": set(), "structs": set()},
     "timekeeping": {"values": {"FrequencyStandard"}, "structs": {"AtomicInstant"}},
+    "atomic": {"values": {"OrbitalType"}, "structs": {"QuantumNumbers"}},
 }
 
 # Rust item -> why it has no direct Cyrius name.

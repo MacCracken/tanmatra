@@ -79,3 +79,31 @@ products in the same order: 270 µs and 5.42 µs. All 28 Bateman golden rows giv
 Each call does a trunc, a half-away round, two saturating integer adds and the Euclidean nanosecond carry, and
 returns the 16-byte instant by value.
 
+
+## M3 Atomic (2026-11-08)
+
+| Bench | Body | Rust | Cyrius | Cyrius / Rust |
+|---|---|---|---|---|
+| `atomic/spectral_line_1000` | every line n1 < n2 ≤ 10 for Z = 1..10 (450 calls) | 0.279 µs | 11.9 µs | 43× |
+| `atomic/electron_config_36` | the configurations of Z = 1..36 | 1.77 µs (a new `Vec` each) | 3.32 µs (a caller array) | 1.9× |
+| `atomic/ionization_energy_118` | every first ionization energy | 69.5 ns | 748 ns | 11× |
+| `atomic/radial_wavefunction_100` | R₃₂(0.1·i a₀), i = 0..99 | 4.53 µs | 10.6 µs | 2.3× |
+| `atomic/einstein_a_to_n2_upto_n10` | A for np → 2s and nd → 2p, n = 3..10 | 8.25 µs | 25.4 µs | 3.1× |
+| `atomic/radial_wavefunction_n10_100` | R₁₀,₃(0.5·i a₀), i = 0..99 | 8.57 µs | 28.3 µs | 3.3× |
+| `atomic/lamb_shift_nlj_all_n4` | the j = l + 1/2 shift of every (n, l) with n ≤ 4 | 103 ns | 640 ns | 6.2× |
+
+**Reading the gap.** The bodies that compute (radial functions, Einstein A, configurations) are 2–3× Rust. The
+call-bound ones are further off: `spectral_line_1000` is 450 calls of three divisions, which LLVM hoists and
+pipelines across the loop (0.6 ns a call), while Cyrius makes each a call returning a `Result` pair (26 ns). The
+ionization-energy lookup is the same story at 6 ns a call.
+
+**Two optimizations, measured.**
+- **`#inline` on the u32 / i32 range checks.** `_tm_u32_ok` and `_tm_i32_ok` are now branch-free single
+  expressions, so `#inline` replays them at each call. `spectral_line_1000` went from 14.8 µs (53×) to 11.9 µs and
+  `lamb_shift_nlj_all_n4` from 704 ns to 640 ns. Writing the checks out by hand reached 10.4 µs, which isn't worth
+  the clutter.
+- **The radial dipole integral, hoisted.** Rust recomputes pow(2/n, i), pow(2/n′, j) and the factorial product
+  p!/c^(p+1) for every term of the double sum. The port computes the pows once per i and per j, and the products
+  as one running product, so the calls and multiplications are the same and so are the bits. A Rust-shaped
+  version timed 36.1 µs (4.4×) for `einstein_a_to_n2_upto_n10`; the hoisted one is 25.4 µs. All 2,886 Einstein
+  golden rows stay 0 ulp.

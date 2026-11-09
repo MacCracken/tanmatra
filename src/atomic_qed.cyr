@@ -1,0 +1,246 @@
+# atomic_qed.cyr — QED and relativistic corrections to hydrogen-like levels: the one-loop Lamb
+# shift with Bethe logarithms, vacuum polarization, the exact Dirac energies, the hyperfine
+# splitting, the free and bound electron g-factors, the strong-field Zeeman shift and the Breit
+# interaction (port of the last part of rust-old/src/atomic.rs).
+#
+# Rust's evaluation order is kept, parenthesized. Only the Lamb shift calls a transcendental
+# (ln, for s states): class C. Everything else is arithmetic and sqrt: class B, bit-identical.
+# Rust's powi(4) is (x·x)·(x·x), as LLVM expands it. Integer arguments follow atomic_config.cyr.
+
+# (Zα)⁴ by Rust's powi(4) expansion.
+#must_use
+fn _tm_pow4(x: f64): f64 {
+    var x2: f64 = x * x;
+    var x4: f64 = x2 * x2;
+    return x4;
+}
+
+# (α/π)(Zα)⁴ m_e c² / n³ in eV: the common prefactor of the Lamb shift and the vacuum
+# polarization, in Rust's order.
+#must_use
+fn _tm_qed_prefactor(za: f64, nf: f64): f64 {
+    var za4: f64 = _tm_pow4(za);
+    var p: f64 = ((((TM_FINE_STRUCTURE / _TM_PI) * za4) * TM_ELECTRON_MASS_MEV) * 1000000.0) / ((nf * nf) * nf);
+    return p;
+}
+
+# ── QED corrections ─────────────────────────────────────────────────────────────────
+
+# The one-loop QED (Lamb) shift, eV, of the hydrogen-like level (n, l, j), j passed as 2j,
+# infinite nuclear mass:
+#   ΔE = (α/π)(Zα)⁴ m_e c²/n³ × [A₄₁ ln(Zα)⁻² + A₄₀ + Zα A₅₀],
+#   self-energy A₄₁ = 4/3 δ_l0, A₄₀ = −(4/3) ln k₀(n,l) + 10/9 δ_l0 − (1 − δ_l0)/(2κ(2l+1)),
+#   A₅₀ = (139/32 − 2 ln 2) π δ_l0; vacuum polarization (Uehling) A₄₀ = −4/15 δ_l0,
+#   A₅₀ = (5/48) π δ_l0; κ = −(l+1) for j = l + 1/2 and l for j = l − 1/2
+# (Eides, Grotch & Shelyuto, Phys. Rep. 342, 63 (2001); CODATA 2018). About 0.2% for hydrogen
+# (2S½ − 2P½: 1059.6 MHz against 1057.845 MHz measured), 3% for He⁺, invalid at high Z.
+# Err(TM_ERR_INVALID_QUANTUM_NUMBERS) for n = 0, l ≥ n, j ≠ l ± 1/2, or n > 4 (the Bethe
+# logarithms of Drake & Swainson 1990 are tabulated for n ≤ 4). Mirrors `lamb_shift_nlj_ev`.
+#must_use
+fn lamb_shift_nlj_ev(z, n, l, two_j): Result {
+    if (_tm_u32_ok(z) != 1) { return Err(TM_ERR_INVALID_ATOMIC_NUMBER); }
+    if (_tm_u32_ok(n) != 1 || _tm_u32_ok(l) != 1 || _tm_u32_ok(two_j) != 1) {
+        return Err(TM_ERR_INVALID_QUANTUM_NUMBERS);
+    }
+    if (n == 0 || l >= n || (two_j != 2 * l + 1 && two_j + 1 != 2 * l)) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    if (n > 4) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    var ln_k0: f64 = _TM_BETHE_LOG[(n * (n - 1)) / 2 + l];
+    var za: f64 = f64_from(z) * TM_FINE_STRUCTURE;
+    var nf: f64 = f64_from(n);
+    var prefactor: f64 = _tm_qed_prefactor(za, nf);
+    var coefficient: f64 = 0.0;
+    if (l == 0) {
+        var lg: f64 = f64_ln(1.0 / (za * za));
+        var a41: f64 = (4.0 / 3.0) * lg;
+        var a40: f64 = ((((-4.0) / 3.0) * ln_k0) + (10.0 / 9.0)) - (4.0 / 15.0);
+        var a50: f64 = (((139.0 / 32.0) - (2.0 * _TM_LN2)) * _TM_PI) + ((5.0 / 48.0) * _TM_PI);
+        coefficient = (a41 + a40) + (za * a50);
+    } else {
+        var lf: f64 = f64_from(l);
+        var kappa: f64 = lf;
+        if (two_j == 2 * l + 1) {
+            var lp: f64 = lf + 1.0;
+            kappa = -lp;
+        }
+        coefficient = (((-4.0) / 3.0) * ln_k0) - (1.0 / ((2.0 * kappa) * ((2.0 * lf) + 1.0)));
+    }
+    var e: f64 = prefactor * coefficient;
+    return Ok(e);
+}
+
+# The one-loop QED (Lamb) shift, eV, of the hydrogen-like (n, l) level: nS½'s for s states,
+# and for l > 0 the (2j+1)-weighted mean over j = l ± 1/2, where the κ terms cancel. 0.0 where
+# lamb_shift_nlj_ev returns an Err (n = 0, l ≥ n, n > 4). Mirrors `lamb_shift_ev`.
+#must_use
+fn lamb_shift_ev(z, n, l): f64 {
+    if (_tm_u32_ok(z) != 1 || _tm_u32_ok(n) != 1 || _tm_u32_ok(l) != 1) { return _tm_nan(); }
+    if (l == 0) {
+        var t0, v0 = lamb_shift_nlj_ev(z, n, 0, 1);
+        if (is_ok(t0) == 1) {
+            var s: f64 = v0;
+            return s;
+        }
+        return 0.0;
+    }
+    var lo: f64 = 0.0;
+    var hi: f64 = 0.0;
+    var t1, v1 = lamb_shift_nlj_ev(z, n, l, 2 * l - 1);
+    if (is_ok(t1) == 1) {
+        var x1: f64 = v1;
+        lo = x1;
+    }
+    var t2, v2 = lamb_shift_nlj_ev(z, n, l, 2 * l + 1);
+    if (is_ok(t2) == 1) {
+        var x2: f64 = v2;
+        hi = x2;
+    }
+    var lf: f64 = f64_from(l);
+    var e: f64 = (((2.0 * lf) * lo) + (((2.0 * lf) + 2.0) * hi)) / ((4.0 * lf) + 2.0);
+    return e;
+}
+
+# The vacuum polarization (Uehling) shift, eV, of a hydrogen-like s level, infinite nuclear
+# mass: ΔE_VP = (α/π)(Zα)⁴ m_e c²/n³ × [−4/15 + (5π/48) Zα]. Hydrogen 2S: −26.89 MHz. 0.0 for
+# l > 0, where these terms vanish, and for n = 0. Mirrors `vacuum_polarization_ev`.
+#must_use
+fn vacuum_polarization_ev(z, n, l): f64 {
+    if (_tm_u32_ok(z) != 1 || _tm_u32_ok(n) != 1 || _tm_u32_ok(l) != 1) { return _tm_nan(); }
+    if (n == 0 || l >= n || l != 0) { return 0.0; }
+    var za: f64 = f64_from(z) * TM_FINE_STRUCTURE;
+    var nf: f64 = f64_from(n);
+    var p: f64 = _tm_qed_prefactor(za, nf);
+    var e: f64 = p * (((-4.0) / 15.0) + (((5.0 * _TM_PI) / 48.0) * za));
+    return e;
+}
+
+# ── the Dirac equation ──────────────────────────────────────────────────────────────
+
+# The exact Dirac energy, MeV (rest mass plus binding), of the hydrogen-like level (n, j), j
+# passed as 2j: E = m_e c² / √(1 + [αZ/(n − δ)]²), δ = j + 1/2 − √((j + 1/2)² − (αZ)²).
+# Err(TM_ERR_INVALID_QUANTUM_NUMBERS) for n = 0, 2j not odd in 1..=2n − 1, a supercritical
+# αZ ≥ j + 1/2, or n − δ ≤ 0. Mirrors `dirac_energy_mev`.
+#must_use
+fn dirac_energy_mev(z, n, two_j): Result {
+    if (_tm_u32_ok(z) != 1) { return Err(TM_ERR_INVALID_ATOMIC_NUMBER); }
+    if (n == 0 || _tm_u32_ok(n) != 1 || _tm_u32_ok(two_j) != 1) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    if (two_j == 0 || (two_j & 1) == 0 || two_j > 2 * n - 1) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    var zf: f64 = f64_from(z);
+    var nf: f64 = f64_from(n);
+    var jph: f64 = (f64_from(two_j) + 1.0) / 2.0;
+    var az: f64 = TM_FINE_STRUCTURE * zf;
+    var az2: f64 = az * az;
+    var disc: f64 = (jph * jph) - az2;
+    if (disc <= 0.0) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    var delta: f64 = jph - f64_sqrt(disc);
+    var n_eff: f64 = nf - delta;
+    if (n_eff <= 0.0) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    var ratio: f64 = az / n_eff;
+    var energy: f64 = TM_ELECTRON_MASS_MEV / f64_sqrt(1.0 + (ratio * ratio));
+    return Ok(energy);
+}
+
+# The Dirac binding energy, eV: m_e c² − E_nj (positive when bound). Errors as
+# dirac_energy_mev. Mirrors `dirac_binding_energy_ev`.
+#must_use
+fn dirac_binding_energy_ev(z, n, two_j): Result {
+    var t, v = dirac_energy_mev(z, n, two_j);
+    if (is_err_result(t) == 1) { return Err(v); }
+    var ed: f64 = v;
+    var b: f64 = (TM_ELECTRON_MASS_MEV - ed) * 1000000.0;
+    return Ok(b);
+}
+
+# The total relativistic correction, eV: the Dirac binding energy less the non-relativistic
+# ½α²m_ec² Z²/n², from the same constants, so every order of the fine structure is included.
+# Errors as dirac_energy_mev. Mirrors `relativistic_correction_ev`.
+#must_use
+fn relativistic_correction_ev(z, n, two_j): Result {
+    var t, v = dirac_binding_energy_ev(z, n, two_j);
+    if (is_err_result(t) == 1) { return Err(v); }
+    var bd: f64 = v;
+    var zf: f64 = f64_from(z);
+    var nf: f64 = f64_from(n);
+    var ry: f64 = (((0.5 * TM_FINE_STRUCTURE) * TM_FINE_STRUCTURE) * TM_ELECTRON_MASS_MEV) * 1000000.0;
+    var bn: f64 = ((ry * zf) * zf) / (nf * nf);
+    var d: f64 = bd - bn;
+    return Ok(d);
+}
+
+# ── hyperfine structure ─────────────────────────────────────────────────────────────
+
+# The magnetic-dipole hyperfine splitting, eV, of an s state of a hydrogen-like ion, between
+# F = I ± 1/2: ΔE = A (I + 1/2), A = (4/3) α⁴ Z³ g_I (m_e/m_p) m_e c²/n³ (Fermi contact term,
+# leading order). Deuterium 1s (I = 1, g_d = 0.8574382335): 327.23 MHz (measured 327.384).
+# 0.0 for n = 0 or I ≤ 0. Mirrors `hyperfine_splitting_spin_ev`.
+#must_use
+fn hyperfine_splitting_spin_ev(z, n, nuclear_g_factor: f64, nuclear_spin: f64): f64 {
+    if (_tm_u32_ok(z) != 1 || _tm_u32_ok(n) != 1) { return _tm_nan(); }
+    if (n == 0 || nuclear_spin <= 0.0) { return 0.0; }
+    var zf: f64 = f64_from(z);
+    var nf: f64 = f64_from(n);
+    var fs: f64 = TM_FINE_STRUCTURE;
+    var alpha4: f64 = ((fs * fs) * fs) * fs;
+    var mass_ratio: f64 = TM_ELECTRON_MASS_MEV / TM_PROTON_MASS_MEV;
+    var a: f64 = ((((((4.0 / 3.0) * alpha4) * zf) * zf) * zf) * mass_ratio) * nuclear_g_factor;
+    a = ((a * TM_ELECTRON_MASS_MEV) * 1000000.0) / ((nf * nf) * nf);
+    var e: f64 = a * (nuclear_spin + 0.5);
+    return e;
+}
+
+# The hyperfine splitting, eV, of an s state with a spin-1/2 nucleus (hydrogen 1s: 5.8776e-6
+# eV, 1421.2 MHz; measured 1420.406 MHz). hyperfine_splitting_spin_ev with I = 1/2. Mirrors
+# `hyperfine_splitting_ev`.
+#must_use
+fn hyperfine_splitting_ev(z, n, nuclear_g_factor: f64): f64 {
+    var e: f64 = hyperfine_splitting_spin_ev(z, n, nuclear_g_factor, 0.5);
+    return e;
+}
+
+# ── g-factors, strong-field Zeeman, Breit ───────────────────────────────────────────
+
+# The free-electron g-factor with QED, g_e = 2(1 + a_e) = 2.00231930436092 (CODATA 2022).
+# Mirrors `electron_g_factor`.
+#must_use
+fn electron_g_factor(): f64 {
+    var g: f64 = 2.0 * (1.0 + TM_ELECTRON_ANOMALOUS_MOMENT);
+    return g;
+}
+
+# The bound-electron g-factor of the 1s state of a hydrogen-like ion: Breit's Dirac value
+# (2/3)(1 + 2√(1 − (αZ)²)) times the free-electron (1 + a_e). 0.0 when (αZ)² ≥ 1. Mirrors
+# `bound_electron_g_factor`.
+#must_use
+fn bound_electron_g_factor(z): f64 {
+    if (_tm_u32_ok(z) != 1) { return _tm_nan(); }
+    var az: f64 = TM_FINE_STRUCTURE * f64_from(z);
+    var az2: f64 = az * az;
+    if (az2 >= 1.0) { return 0.0; }
+    var breit: f64 = (2.0 / 3.0) * (1.0 + (2.0 * f64_sqrt(1.0 - az2)));
+    var g: f64 = breit * (1.0 + TM_ELECTRON_ANOMALOUS_MOMENT);
+    return g;
+}
+
+# The strong-field (Paschen–Back) Zeeman shift, eV, with the QED g_e: ΔE = (m_l + g_e m_s) μ_B B,
+# ms passed as ±1 for ±1/2. For weak fields use zeeman_splitting_ev. Mirrors
+# `anomalous_zeeman_splitting_ev`.
+#must_use
+fn anomalous_zeeman_splitting_ev(b_tesla: f64, ml, ms): f64 {
+    if (_tm_i32_ok(ml) != 1 || _tm_i32_ok(ms) != 1) { return _tm_nan(); }
+    var g_e: f64 = electron_g_factor();
+    var ms_half: f64 = f64_from(ms) / 2.0;
+    var e: f64 = ((f64_from(ml) + (g_e * ms_half)) * TM_BOHR_MAGNETON_EV_T) * b_tesla;
+    return e;
+}
+
+# The leading-order Breit (magnetic) interaction of the 1s² ¹S₀ ground state of a helium-like
+# ion, eV: ΔE = α² Z³/4 E_h, the spin–spin contact term with unscreened hydrogenic orbitals
+# (Bethe & Salpeter §38–39); the leading term of the 1/Z expansion, most useful for Z ≈ 10–40.
+# Mirrors `breit_interaction_ev`.
+#must_use
+fn breit_interaction_ev(z): f64 {
+    if (_tm_u32_ok(z) != 1) { return _tm_nan(); }
+    var zf: f64 = f64_from(z);
+    var hartree: f64 = 2.0 * TM_RYDBERG_EV;
+    var e: f64 = (((((TM_FINE_STRUCTURE * TM_FINE_STRUCTURE) * zf) * zf) * zf) / 4.0) * hartree;
+    return e;
+}

@@ -3,8 +3,8 @@
 # A fallible tanmatra function returns a value-form Result whose Err payload is one of
 # these codes. The golden token `E:InvalidAtomicNumber` is TM_ERR_INVALID_ATOMIC_NUMBER:
 # TM_ERR_ + snake(variant). The values are append-only. The Rust variants' payloads (Z, A,
-# a detail string) travel through an `err_out` pointer where a function documents one;
-# that arrives with the first fallible API (M2, Nucleus).
+# a detail string) only restate the caller's input, so no detail travels with the code
+# (port plan §5, decided in M2); tm_error_message(code) gives the fixed text.
 
 enum TmError {
     TM_ERR_NONE = 0;

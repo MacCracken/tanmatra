@@ -28,6 +28,10 @@ include "src/nucleus.cyr"
 include "src/shell_model.cyr"
 include "src/decay_data.cyr"
 include "src/decay.cyr"
+include "src/atomic_data.cyr"
+include "src/atomic_config.cyr"
+include "src/atomic_hydrogenic.cyr"
+include "src/atomic_qed.cyr"
 include "src/timekeeping_data.cyr"
 include "src/timekeeping.cyr"
 
@@ -210,6 +214,10 @@ fn _par_enum(k): i64 {
     if (_par_eq(p, l, "FundamentalForce.Electromagnetic") == 1) { return TM_FUNDAMENTAL_FORCE_ELECTROMAGNETIC; }
     if (_par_eq(p, l, "FundamentalForce.Weak") == 1) { return TM_FUNDAMENTAL_FORCE_WEAK; }
     if (_par_eq(p, l, "FundamentalForce.Gravity") == 1) { return TM_FUNDAMENTAL_FORCE_GRAVITY; }
+    if (_par_eq(p, l, "OrbitalType.S") == 1) { return TM_ORBITAL_TYPE_S; }
+    if (_par_eq(p, l, "OrbitalType.P") == 1) { return TM_ORBITAL_TYPE_P; }
+    if (_par_eq(p, l, "OrbitalType.D") == 1) { return TM_ORBITAL_TYPE_D; }
+    if (_par_eq(p, l, "OrbitalType.F") == 1) { return TM_ORBITAL_TYPE_F; }
     return 0 - 1;
 }
 
@@ -812,6 +820,293 @@ fn _par_timekeeping(fp, fl): i64 {
 }
 
 # Routes a row to its module's dispatcher. 0 (pending) for a module with none yet.
+# A TmOrbitalType value's golden name.
+#must_use
+fn _par_orbital_name(o): i64 {
+    if (o == TM_ORBITAL_TYPE_S) { return "OrbitalType.S"; }
+    if (o == TM_ORBITAL_TYPE_P) { return "OrbitalType.P"; }
+    if (o == TM_ORBITAL_TYPE_D) { return "OrbitalType.D"; }
+    if (o == TM_ORBITAL_TYPE_F) { return "OrbitalType.F"; }
+    return "OrbitalType.?";
+}
+
+# A TmTransitionType value's golden name.
+#must_use
+fn _par_transition_name(t): i64 {
+    if (t == TM_TRANSITION_TYPE_ELECTRIC_DIPOLE) { return "TransitionType.ElectricDipole"; }
+    if (t == TM_TRANSITION_TYPE_FORBIDDEN) { return "TransitionType.Forbidden"; }
+    return "TransitionType.?";
+}
+
+# A TmElectronAffinity kind's golden name.
+#must_use
+fn _par_affinity_name(k): i64 {
+    if (k == TM_ELECTRON_AFFINITY_BOUND) { return "ElectronAffinity.Bound"; }
+    if (k == TM_ELECTRON_AFFINITY_UNBOUND) { return "ElectronAffinity.Unbound"; }
+    if (k == TM_ELECTRON_AFFINITY_UNKNOWN) { return "ElectronAffinity.Unknown"; }
+    return "ElectronAffinity.?";
+}
+
+# Appends text as a golden `s:` token: percent-encoded as scripts/oracle/src/tsv.rs does
+# (every byte outside 0x21..0x7e, and `%`, as %XX), since the harness compares the raw body.
+fn _par_got_text(p, len) {
+    var out = alloc(len * 3 + 8);
+    var n = 0;
+    var k = 0;
+    while (k < len) {
+        var c = load8(p + k);
+        if (c >= 33 && c <= 126 && c != 37) {
+            store8(out + n, c);
+            n = n + 1;
+        } else {
+            var hi = (c >> 4) & 15;
+            var lo = c & 15;
+            store8(out + n, 37);
+            if (hi < 10) { store8(out + n + 1, 48 + hi); } else { store8(out + n + 1, 55 + hi); }
+            if (lo < 10) { store8(out + n + 2, 48 + lo); } else { store8(out + n + 2, 55 + lo); }
+            n = n + 3;
+        }
+        k = k + 1;
+    }
+    _par_got_s(out, n);
+}
+
+# Appends a configuration of `n` entries: `v:n`, then `i:n e:OrbitalType.X i:electrons` each.
+fn _par_got_config(cfg: *TmOrbitalFilling, n) {
+    _par_got_seq(n);
+    var k = 0;
+    while (k < n) {
+        var e: *TmOrbitalFilling = cfg + k;
+        _par_got_i(e.n);
+        _par_got_e(_par_orbital_name(e.orbital));
+        _par_got_i(e.electrons);
+        k = k + 1;
+    }
+}
+
+# Reads the configuration input at token k (`v:len`, then triples) into cfg; returns len.
+fn _par_in_config(k, cfg: *TmOrbitalFilling): i64 {
+    var len = _par_in(k);
+    var j = 0;
+    while (j < len) {
+        var at = k + 1 + j * 3;
+        var e: *TmOrbitalFilling = cfg + j;
+        e.n = _par_in(at);
+        e.orbital = _par_enum(at + 1);
+        e.electrons = _par_in(at + 2);
+        j = j + 1;
+    }
+    return len;
+}
+
+# Appends a series result: `v:count`, then `i:n f:λ` per line; or the Err.
+fn _par_got_series(t, v, ns, nm) {
+    if (is_ok(t) != 1) { _par_got_err(v); return 0; }
+    _par_got_seq(v);
+    var k = 0;
+    while (k < v) {
+        _par_got_i(load64(ns + k * 8));
+        _par_got_f(load64(nm + k * 8));
+        k = k + 1;
+    }
+    return 0;
+}
+
+# `atomic` rows: src/atomic_config.cyr, src/atomic_hydrogenic.cyr and src/atomic_qed.cyr.
+fn _par_atomic(fp, fl): i64 {
+    if (_par_eq(fp, fl, "OrbitalType::l") == 1) { _par_got_i(orbital_type_l(_par_enum(0))); return 1; }
+    if (_par_eq(fp, fl, "OrbitalType::max_electrons") == 1) {
+        _par_got_i(orbital_type_max_electrons(_par_enum(0)));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "OrbitalType::symbol") == 1) {
+        var ch = alloc(8);
+        store8(ch, orbital_type_symbol(_par_enum(0)));
+        _par_got_text(ch, 1);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "format_configuration") == 1) {
+        var cfg = alloc(32 * 24);
+        var len = _par_in_config(0, cfg);
+        var s = format_configuration(cfg, len);
+        _par_got_text(str_data(s), str_len(s));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "format_configuration_short") == 1) {
+        var cfg2 = alloc(32 * 24);
+        var len2 = _par_in_config(0, cfg2);
+        var s2 = format_configuration_short(cfg2, len2, _par_in(1 + len2 * 3));
+        _par_got_text(str_data(s2), str_len(s2));
+        return 1;
+    }
+    var a = _par_in(0);
+    var b = _par_in(1);
+    var c = _par_in(2);
+    var d = _par_in(3);
+    var e = _par_in(4);
+    if (_par_eq(fp, fl, "QuantumNumbers::new") == 1) {
+        var q: TmQuantumNumbers;
+        var qt, qv = TmQuantumNumbers_new(a, b, c, d, &q);
+        if (is_ok(qt) == 1) {
+            _par_got_i(q.n);
+            _par_got_i(q.l);
+            _par_got_i(q.ml);
+            _par_got_i(q.ms);
+        } else {
+            _par_got_err(qv);
+        }
+        return 1;
+    }
+    if (_par_eq(fp, fl, "electron_configuration") == 1) {
+        var cfg3 = alloc(32 * 24);
+        var ct, cv = electron_configuration(a, cfg3, 32);
+        if (is_ok(ct) == 1) { _par_got_config(cfg3, cv); } else { _par_got_err(cv); }
+        return 1;
+    }
+    if (_par_eq(fp, fl, "ionization_energy_ev") == 1) {
+        var t, v = ionization_energy_ev(a);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "electron_affinity") == 1) {
+        var et, ev = electron_affinity(a);
+        if (is_ok(et) != 1) { _par_got_err(ev); return 1; }
+        _par_got_e(_par_affinity_name(ev));
+        if (ev == TM_ELECTRON_AFFINITY_BOUND) {
+            var vt, vv = electron_affinity_ev(a);
+            _par_got_f(vv);
+        }
+        return 1;
+    }
+    if (_par_eq(fp, fl, "electron_affinity_ev") == 1) {
+        var t, v = electron_affinity_ev(a);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "spectral_line_nm") == 1) {
+        var t, v = spectral_line_nm(a, b, c);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "reduced_mass_factor") == 1) {
+        var t, v = reduced_mass_factor(a, b);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "spectral_line_vacuum_nm") == 1) {
+        var t, v = spectral_line_vacuum_nm(a, b, c, d);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "hydrogen_level_energy_ev") == 1) {
+        var t, v = hydrogen_level_energy_ev(a, b, c);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "spectral_line_fine_nm") == 1) {
+        var t, v = spectral_line_fine_nm(a, b, c, d, e);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    var ns = alloc(512);
+    var nm = alloc(512);
+    if (_par_eq(fp, fl, "lyman_series") == 1) {
+        var t, v = lyman_series(a, b, ns, nm, 64);
+        _par_got_series(t, v, ns, nm);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "balmer_series") == 1) {
+        var t, v = balmer_series(a, b, ns, nm, 64);
+        _par_got_series(t, v, ns, nm);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "paschen_series") == 1) {
+        var t, v = paschen_series(a, b, ns, nm, 64);
+        _par_got_series(t, v, ns, nm);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "brackett_series") == 1) {
+        var t, v = brackett_series(a, b, ns, nm, 64);
+        _par_got_series(t, v, ns, nm);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "pfund_series") == 1) {
+        var t, v = pfund_series(a, b, ns, nm, 64);
+        _par_got_series(t, v, ns, nm);
+        return 1;
+    }
+    var bf: f64 = b;
+    var cf: f64 = c;
+    var df: f64 = d;
+    if (_par_eq(fp, fl, "lande_g_factor") == 1) { _par_got_f(lande_g_factor(a, b)); return 1; }
+    if (_par_eq(fp, fl, "zeeman_splitting_ev") == 1) { _par_got_f(zeeman_splitting_ev(a, b, c, df)); return 1; }
+    if (_par_eq(fp, fl, "stark_shift_hydrogen_ev") == 1) { _par_got_f(stark_shift_hydrogen_ev(a, b, cf)); return 1; }
+    if (_par_eq(fp, fl, "anomalous_zeeman_splitting_ev") == 1) {
+        var af: f64 = a;
+        _par_got_f(anomalous_zeeman_splitting_ev(af, b, c));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "lamb_shift_nlj_ev") == 1) {
+        var t, v = lamb_shift_nlj_ev(a, b, c, d);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "lamb_shift_ev") == 1) { _par_got_f(lamb_shift_ev(a, b, c)); return 1; }
+    if (_par_eq(fp, fl, "vacuum_polarization_ev") == 1) { _par_got_f(vacuum_polarization_ev(a, b, c)); return 1; }
+    if (_par_eq(fp, fl, "dirac_energy_mev") == 1) {
+        var t, v = dirac_energy_mev(a, b, c);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "dirac_binding_energy_ev") == 1) {
+        var t, v = dirac_binding_energy_ev(a, b, c);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "relativistic_correction_ev") == 1) {
+        var t, v = relativistic_correction_ev(a, b, c);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "hyperfine_splitting_ev") == 1) { _par_got_f(hyperfine_splitting_ev(a, b, cf)); return 1; }
+    if (_par_eq(fp, fl, "hyperfine_splitting_spin_ev") == 1) {
+        _par_got_f(hyperfine_splitting_spin_ev(a, b, cf, df));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "electron_g_factor") == 1) { _par_got_f(electron_g_factor()); return 1; }
+    if (_par_eq(fp, fl, "bound_electron_g_factor") == 1) { _par_got_f(bound_electron_g_factor(a)); return 1; }
+    if (_par_eq(fp, fl, "breit_interaction_ev") == 1) { _par_got_f(breit_interaction_ev(a)); return 1; }
+    if (_par_eq(fp, fl, "radial_wavefunction") == 1) {
+        var t, v = radial_wavefunction(a, b, c, df);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "radial_probability_density") == 1) {
+        var t, v = radial_probability_density(a, b, c, df);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "check_selection_rules") == 1) {
+        _par_got_e(_par_transition_name(check_selection_rules(a, b)));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "check_selection_rules_full") == 1) {
+        _par_got_e(_par_transition_name(check_selection_rules_full(a, b, c, d)));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "einstein_a_coefficient") == 1) {
+        var t, v = einstein_a_coefficient(a, b, c, d, e);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "einstein_b_coefficient") == 1) {
+        var t, v = einstein_b_coefficient(a, b, c, d, e);
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    return 0;
+}
+
 fn _par_dispatch(mp, ml, fp, fl): i64 {
     _par_got_n = 0;
     if (_par_eq(mp, ml, "constants") == 1) { return _par_constants(fp, fl); }
@@ -821,6 +1116,7 @@ fn _par_dispatch(mp, ml, fp, fl): i64 {
     if (_par_eq(mp, ml, "nucleus") == 1) { return _par_nucleus(fp, fl); }
     if (_par_eq(mp, ml, "decay") == 1) { return _par_decay(fp, fl); }
     if (_par_eq(mp, ml, "timekeeping") == 1) { return _par_timekeeping(fp, fl); }
+    if (_par_eq(mp, ml, "atomic") == 1) { return _par_atomic(fp, fl); }
     return 0;
 }
 
@@ -847,6 +1143,13 @@ fn _par_c_bound(fp, fl): i64 {
     if (_par_eq(fp, fl, "remaining_fraction") == 1) { return 4; }
     # M5: S = 2 (sin nudged ±1 ulp on all 21 golden rows), 1 call: K = 2·2·1 + 2.
     if (_par_eq(fp, fl, "sagnac_correction_ns") == 1) { return 6; }
+    # M3: ln nudged ±1 ulp on every s-state golden row gives S = 4, 1 call: K = 2·4·1 + 2. The
+    # l > 0 rows have no ln. lamb_shift_ev's s states are lamb_shift_nlj_ev's value.
+    if (_par_eq(fp, fl, "lamb_shift_nlj_ev") == 1) { return 10; }
+    if (_par_eq(fp, fl, "lamb_shift_ev") == 1) { return 10; }
+    # M3: exp nudged ±1 ulp on every golden row: R = (N·P)·e gives S = 2, R²r² gives S = 8.
+    if (_par_eq(fp, fl, "radial_wavefunction") == 1) { return 6; }
+    if (_par_eq(fp, fl, "radial_probability_density") == 1) { return 18; }
     return 0 - 1;
 }
 
@@ -864,7 +1167,7 @@ fn _par_accepted(fp, fl, ip, il): i64 {
 # ── per-function statistics ─────────────────────────────────────────────────────────
 # One slot per distinct fn name in the current module: name, class, row counts and an ulp
 # histogram over the float outputs (0, 1, 2, 3–16, >16, NaN/inf mismatch).
-var _PAR_FN_MAX = 96;
+var _PAR_FN_MAX = 192;
 var _par_fn_p = 0;
 var _par_fn_l = 0;
 var _par_fn_cls = 0;

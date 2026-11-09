@@ -16,6 +16,10 @@ include "src/nucleus.cyr"
 include "src/shell_model.cyr"
 include "src/decay_data.cyr"
 include "src/decay.cyr"
+include "src/atomic_data.cyr"
+include "src/atomic_config.cyr"
+include "src/atomic_hydrogenic.cyr"
+include "src/atomic_qed.cyr"
 include "src/timekeeping_data.cyr"
 include "src/timekeeping.cyr"
 
@@ -216,6 +220,95 @@ fn bench_known_isotopes_all() {
     }
 }
 
+# atomic/spectral_line_1000: every line n1 < n2 ≤ 10 for Z = 1..10 (the Rust bench's body).
+fn bench_spectral_line_1000() {
+    var z = 1;
+    while (z <= 10) {
+        var n1 = 1;
+        while (n1 <= 10) {
+            var n2 = n1 + 1;
+            while (n2 <= 10) {
+                var t, v = spectral_line_nm(z, n1, n2);
+                _bench_sink = v;
+                n2 = n2 + 1;
+            }
+            n1 = n1 + 1;
+        }
+        z = z + 1;
+    }
+}
+
+var _bench_cfg: TmOrbitalFilling[20];
+
+# atomic/electron_config_36: the configurations of Z = 1..36. Rust returns a new Vec each;
+# Cyrius fills a caller array.
+fn bench_electron_config_36() {
+    var z = 1;
+    while (z <= 36) {
+        var t, v = electron_configuration(z, &_bench_cfg, 20);
+        _bench_sink = v;
+        z = z + 1;
+    }
+}
+
+# atomic/ionization_energy_118: every first ionization energy.
+fn bench_ionization_energy_118() {
+    var z = 1;
+    while (z <= 118) {
+        var t, v = ionization_energy_ev(z);
+        _bench_sink = v;
+        z = z + 1;
+    }
+}
+
+# atomic/radial_wavefunction_100: R_32(r) at r = 0.1·i a₀, i = 0..99.
+fn bench_radial_wavefunction_100() {
+    var i = 0;
+    while (i < 100) {
+        var r: f64 = f64_from(i) * 0.1;
+        var t, v = radial_wavefunction(1, 3, 2, r);
+        _bench_sink = v;
+        i = i + 1;
+    }
+}
+
+# atomic/einstein_a_to_n2_upto_n10: A for np → 2s and nd → 2p, n = 3..10.
+fn bench_einstein_a_n10() {
+    var n = 3;
+    while (n <= 10) {
+        var t1, v1 = einstein_a_coefficient(1, n, 1, 2, 0);
+        _bench_sink = v1;
+        var t2, v2 = einstein_a_coefficient(1, n, 2, 2, 1);
+        _bench_sink = v2;
+        n = n + 1;
+    }
+}
+
+# atomic/radial_wavefunction_n10_100: R_{10,3}(r) at r = 0.5·i a₀, i = 0..99.
+fn bench_radial_wavefunction_n10_100() {
+    var i = 0;
+    while (i < 100) {
+        var r: f64 = f64_from(i) * 0.5;
+        var t, v = radial_wavefunction(1, 10, 3, r);
+        _bench_sink = v;
+        i = i + 1;
+    }
+}
+
+# atomic/lamb_shift_nlj_all_n4: the j = l + 1/2 Lamb shift of every (n, l) with n ≤ 4.
+fn bench_lamb_shift_nlj_all_n4() {
+    var n = 1;
+    while (n <= 4) {
+        var l = 0;
+        while (l < n) {
+            var t, v = lamb_shift_nlj_ev(1, n, l, 2 * l + 1);
+            _bench_sink = v;
+            l = l + 1;
+        }
+        n = n + 1;
+    }
+}
+
 # timekeeping/atomic_instant_add_seconds_1000: 1000 chained add_seconds(1.000000001) from
 # (2.1e9 s, 123 456 789 ns), the Rust bench's body.
 fn bench_atomic_instant_add_seconds_1000() {
@@ -258,6 +351,13 @@ fn main(): i64 {
     run("decay/bateman_chain_3", &bench_bateman_chain_3, 200, 20);
     run("decay/bateman_u238_series_15", &bench_bateman_u238_series_15, 5, 20);
     run("decay/known_isotopes_all", &bench_known_isotopes_all, 200, 20);
+    run("atomic/spectral_line_1000", &bench_spectral_line_1000, 50, 20);
+    run("atomic/electron_config_36", &bench_electron_config_36, 200, 20);
+    run("atomic/ionization_energy_118", &bench_ionization_energy_118, 2000, 20);
+    run("atomic/radial_wavefunction_100", &bench_radial_wavefunction_100, 100, 20);
+    run("atomic/einstein_a_to_n2_upto_n10", &bench_einstein_a_n10, 20, 20);
+    run("atomic/radial_wavefunction_n10_100", &bench_radial_wavefunction_n10_100, 50, 20);
+    run("atomic/lamb_shift_nlj_all_n4", &bench_lamb_shift_nlj_all_n4, 1000, 20);
     run("timekeeping/atomic_instant_add_seconds_1000", &bench_atomic_instant_add_seconds_1000, 50, 20);
     return 0;
 }

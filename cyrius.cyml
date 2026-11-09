@@ -46,6 +46,10 @@ modules = [
     "src/shell_model.cyr",
     "src/decay_data.cyr",
     "src/decay.cyr",
+    "src/atomic_data.cyr",
+    "src/atomic_config.cyr",
+    "src/atomic_hydrogenic.cyr",
+    "src/atomic_qed.cyr",
     "src/timekeeping_data.cyr",
     "src/timekeeping.cyr",
 ]

@@ -1,0 +1,445 @@
+# atomic_hydrogenic.cyr — hydrogen-like atoms: Rydberg lines with and without the reduced
+# mass, first-order fine structure, the named series, Landé g, the Zeeman and Stark shifts,
+# radial wavefunctions, E1 selection rules and the Einstein coefficients (port of the
+# hydrogenic part of rust-old/src/atomic.rs).
+#
+# Every formula keeps Rust's evaluation order, parenthesized, so the golden rows of the
+# arithmetic functions are bit-identical (class B). The radial functions use exp (class C),
+# and the Einstein coefficients the exact radial dipole integral, a double sum of pow terms
+# (class D). Integer arguments follow atomic_config.cyr: outside Rust's u32 / i32 a fallible
+# function returns its Err and an infallible one NaN. Where Rust's u32 arithmetic would
+# overflow (2n − 1 for n ≥ 2^31), the port computes exactly in i64.
+
+# ── spectral lines ──────────────────────────────────────────────────────────────────
+
+# Vacuum wavelength, nm, of the hydrogen-like line n1 ↔ n2 for an infinitely heavy nucleus:
+# 1/λ = R∞ Z² |1/n1² − 1/n2²|. Hα is 656.112 nm here and 656.470 nm with the proton's mass
+# (spectral_line_vacuum_nm). Err(TM_ERR_INVALID_ATOMIC_NUMBER) for Z = 0;
+# Err(TM_ERR_INVALID_QUANTUM_NUMBERS) for n1 or n2 = 0, or n1 = n2. Mirrors `spectral_line_nm`.
+#must_use
+fn spectral_line_nm(z, n1, n2): Result {
+    if (z == 0 || _tm_u32_ok(z) != 1) { return Err(TM_ERR_INVALID_ATOMIC_NUMBER); }
+    if (n1 == 0 || n2 == 0 || _tm_u32_ok(n1) != 1 || _tm_u32_ok(n2) != 1) {
+        return Err(TM_ERR_INVALID_QUANTUM_NUMBERS);
+    }
+    if (n1 == n2) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    var lower = n1;
+    var upper = n2;
+    if (n1 > n2) { lower = n2; upper = n1; }
+    var zf: f64 = f64_from(z);
+    var lo: f64 = f64_from(lower);
+    var up: f64 = f64_from(upper);
+    var inv: f64 = ((TM_RYDBERG * zf) * zf) * ((1.0 / (lo * lo)) - (1.0 / (up * up)));
+    var nm: f64 = 1000000000.0 / inv;
+    return Ok(nm);
+}
+
+# The reduced-mass factor μ/m_e = 1/(1 + m_e/M) of a hydrogen-like ion (Z, A). M is the
+# AME2020 atomic mass less Z electron masses when tabulated, else the semi-empirical nuclear
+# mass; the proton mass for ¹H. Err as nucleus_new for an invalid (Z, A). Mirrors
+# `reduced_mass_factor`.
+#must_use
+fn reduced_mass_factor(z, a): Result {
+    var t, nuc = nucleus_new(z, a);
+    if (is_err_result(t) == 1) { return Err(nuc); }
+    var m: f64 = TM_PROTON_MASS_MEV;
+    if (z != 1 || a != 1) {
+        var ot, ov = nucleus_experimental_atomic_mass_amu(nuc);
+        if (is_some(ot) == 1) {
+            var amu: f64 = ov;
+            m = (amu * TM_AMU_MEV) - (f64_from(z) * TM_ELECTRON_MASS_MEV);
+        } else {
+            m = nucleus_nuclear_mass(nuc);
+        }
+    }
+    var r: f64 = 1.0 / (1.0 + (TM_ELECTRON_MASS_MEV / m));
+    return Ok(r);
+}
+
+# Vacuum wavelength, nm, with the nuclear reduced-mass correction: λ∞ / (μ/m_e). Hydrogen Hα:
+# 656.470 nm. Errors as spectral_line_nm, then reduced_mass_factor. Mirrors
+# `spectral_line_vacuum_nm`.
+#must_use
+fn spectral_line_vacuum_nm(z, a, n1, n2): Result {
+    var t1, v1 = spectral_line_nm(z, n1, n2);
+    if (is_err_result(t1) == 1) { return Err(v1); }
+    var t2, v2 = reduced_mass_factor(z, a);
+    if (is_err_result(t2) == 1) { return Err(v2); }
+    var nm: f64 = v1;
+    var mu: f64 = v2;
+    var r: f64 = nm / mu;
+    return Ok(r);
+}
+
+# Energy, eV (negative: bound), of the hydrogen-like level (n, j) with the first-order fine
+# structure, infinite nuclear mass:
+# E = −R∞hc Z²/n² × [1 + (αZ)²/n² × (n/(j + 1/2) − 3/4)], j passed as 2j.
+# Err(TM_ERR_INVALID_QUANTUM_NUMBERS) for n = 0, or 2j not odd in 1..=2n − 1. Mirrors
+# `hydrogen_level_energy_ev`.
+#must_use
+fn hydrogen_level_energy_ev(z, n, two_j): Result {
+    if (_tm_u32_ok(z) != 1) { return Err(TM_ERR_INVALID_ATOMIC_NUMBER); }
+    if (n == 0 || _tm_u32_ok(n) != 1 || _tm_u32_ok(two_j) != 1) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    if ((two_j & 1) == 0 || two_j > 2 * n - 1) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    var zf: f64 = f64_from(z);
+    var nf: f64 = f64_from(n);
+    var jph: f64 = (f64_from(two_j) + 1.0) / 2.0;
+    var ry: f64 = TM_RYDBERG_EV;
+    var e0: f64 = ((-ry * zf) * zf) / (nf * nf);
+    var az: f64 = TM_FINE_STRUCTURE * zf;
+    var corr: f64 = 1.0 + (((az * az) / (nf * nf)) * ((nf / jph) - 0.75));
+    var e: f64 = e0 * corr;
+    return Ok(e);
+}
+
+# Wavelength, nm, of the line between two first-order fine-structure levels (n1, 2j1) and
+# (n2, 2j2): hc / |E2 − E1|. Errors as hydrogen_level_energy_ev, and
+# Err(TM_ERR_INVALID_QUANTUM_NUMBERS) when |ΔE| < 1e-30 eV. Mirrors `spectral_line_fine_nm`.
+#must_use
+fn spectral_line_fine_nm(z, n1, two_j1, n2, two_j2): Result {
+    var t1, v1 = hydrogen_level_energy_ev(z, n1, two_j1);
+    if (is_err_result(t1) == 1) { return Err(v1); }
+    var t2, v2 = hydrogen_level_energy_ev(z, n2, two_j2);
+    if (is_err_result(t2) == 1) { return Err(v2); }
+    var e1: f64 = v1;
+    var e2: f64 = v2;
+    var d: f64 = f64_abs(e2 - e1);
+    if (d < 0.000000000000000000000000000001) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    var nm: f64 = TM_HC_EV_NM / d;
+    return Ok(nm);
+}
+
+# ── named series ────────────────────────────────────────────────────────────────────
+
+# The series n → `lower` for n = lower + 1 ..= n_max: writes up to `cap` (n, λ nm) pairs to
+# n_out[] (i64) and nm_out[] (f64) and returns Ok(count), count = n_max − lower.
+# Err(TM_ERR_INVALID_QUANTUM_NUMBERS) when n_max ≤ lower, then Err(TM_ERR_INVALID_ATOMIC_NUMBER)
+# for Z = 0, as Rust's first spectral_line_nm call.
+#must_use
+fn _tm_series(z, lower, n_max, n_out, nm_out, cap): Result {
+    if (n_max <= lower || _tm_u32_ok(n_max) != 1) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    if (z == 0 || _tm_u32_ok(z) != 1) { return Err(TM_ERR_INVALID_ATOMIC_NUMBER); }
+    var count = n_max - lower;
+    var k = 0;
+    while (k < count && k < cap) {
+        var n = lower + 1 + k;
+        var t, v = spectral_line_nm(z, lower, n);
+        store64(n_out + k * 8, n);
+        store64(nm_out + k * 8, v);
+        k = k + 1;
+    }
+    return Ok(count);
+}
+
+# Lyman series n → 1 (ultraviolet, 91.2–121.6 nm) for n = 2 ..= n_max, as _tm_series: Ok(count)
+# with up to `cap` pairs in n_out[] / nm_out[]. Err(TM_ERR_INVALID_QUANTUM_NUMBERS) for
+# n_max < 2. Mirrors the Vec `lyman_series` returns.
+#must_use
+fn lyman_series(z, n_max, n_out, nm_out, cap): Result {
+    var t, v = _tm_series(z, 1, n_max, n_out, nm_out, cap);
+    if (is_err_result(t) == 1) { return Err(v); }
+    return Ok(v);
+}
+
+# Balmer series n → 2 (visible and near-UV, 364.6–656.3 nm) for n = 3 ..= n_max. As
+# lyman_series; Err for n_max < 3. Mirrors `balmer_series`.
+#must_use
+fn balmer_series(z, n_max, n_out, nm_out, cap): Result {
+    var t, v = _tm_series(z, 2, n_max, n_out, nm_out, cap);
+    if (is_err_result(t) == 1) { return Err(v); }
+    return Ok(v);
+}
+
+# Paschen series n → 3 (near-infrared, 820.4–1875 nm) for n = 4 ..= n_max. As lyman_series;
+# Err for n_max < 4. Mirrors `paschen_series`.
+#must_use
+fn paschen_series(z, n_max, n_out, nm_out, cap): Result {
+    var t, v = _tm_series(z, 3, n_max, n_out, nm_out, cap);
+    if (is_err_result(t) == 1) { return Err(v); }
+    return Ok(v);
+}
+
+# Brackett series n → 4 (infrared, 1458–4051 nm) for n = 5 ..= n_max. As lyman_series; Err for
+# n_max < 5. Mirrors `brackett_series`.
+#must_use
+fn brackett_series(z, n_max, n_out, nm_out, cap): Result {
+    var t, v = _tm_series(z, 4, n_max, n_out, nm_out, cap);
+    if (is_err_result(t) == 1) { return Err(v); }
+    return Ok(v);
+}
+
+# Pfund series n → 5 (far-infrared, 2279–7460 nm) for n = 6 ..= n_max. As lyman_series; Err
+# for n_max < 6. Mirrors `pfund_series`.
+#must_use
+fn pfund_series(z, n_max, n_out, nm_out, cap): Result {
+    var t, v = _tm_series(z, 5, n_max, n_out, nm_out, cap);
+    if (is_err_result(t) == 1) { return Err(v); }
+    return Ok(v);
+}
+
+# ── Zeeman and Stark effects ────────────────────────────────────────────────────────
+
+# The Landé g-factor of a single-electron level, g_J = 1 + [J(J+1) + S(S+1) − L(L+1)]/[2J(J+1)]
+# with S = 1/2, L = l and J = j (passed as 2j). 0.0 when j is not l ± 1/2. Mirrors
+# `lande_g_factor`.
+#must_use
+fn lande_g_factor(l, two_j): f64 {
+    if (_tm_u32_ok(l) != 1 || _tm_u32_ok(two_j) != 1) { return _tm_nan(); }
+    if (two_j + 1 != 2 * l + 2 && two_j + 1 != 2 * l) { return 0.0; }
+    var j: f64 = f64_from(two_j) / 2.0;
+    var lf: f64 = f64_from(l);
+    var s: f64 = 0.5;
+    var jj: f64 = j * (j + 1.0);
+    if (jj < 0.000000000000000000000000000001) { return 0.0; }
+    var g: f64 = 1.0 + (((jj + (s * (s + 1.0))) - (lf * (lf + 1.0))) / (2.0 * jj));
+    return g;
+}
+
+# The weak-field (anomalous) Zeeman shift, eV: ΔE = m_j g_J μ_B B, with m_j passed as 2m_j
+# (not validated, as in Rust). Mirrors `zeeman_splitting_ev`.
+#must_use
+fn zeeman_splitting_ev(l, two_j, two_mj, b_tesla: f64): f64 {
+    if (_tm_i32_ok(two_mj) != 1) { return _tm_nan(); }
+    var mj: f64 = f64_from(two_mj) / 2.0;
+    var g: f64 = lande_g_factor(l, two_j);
+    var e: f64 = ((mj * g) * TM_BOHR_MAGNETON_EV_T) * b_tesla;
+    return e;
+}
+
+# The linear Stark shift of hydrogen, eV: ΔE = (3/2) n k e a₀ F, k = n₁ − n₂ the parabolic
+# index (|k| ≤ n − 1) and F in V/m. 0.0 for n = 0 or |k| > n − 1. Mirrors
+# `stark_shift_hydrogen_ev`.
+#must_use
+fn stark_shift_hydrogen_ev(n, parabolic_index, e_field_v_per_m: f64): f64 {
+    if (_tm_u32_ok(n) != 1 || _tm_i32_ok(parabolic_index) != 1) { return _tm_nan(); }
+    var ak = parabolic_index;
+    if (ak < 0) { ak = 0 - ak; }
+    if (n == 0 || ak > n - 1) { return 0.0; }
+    var e: f64 = (((1.5 * f64_from(n)) * f64_from(parabolic_index)) * TM_BOHR_RADIUS) * e_field_v_per_m;
+    return e;
+}
+
+# ── radial wavefunctions ────────────────────────────────────────────────────────────
+
+# Writes the n coefficients c_i (index = power of ρ) of P(ρ) = ρ^l L_{n−l−1}^{(2l+1)}(ρ) to
+# coeffs[] and returns the normalization N of R_nl = N P(ρ) e^{−ρ/2}, ρ = 2Zr/(n a₀), in
+# a₀^{−3/2}: Rust's hydrogen_radial_polynomial, operation for operation. Needs 1 ≤ n ≤ 60,
+# l < n.
+#must_use
+fn _tm_radial_poly(z, n, l, coeffs): f64 {
+    var k = n - l - 1;
+    var alpha = 2 * l + 1;
+    var i = 0;
+    while (i < n) { store64(coeffs + i * 8, 0.0); i = i + 1; }
+    # L_k^α(x) = Σ_i (−1)^i C(k+α, k−i) x^i / i!
+    i = 0;
+    while (i <= k) {
+        var binom: f64 = 1.0;
+        var top = k + alpha;
+        var choose = k - i;
+        var t = 0;
+        while (t < choose) {
+            binom = binom * (f64_from(top - t) / f64_from(t + 1));
+            t = t + 1;
+        }
+        var fact: f64 = 1.0;
+        t = 1;
+        while (t <= i) {
+            fact = fact * f64_from(t);
+            t = t + 1;
+        }
+        var sign: f64 = 1.0;
+        if ((i & 1) == 1) { sign = -1.0; }
+        var c: f64 = (sign * binom) / fact;
+        store64(coeffs + (l + i) * 8, c);
+        i = i + 1;
+    }
+    # N = sqrt((2Z/n)³ (n−l−1)! / (2n (n+l)!)), the factorial ratio as 1/Π_{i=n−l}^{n+l} i.
+    var zf: f64 = f64_from(z);
+    var nf: f64 = f64_from(n);
+    var ratio: f64 = 1.0;
+    var u = n - l;
+    while (u <= n + l) {
+        ratio = ratio / f64_from(u);
+        u = u + 1;
+    }
+    var scale: f64 = (2.0 * zf) / nf;
+    var norm: f64 = f64_sqrt((((scale * scale) * scale) * ratio) / (2.0 * nf));
+    return norm;
+}
+
+# The radial wavefunction R_nl(r) of a hydrogen-like atom, infinite nuclear mass, in a₀^{−3/2}:
+# R_nl = N ρ^l e^{−ρ/2} L_{n−l−1}^{(2l+1)}(ρ), ρ = 2Zr/(n a₀), normalized so ∫ R² r² dr = 1;
+# r in units of a₀. Err(TM_ERR_INVALID_QUANTUM_NUMBERS) unless 1 ≤ n ≤ 60 and l < n, then
+# Err(TM_ERR_INVALID_ATOMIC_NUMBER) for Z = 0. Mirrors `radial_wavefunction`.
+#must_use
+fn radial_wavefunction(z, n, l, r_bohr: f64): Result {
+    if (n < 1 || n > 60) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    if (l < 0 || l >= n) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    if (z == 0 || _tm_u32_ok(z) != 1) { return Err(TM_ERR_INVALID_ATOMIC_NUMBER); }
+    var c[480];
+    var norm: f64 = _tm_radial_poly(z, n, l, &c);
+    var rho: f64 = ((2.0 * f64_from(z)) * r_bohr) / f64_from(n);
+    var poly: f64 = 0.0;
+    var k = n - 1;
+    while (k >= 0) {
+        var ck: f64 = load64(&c + k * 8);
+        poly = (poly * rho) + ck;
+        k = k - 1;
+    }
+    var mrho: f64 = -rho;
+    var e: f64 = f64_exp(mrho / 2.0);
+    var r: f64 = (norm * poly) * e;
+    return Ok(r);
+}
+
+# The radial probability density |R_nl(r)|² r², per unit r (a₀⁻¹). Errors as
+# radial_wavefunction. Mirrors `radial_probability_density`.
+#must_use
+fn radial_probability_density(z, n, l, r_bohr: f64): Result {
+    var t, v = radial_wavefunction(z, n, l, r_bohr);
+    if (is_err_result(t) == 1) { return Err(v); }
+    var rnl: f64 = v;
+    var p: f64 = ((rnl * rnl) * r_bohr) * r_bohr;
+    return Ok(p);
+}
+
+# ⟨n l | r | n2 l2⟩ = ∫ R_nl R_n2l2 r³ dr, exactly, in units of a₀/Z: Rust's
+# radial_dipole_integral. Each term is c1_i c2_j (2/n)^i (2/n2)^j p!/c^{p+1}, p = i + j + 3,
+# c = 1/n + 1/n2. The pow factors are computed once per i and per j, and p!/c^{p+1} as the
+# running product (1/c)(1/c)(2/c)···(p/c): the same calls and the same multiplications as
+# Rust's loops, so the same bits, without recomputing them per term.
+#must_use
+fn _tm_radial_dipole(n, l, n2, l2): f64 {
+    var c1[480];
+    var c2[480];
+    var norm1: f64 = _tm_radial_poly(1, n, l, &c1);
+    var norm2: f64 = _tm_radial_poly(1, n2, l2, &c2);
+    var s1: f64 = 2.0 / f64_from(n);
+    var s2: f64 = 2.0 / f64_from(n2);
+    var decay: f64 = (1.0 / f64_from(n)) + (1.0 / f64_from(n2));
+    var p1[480];
+    var p2[480];
+    var i = 0;
+    while (i < n) {
+        var pa: f64 = ganita_f64_pow(s1, f64_from(i));
+        store64(&p1 + i * 8, pa);
+        i = i + 1;
+    }
+    var j = 0;
+    while (j < n2) {
+        var pb: f64 = ganita_f64_pow(s2, f64_from(j));
+        store64(&p2 + j * 8, pb);
+        j = j + 1;
+    }
+    var integ[976];   # p!/c^{p+1} for p = 0 ..= n + n2 + 1 ≤ 121
+    var run: f64 = 1.0 / decay;
+    store64(&integ, run);
+    var p = 1;
+    while (p <= n + n2 + 1) {
+        run = run * (f64_from(p) / decay);
+        store64(&integ + p * 8, run);
+        p = p + 1;
+    }
+    var total: f64 = 0.0;
+    i = 0;
+    while (i < n) {
+        var a: f64 = load64(&c1 + i * 8);
+        if (a != 0.0) {
+            var ap: f64 = load64(&p1 + i * 8);
+            j = 0;
+            while (j < n2) {
+                var b: f64 = load64(&c2 + j * 8);
+                if (b != 0.0) {
+                    var bp: f64 = load64(&p2 + j * 8);
+                    var integral: f64 = load64(&integ + (i + j + 3) * 8);
+                    total = total + ((((a * b) * ap) * bp) * integral);
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+    var r: f64 = (norm1 * norm2) * total;
+    return r;
+}
+
+# ── selection rules and transition probabilities ────────────────────────────────────
+
+# TM_TRANSITION_TYPE_ELECTRIC_DIPOLE when |l1 − l2| = 1 (E1-allowed for a hydrogen-like atom),
+# else TM_TRANSITION_TYPE_FORBIDDEN. Mirrors `check_selection_rules`.
+#must_use
+fn check_selection_rules(l1, l2): i64 {
+    if (_tm_u32_ok(l1) != 1 || _tm_u32_ok(l2) != 1) { return TM_TRANSITION_TYPE_FORBIDDEN; }
+    var d = l1 - l2;
+    if (d == 1 || d == (0 - 1)) { return TM_TRANSITION_TYPE_ELECTRIC_DIPOLE; }
+    return TM_TRANSITION_TYPE_FORBIDDEN;
+}
+
+# As check_selection_rules, also requiring Δm_l ∈ {−1, 0, 1}. Mirrors
+# `check_selection_rules_full`.
+#must_use
+fn check_selection_rules_full(l1, ml1, l2, ml2): i64 {
+    if (_tm_i32_ok(ml1) != 1 || _tm_i32_ok(ml2) != 1) { return TM_TRANSITION_TYPE_FORBIDDEN; }
+    if (check_selection_rules(l1, l2) != TM_TRANSITION_TYPE_ELECTRIC_DIPOLE) { return TM_TRANSITION_TYPE_FORBIDDEN; }
+    var dm = ml1 - ml2;
+    if (dm >= (0 - 1) && dm <= 1) { return TM_TRANSITION_TYPE_ELECTRIC_DIPOLE; }
+    return TM_TRANSITION_TYPE_FORBIDDEN;
+}
+
+# The Einstein A coefficient, s⁻¹, of the E1 transition (n_u, l_u) → (n_l, l_l) in a
+# hydrogen-like ion, summed over final and averaged over initial substates (infinite nuclear
+# mass, non-relativistic): A = (4/3) α³ ω³ max(l_u, l_l)/(2l_u + 1) |⟨n_l l_l|r|n_u l_u⟩|² in
+# atomic units, with the exact radial integral, so A ∝ Z⁴. H Lyα: 6.2684e8 s⁻¹ (times μ/m_e,
+# 6.2649e8, as NIST ASD). Err(TM_ERR_INVALID_QUANTUM_NUMBERS) for Δl ≠ ±1, n_u ≤ n_l, n_l = 0,
+# l ≥ n on either level or n_u > 60; then Err(TM_ERR_INVALID_ATOMIC_NUMBER) for Z = 0. Mirrors
+# `einstein_a_coefficient`.
+#must_use
+fn einstein_a_coefficient(z, n_upper, l_upper, n_lower, l_lower): Result {
+    if (_tm_u32_ok(z) != 1) { return Err(TM_ERR_INVALID_ATOMIC_NUMBER); }
+    if (_tm_u32_ok(n_upper) != 1 || _tm_u32_ok(n_lower) != 1) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    if (check_selection_rules(l_upper, l_lower) == TM_TRANSITION_TYPE_FORBIDDEN) {
+        return Err(TM_ERR_INVALID_QUANTUM_NUMBERS);
+    }
+    if (n_upper <= n_lower) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+    if (n_lower == 0 || l_upper >= n_upper || l_lower >= n_lower || n_upper > 60) {
+        return Err(TM_ERR_INVALID_QUANTUM_NUMBERS);
+    }
+    if (z == 0) { return Err(TM_ERR_INVALID_ATOMIC_NUMBER); }
+    var zf: f64 = f64_from(z);
+    var nu: f64 = f64_from(n_upper);
+    var nl: f64 = f64_from(n_lower);
+    var omega: f64 = ((zf * zf) * 0.5) * ((1.0 / (nl * nl)) - (1.0 / (nu * nu)));
+    var dip: f64 = _tm_radial_dipole(n_upper, l_upper, n_lower, l_lower);
+    var radial: f64 = dip / zf;
+    var l_max = l_upper;
+    if (l_lower > l_upper) { l_max = l_lower; }
+    var angular: f64 = f64_from(l_max) / f64_from(2 * l_upper + 1);
+    var alpha3: f64 = (TM_FINE_STRUCTURE * TM_FINE_STRUCTURE) * TM_FINE_STRUCTURE;
+    var rate: f64 = ((((((4.0 / 3.0) * alpha3) * omega) * omega) * omega) * angular) * radial;
+    rate = rate * radial;
+    var a: f64 = rate / TM_ATOMIC_UNIT_TIME_S;
+    return Ok(a);
+}
+
+# The Einstein B coefficient for stimulated emission, m³/(J·s²): B₂₁ = A₂₁ c³/(8π h ν³), ν the
+# transition frequency (infinite nuclear mass), for the spectral energy density per unit
+# frequency; absorption follows from g₁B₁₂ = g₂B₂₁. Errors as einstein_a_coefficient. Mirrors
+# `einstein_b_coefficient`.
+#must_use
+fn einstein_b_coefficient(z, n_upper, l_upper, n_lower, l_lower): Result {
+    var t, v = einstein_a_coefficient(z, n_upper, l_upper, n_lower, l_lower);
+    if (is_err_result(t) == 1) { return Err(v); }
+    var a21: f64 = v;
+    var zf: f64 = f64_from(z);
+    var n1: f64 = f64_from(n_lower);
+    var n2: f64 = f64_from(n_upper);
+    var de: f64 = ((TM_RYDBERG_EV * zf) * zf) * ((1.0 / (n1 * n1)) - (1.0 / (n2 * n2)));
+    var freq: f64 = de / TM_H_EV_S;
+    var hj: f64 = TM_H_EV_S * TM_ELEMENTARY_CHARGE;
+    if (freq <= 0.0) { return Ok(0.0); }
+    var f3: f64 = freq * (freq * freq);   # Rust's powi(3), as LLVM expands it
+    var num: f64 = ((a21 * TM_C) * TM_C) * TM_C;
+    var b: f64 = num / (((8.0 * _TM_PI) * hj) * f3);
+    return Ok(b);
+}

@@ -42,7 +42,7 @@ fn opt_f(x: Option<f64>) -> Vec<Tok> {
 }
 
 /// The tabulated nuclides (AME2020, radii, moments), from the oracle's lookups.
-fn tabulated() -> BTreeSet<(u32, u32)> {
+pub fn tabulated() -> BTreeSet<(u32, u32)> {
     let mut set = BTreeSet::new();
     for z in 1..=120 {
         for a in z..=300 {

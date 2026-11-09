@@ -4,6 +4,9 @@
 2. constants.tsv matches the decimal literals in rust-old/src/constants.rs.
 3. Class-B relativity rows recomputed in Python with Rust's operation order are bit-identical.
 4. libm.tsv: sqrt vs math.sqrt (correctly rounded); cbrt of perfect cubes is exact.
+5. atomic.tsv: the class-B Rydberg lines and fine-structure levels recomputed in Python with
+   Rust's operation order are bit-identical; every configuration holds Z electrons, never
+   overfills a subshell, and is the Madelung filling except at the 20 NIST exceptions.
 """
 import math, re, struct, sys
 from pathlib import Path
@@ -123,5 +126,60 @@ for fn, cls, ins, outs in rows("libm"):
                 check(outs[0][1] == math.copysign(k, x), f"cbrt({x!r}) = {outs[0][1]!r}, want {k}")
                 n += 1
 print("libm rows checked:", n)
+
+# 5. atomic
+RY = lits["RYDBERG"]; RY_EV = lits["RYDBERG_EV"]; FS = lits["FINE_STRUCTURE"]
+def line_nm(z, n1, n2):
+    if z == 0: return "E:InvalidAtomicNumber"
+    if n1 == 0 or n2 == 0 or n1 == n2: return "E:InvalidQuantumNumbers"
+    lo, up = min(n1, n2), max(n1, n2)
+    zf, lf, uf = float(z), float(lo), float(up)
+    return 1e9 / (((RY * zf) * zf) * ((1.0 / (lf * lf)) - (1.0 / (uf * uf))))
+def level_ev(z, n, tj):
+    if n == 0 or tj % 2 == 0 or tj > 2 * n - 1: return "E:InvalidQuantumNumbers"
+    zf, nf, jph = float(z), float(n), (float(tj) + 1.0) / 2.0
+    e0 = ((-RY_EV * zf) * zf) / (nf * nf)
+    az = FS * zf
+    return e0 * (1.0 + (((az * az) / (nf * nf)) * ((nf / jph) - 0.75)))
+n = 0
+for fn, cls, ins, outs in rows("atomic"):
+    a = [t[1] for t in ins]
+    impl = {"spectral_line_nm": line_nm, "hydrogen_level_energy_ev": level_ev}.get(fn)
+    if impl is None:
+        continue
+    got = impl(*a)
+    if isinstance(got, str):
+        check(outs[0][0] == "E" and got == "E:" + outs[0][1], f"{fn}{tuple(a)} -> {got}")
+    else:
+        check(outs[0][0] == "f" and same(got, outs[0][2]), f"{fn}{tuple(a)} -> {got!r} vs {outs[0][1]!r}")
+    n += 1
+print("atomic line/level rows recomputed:", n)
+
+MAX = {"S": 2, "P": 6, "D": 10, "F": 14}
+L = {"S": 0, "P": 1, "D": 2, "F": 3}
+# Madelung: by n + l, then n.
+order = sorted(((n_, o) for n_ in range(1, 9) for o in "SPDF" if L[o] < n_), key=lambda x: (x[0] + L[x[1]], x[0]))
+def madelung(z):
+    out, left = [], z
+    for n_, o in order:
+        if left == 0: break
+        k = min(left, MAX[o]); out.append((n_, o, k)); left -= k
+    return out
+NIST = {24, 29, 41, 42, 44, 45, 46, 47, 57, 58, 64, 78, 79, 89, 90, 91, 92, 93, 96, 103}
+n = 0
+for fn, cls, ins, outs in rows("atomic"):
+    if fn != "electron_configuration":
+        continue
+    z = ins[0][1]
+    if not 1 <= z <= 118:
+        check(outs[0][0] == "E", f"electron_configuration({z}) should be an Err")
+        continue
+    k = outs[0][1]
+    cfg = [(outs[1 + 3 * j][1], outs[2 + 3 * j][1].split(".")[1], outs[3 + 3 * j][1]) for j in range(int(k))]
+    check(sum(e for _, _, e in cfg) == z, f"Z={z}: {sum(e for _, _, e in cfg)} electrons")
+    check(all(0 < e <= MAX[o] for _, o, e in cfg), f"Z={z}: a subshell is empty or overfilled")
+    check((cfg == madelung(z)) == (z not in NIST), f"Z={z}: Madelung filling iff not a NIST exception")
+    n += 1
+print("atomic configurations checked:", n)
 print("FAILURES:", fails)
 sys.exit(1 if fails else 0)

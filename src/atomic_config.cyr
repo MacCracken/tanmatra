@@ -1,0 +1,265 @@
+# atomic_config.cyr — orbital types, quantum numbers, electron configurations, ionization
+# energies and electron affinities (port of the configuration half of rust-old/src/atomic.rs).
+#
+# - A configuration is an array of `struct TmOrbitalFilling { n; orbital; electrons; }`, Rust's
+#   OrbitalFilling with its public fields: `var cfg: TmOrbitalFilling[20];`. Reach entry k through
+#   a typed pointer, `var base: *TmOrbitalFilling = &cfg;` then `base + k`, which steps by sizeof
+#   (24 bytes). `&cfg + k` is an untyped address and steps by BYTES; passing `&cfg` to a
+#   `*TmOrbitalFilling` parameter is fine. Every u32 field round-trips, unlike a packed word.
+# - electron_configuration fills a caller array and returns the count. Twenty entries always
+#   suffice: the filling order has 20 subshells.
+# - The tables are the generated atomic_data.cyr. Everything here is integer logic or a table
+#   read, so the golden rows are class A.
+# - Integer arguments are Rust's u32 (or i32). A value outside that type is not one Rust can be
+#   called with: a fallible function returns its Err, an infallible f64 one NaN, and a
+#   TransitionType one TM_TRANSITION_TYPE_FORBIDDEN.
+
+# 1 if x is a u32 value. Branch-free, so #inline replays it at each call.
+#must_use
+#inline
+fn _tm_u32_ok(x): i64 { return (x >= 0) & (x <= 0xFFFFFFFF); }
+
+# 1 if x is an i32 value. Branch-free, so #inline replays it at each call.
+#must_use
+#inline
+fn _tm_i32_ok(x): i64 { return (x >= (0 - 2147483648)) & (x <= 2147483647); }
+
+# ── OrbitalType ─────────────────────────────────────────────────────────────────────
+
+# The angular momentum quantum number l. Mirrors `OrbitalType::l`.
+#must_use
+fn orbital_type_l(o): i64 {
+    if (_tm_in_range(o, TM_ORBITAL_TYPE_COUNT) != 1) { return 0 - 1; }
+    return TM_ORBITAL_TYPE_L[o];
+}
+
+# The subshell capacity 2(2l + 1). Mirrors `OrbitalType::max_electrons`.
+#must_use
+fn orbital_type_max_electrons(o): i64 {
+    if (_tm_in_range(o, TM_ORBITAL_TYPE_COUNT) != 1) { return 0 - 1; }
+    return TM_ORBITAL_TYPE_MAX_ELECTRONS[o];
+}
+
+# The letter symbol as an ASCII code ('s' is 115). Mirrors `OrbitalType::symbol`, which
+# returns a char.
+#must_use
+fn orbital_type_symbol(o): i64 {
+    if (_tm_in_range(o, TM_ORBITAL_TYPE_COUNT) != 1) { return 0 - 1; }
+    return TM_ORBITAL_TYPE_SYMBOL[o];
+}
+
+# ── QuantumNumbers ──────────────────────────────────────────────────────────────────
+
+# A validated set of quantum numbers (n, l, ml, ms), ms stored as +1 or −1 for ±1/2. Mirrors
+# `QuantumNumbers`.
+struct TmQuantumNumbers {
+    n: i64;
+    l: i64;
+    ml: i64;
+    ms: i64;
+}
+
+impl TmQuantumNumbers {
+    # Validates (n, l, ml, ms), writes them to *out and returns Ok(out); or
+    # Err(TM_ERR_INVALID_QUANTUM_NUMBERS) when n < 1, l ≥ n, |ml| > l or ms is not ±1, leaving
+    # *out untouched. A 32-byte struct can't ride a value-form Result, so this mirrors
+    # `QuantumNumbers::new` through an out-pointer.
+    #must_use
+    fn new(n, l, ml, ms, out: *TmQuantumNumbers): Result {
+        if (_tm_u32_ok(n) != 1 || _tm_u32_ok(l) != 1 || _tm_i32_ok(ml) != 1 || _tm_i32_ok(ms) != 1) {
+            return Err(TM_ERR_INVALID_QUANTUM_NUMBERS);
+        }
+        if (n == 0 || l >= n) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+        var aml = ml;
+        if (ml < 0) { aml = 0 - ml; }
+        if (aml > l) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+        if (ms != 1 && ms != (0 - 1)) { return Err(TM_ERR_INVALID_QUANTUM_NUMBERS); }
+        out.n = n;
+        out.l = l;
+        out.ml = ml;
+        out.ms = ms;
+        return Ok(out);
+    }
+}
+
+# ── OrbitalFilling ──────────────────────────────────────────────────────────────────
+
+# A configuration entry: `electrons` in subshell (n, orbital), orbital a TmOrbitalType. Mirrors
+# `OrbitalFilling`.
+struct TmOrbitalFilling {
+    n: i64;
+    orbital: i64;
+    electrons: i64;
+}
+
+# ── electron configurations ─────────────────────────────────────────────────────────
+
+# Rust's set_subshell over the `count` entries at cfg: subshell (n, orbital) gets `electrons`,
+# or is appended when absent and electrons > 0. Returns the new count.
+#must_use
+fn _tm_set_subshell(cfg: *TmOrbitalFilling, count, n, orbital, electrons): i64 {
+    var k = 0;
+    while (k < count) {
+        var e: *TmOrbitalFilling = cfg + k;
+        if (e.n == n && e.orbital == orbital) {
+            e.electrons = electrons;
+            return count;
+        }
+        k = k + 1;
+    }
+    if (electrons > 0) {
+        var f: *TmOrbitalFilling = cfg + count;
+        f.n = n;
+        f.orbital = orbital;
+        f.electrons = electrons;
+        return count + 1;
+    }
+    return count;
+}
+
+# The ground-state configuration of element Z: the Aufbau filling in Madelung order (n + l,
+# then n), with the 20 NIST exceptions (Cr, Cu, Nb, Mo, Ru, Rh, Pd, Ag, La, Ce, Gd, Pt, Au, Ac,
+# Th, Pa, U, Np, Cm, Lr). Writes up to `cap` entries to out[] and returns Ok(count) — 20
+# entries always suffice — or Err(TM_ERR_INVALID_ATOMIC_NUMBER) unless 1 ≤ Z ≤ 118. Mirrors
+# `electron_configuration`.
+#must_use
+fn electron_configuration(z, out: *TmOrbitalFilling, cap): Result {
+    if (z < 1 || z > 118) { return Err(TM_ERR_INVALID_ATOMIC_NUMBER); }
+    var cfg: TmOrbitalFilling[21];   # the 20 subshells, plus the one an exception may append
+    var base: *TmOrbitalFilling = &cfg;
+    var count = 0;
+    var remaining = z;
+    var k = 0;
+    while (k < _TM_FILLING_ORDER_COUNT && remaining > 0) {
+        var orbital = _TM_FILLING_ORDER_ORBITAL[k];
+        var max = TM_ORBITAL_TYPE_MAX_ELECTRONS[orbital];
+        var fill = remaining;
+        if (remaining >= max) { fill = max; }
+        var e: *TmOrbitalFilling = base + count;
+        e.n = _TM_FILLING_ORDER_N[k];
+        e.orbital = orbital;
+        e.electrons = fill;
+        count = count + 1;
+        remaining = remaining - fill;
+        k = k + 1;
+    }
+    var x = 0;
+    while (x < _TM_CONFIG_EXCEPTION_COUNT) {
+        if (_TM_CONFIG_EXCEPTION_Z[x] == z) {
+            var e1 = _TM_CONFIG_EXCEPTION_ELECTRONS1[x];
+            var e2 = _TM_CONFIG_EXCEPTION_ELECTRONS2[x];
+            count = _tm_set_subshell(base, count, _TM_CONFIG_EXCEPTION_N1[x], _TM_CONFIG_EXCEPTION_ORBITAL1[x], e1);
+            count = _tm_set_subshell(base, count, _TM_CONFIG_EXCEPTION_N2[x], _TM_CONFIG_EXCEPTION_ORBITAL2[x], e2);
+        }
+        x = x + 1;
+    }
+    # Drop the subshells an exception emptied (Rust's retain).
+    var n = 0;
+    k = 0;
+    while (k < count) {
+        var src: *TmOrbitalFilling = base + k;
+        if (src.electrons > 0) {
+            if (n < cap) {
+                var dst: *TmOrbitalFilling = out + n;
+                dst.n = src.n;
+                dst.orbital = src.orbital;
+                dst.electrons = src.electrons;
+            }
+            n = n + 1;
+        }
+        k = k + 1;
+    }
+    return Ok(n);
+}
+
+# Appends entries [from, to) of cfg to the builder, as "1s2 2s2 2p6".
+fn _tm_format_entries(sb, cfg: *TmOrbitalFilling, from, to) {
+    var k = from;
+    while (k < to) {
+        var e: *TmOrbitalFilling = cfg + k;
+        if (k > from) { str_builder_putc(sb, 32); }
+        str_builder_add_int(sb, e.n);
+        var c = orbital_type_symbol(e.orbital);
+        if (c < 0) { c = 63; }
+        str_builder_putc(sb, c);
+        str_builder_add_int(sb, e.electrons);
+        k = k + 1;
+    }
+}
+
+# The configuration's `len` entries at cfg as text, e.g. "1s2 2s2 2p6 3s2 3p6 4s2 3d6" for
+# iron. An orbital that is not a TmOrbitalType prints as '?'. Mirrors `format_configuration`.
+#must_use
+fn format_configuration(cfg: *TmOrbitalFilling, len): Str {
+    var sb = str_builder_new();
+    _tm_format_entries(sb, cfg, 0, len);
+    return str_builder_build(sb);
+}
+
+# The configuration in noble-gas core notation, e.g. "[Ar] 4s2 3d6" for iron (Z = 26). The core
+# is the largest of He, Ne, Ar, Kr, Xe, Rn below Z; the entries up to the one that completes
+# its electron count are replaced by it. Z ≤ 2 gives the plain format. Mirrors
+# `format_configuration_short`.
+#must_use
+fn format_configuration_short(cfg: *TmOrbitalFilling, len, z): Str {
+    var core = 0;
+    var core_z = 0;
+    if (z > 86) { core = "[Rn]"; core_z = 86; }
+    elif (z > 54) { core = "[Xe]"; core_z = 54; }
+    elif (z > 36) { core = "[Kr]"; core_z = 36; }
+    elif (z > 18) { core = "[Ar]"; core_z = 18; }
+    elif (z > 10) { core = "[Ne]"; core_z = 10; }
+    elif (z > 2) { core = "[He]"; core_z = 2; }
+    else { return format_configuration(cfg, len); }
+    var electrons = 0;
+    var start = 0;
+    var k = 0;
+    while (k < len) {
+        var e: *TmOrbitalFilling = cfg + k;
+        electrons = electrons + e.electrons;
+        if (electrons >= core_z) {
+            start = k + 1;
+            break;
+        }
+        k = k + 1;
+    }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, core);
+    if (start < len) {
+        str_builder_putc(sb, 32);
+        _tm_format_entries(sb, cfg, start, len);
+    }
+    return str_builder_build(sb);
+}
+
+# ── ionization energies and electron affinities ─────────────────────────────────────
+
+# The first ionization energy in eV: NIST ASD for Z = 1–108, relativistic calculations
+# (Smits et al. 2023) for Z = 109–118. Err(TM_ERR_INVALID_ATOMIC_NUMBER) unless 1 ≤ Z ≤ 118.
+# Mirrors `ionization_energy_ev`.
+#must_use
+fn ionization_energy_ev(z): Result {
+    if (z < 1 || z > 118) { return Err(TM_ERR_INVALID_ATOMIC_NUMBER); }
+    var ie: f64 = _TM_IONIZATION_ENERGY_EV[z - 1];
+    return Ok(ie);
+}
+
+# The kind of the neutral atom's electron affinity: Ok(TM_ELECTRON_AFFINITY_BOUND, _UNBOUND
+# or _UNKNOWN), or Err(TM_ERR_INVALID_ATOMIC_NUMBER) unless 1 ≤ Z ≤ 118. The bound value is
+# electron_affinity_ev(z): a `: stack` enum can't nest inside a value-form Result, so Rust's
+# `Bound(f64)` payload travels there (port plan §5). Mirrors `electron_affinity`.
+#must_use
+fn electron_affinity(z): Result {
+    if (z < 1 || z > 118) { return Err(TM_ERR_INVALID_ATOMIC_NUMBER); }
+    return Ok(_TM_ELECTRON_AFFINITY_KIND[z - 1]);
+}
+
+# The electron affinity in eV, the energy released by X + e⁻ → X⁻: 0.0 both when no bound
+# anion exists and when no value is known (electron_affinity tells them apart).
+# Err(TM_ERR_INVALID_ATOMIC_NUMBER) unless 1 ≤ Z ≤ 118. Mirrors `electron_affinity_ev`.
+#must_use
+fn electron_affinity_ev(z): Result {
+    if (z < 1 || z > 118) { return Err(TM_ERR_INVALID_ATOMIC_NUMBER); }
+    var ev: f64 = _TM_ELECTRON_AFFINITY_EV[z - 1];
+    return Ok(ev);
+}

@@ -45,7 +45,7 @@ python3 -I scripts/oracle/probe_tables.py .                                     
 | `nucleus` (with the shell model) | M2 | 74,297 | `src/m_nucleus.rs` | `src/nucleus_data.cyr` (`src/t_nucleus.rs`, with the private-value proofs) |
 | `decay` | M2 | 8,511 | `src/m_decay.rs` | `src/decay_data.cyr` (`src/t_decay.rs`) |
 | `timekeeping` | M5 | 20,703 | `src/m_timekeeping.rs` | `src/timekeeping_data.cyr` (`src/t_timekeeping.rs`: the leap table derived from `leap_seconds_at`, the USNO segments extracted, both proven) |
-| atomic | M3 | — | — | `atomic_data.cyr` |
+| `atomic` | M3 | 43,309 | `src/m_atomic.rs` | `src/atomic_data.cyr` (`src/t_atomic.rs`: the filling order and Bethe logarithms extracted, the 20 NIST exceptions derived from `electron_configuration`, all proven) |
 | reaction, scattering | M4 | — | — | `reaction_data.cyr` |
 | optics | M6 | — | — | — |
 
@@ -130,7 +130,11 @@ Some values have no public accessor: the SEMF and Myers–Swiatecki coefficients
 u→keV factor, `MS_MAGIC`, and the empirical proton and neutron level orders. They are never
 re-typed. `src/rust_src.rs` extracts them mechanically under strict rules:
 - it reads only a `const NAME: TYPE = <literal>;` item: a plain decimal, or a list of integer
-  tuples;
+  tuples (or `(integer, Enum::Variant)` pairs). The one other shape is a pure lookup function,
+  `Some(match (a, b) { (1, 0) => <decimal>, .. _ => return None, })`, every line of which must be
+  such an arm;
+- a const's end is its first `;` outside a `//` comment (citations contain `;`);
+- comments are read for labels only: each IE and EA entry's citation, checked to name its `(Z=k)`;
 - a table's element count must match its declared length;
 - floats are parsed with `str::parse::<f64>`, correctly rounded like rustc's own literal
   conversion.
@@ -147,6 +151,13 @@ whole milestone grid, requiring identical bits.
 change between consecutive months), then proven over years 1900–2200 and months 0–13. The 1961–1971 USNO segments
 and `MJD_1972` are extracted, then proven by recomputing `tai_minus_utc_seconds_mjd` over 24,000 quarter-day MJDs
 plus every segment start ±1e-6.
+
+**M3.** The ionization energies and electron affinities come through the public API. `FILLING_ORDER` is extracted
+and the 20 NIST exceptions are derived, as each element's two subshell changes from the pure Madelung filling;
+together they are proven by recomputing `electron_configuration` for Z = 0–120 and u32::MAX. The Bethe logarithms
+are extracted from `bethe_log`'s match and proven by recomputing `lamb_shift_nlj_ev` for Z = 0–118 and u32::MAX over
+every (n ≤ 6, l ≤ n, 2j ≤ 2n + 1). A Bethe logarithm nudged by 1 ulp is refused (*Bethe-logarithm proof failed at
+Z=1 n=3 l=0 2j=1*), and so is a dropped exception (*configuration proof failed at Z=45*).
 
 ### Emission rules
 

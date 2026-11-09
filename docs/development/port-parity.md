@@ -172,6 +172,31 @@ The difference is `f64_exp`: x87 on x86_64, and the fdlibm polyfill on aarch64, 
 libm uses. Class D's relative 1e-12 holds with about three decades to spare. `_tm_ldexp`, the squaring scale, is
 Rust libm's scalbn transcribed, and is bit-identical (306/306 `libm::ldexp` rows, class A, on every target).
 
+## Atomic (M3)
+
+Over the 43,309 `atomic.tsv` rows on 2026-11-08, every class A and B row is 0 ulp on all three targets: the
+configurations and formats, the Rydberg and reduced-mass lines, fine structure, the series, Zeeman and Stark,
+vacuum polarization, Dirac, hyperfine, the g-factors and Breit. The class-C and class-D functions:
+
+| Function | Class (K) | Rows | x86_64 ELF and PE | aarch64 |
+|---|---|---|---|---|
+| `lamb_shift_nlj_ev` | C (10) | 2,596 | 1,906 × 0, 12 × 1, 2 × 2 | 1,918 × 0, 2 × 1 |
+| `lamb_shift_ev` | C (10) | 2,520 | 2,506 × 0, 12 × 1, 2 × 2 | 2,518 × 0, 2 × 1 |
+| `radial_wavefunction` | C (6) | 9,249 | 8,298 × 0, 768 × 1, 129 × 2 | all 0 |
+| `radial_probability_density` | C (18) | 9,249 | 8,319 × 0, 189 × 1, 356 × 2, 331 × 3–7 | all 0 |
+| `einstein_a_coefficient` | D | 1,443 | all 0 | all 0 |
+| `einstein_b_coefficient` | D | 1,443 | all 0 | all 0 |
+
+(The histograms count float outputs; Err rows have none.)
+
+- **The targets differ only through exp and ln**, as for the primitives: aarch64's fdlibm exp makes the radial
+  functions bit-identical there, and its ln polyfill leaves 2 one-ulp Lamb rows against 14 on x86 (x87).
+- **The radial dipole integral is bit-identical.** Einstein A and B are class D: a double sum of pow terms whose
+  alternating signs cancel. Even so, every row matches exactly, out to n_u = 60, with `ganita_f64_pow` for the
+  (2/n)^i factors. Class D's 1e-12 stays the gate: a pow change upstream could move these rows by an ulp.
+- **Dirac is class B, not C.** `dirac_energy_mev` and its two callers use only sqrt and arithmetic, so their
+  2,856 rows are B and bit-identical. That tightens the plan's class.
+
 ## Rule for the class-C bounds of tanmatra's own functions
 
 Class C stays for formulas built on exp, ln, pow, sin, cos, tan or sinh, such as the shell term, Dirac, the
@@ -196,9 +221,12 @@ Never raise K_F after seeing the port's results. A row that fails K_F is a defec
 | Function | Milestone | S (method) | Class-C calls on its path | K_F |
 |---|---|---|---|---|
 | `Nucleus::atomic_mass_amu` | M2 | **0**: the two `pow` results (Z^2.39 and Z^5.35) nudged ±1 ulp on all 2,053 golden rows, with `nuclear_mass` taken from the golden corpus. The electron binding is about 10⁻⁶ of the mass, so a 1-ulp change never moves the output | 2 | **2** |
-
 | `sagnac_correction_ns` | M5 | **2**: sin(φ) nudged ±1 ulp on all 21 golden rows, through four products and a quotient | 1 | **6** |
 | `remaining_fraction` | M2 | **1**: the output is the pow result itself, `pow(0.5, t / T½)` (t / T½ is a correctly rounded division on both sides) | 1 | **4** |
+| `lamb_shift_nlj_ev` | M3 | **4**: ln(1/(Zα)²) nudged ±1 ulp on every s-state golden row (Z = 1–118 and u32::MAX, n ≤ 4). The l > 0 rows have no ln (their coefficient is the tabulated Bethe logarithm), and Z = 0 is 0 · ln(∞) = NaN whatever ln returns | 1 | **10** |
+| `lamb_shift_ev` | M3 | **4**: an s state is `lamb_shift_nlj_ev(z, n, 0, 1)` itself; l > 0 averages two ln-free values | 1 | **10** |
+| `radial_wavefunction` | M3 | **2**: exp(−ρ/2) nudged ±1 ulp on every golden row; R = (N·P)·e, so a 1-ulp change of e moves R by at most 2 ulp across a binade. 26 edge rows whose exp result is 0 or ∞ (r ≥ 1e300, ±∞, NaN) are exact on both sides and excluded | 1 | **6** |
+| `radial_probability_density` | M3 | **8**: as `radial_wavefunction`, through R² r² | 1 | **18** |
 
 The Myers–Swiatecki shell term turned out to be class B, not C. It uses only cbrt (correctly rounded on both
 sides) and arithmetic, and its 14,160 rows are bit-identical.
