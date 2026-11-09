@@ -1,0 +1,25 @@
+[package]
+name = "tanmatra-oracle"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.89"
+license = "GPL-3.0-only"
+publish = false
+description = "Drives the frozen Rust tanmatra 1.3.0 in rust-old/ to write the Cyrius port's golden corpus"
+
+# The oracle is used by path and never built or edited in place (CLAUDE.md: do not
+# modify rust-old/). Cargo.lock was seeded from rust-old/Cargo.lock, so every shared
+# dependency resolves to the version the oracle was tested with.
+[dependencies]
+tanmatra = { path = "../../rust-old", features = ["optics"] }
+# The same libm the oracle links. libm.tsv records its outputs directly, as the reference
+# for the Cyrius math-function baselines (port plan §2 step 8).
+libm = "=0.2.16"
+
+[[bin]]
+name = "golden"
+path = "src/main.rs"
+
+[profile.release]
+# Correctness, not speed: keep overflow checks so a bad grid index fails loudly.
+overflow-checks = true

@@ -1,0 +1,186 @@
+//! Golden TSV, format 1. The spec is in `scripts/oracle/README.md`; keep the two in step.
+//!
+//! One row per call:
+//!
+//! ```text
+//! fn <TAB> class <TAB> inputs <TAB> outputs <TAB> note
+//! ```
+//!
+//! `inputs` and `outputs` are space-separated typed tokens (`-` when empty). `note` is a
+//! human-readable rendering of the same call, for review only; the harness ignores it.
+
+use std::fmt::Debug;
+
+/// Parity tolerance class of a row (port plan §4).
+#[allow(dead_code)] // D arrives with Bateman and the radial integrals (M2, M3)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Class {
+    /// Bit-identical (NaN matches any NaN), or equal integers / strings.
+    A,
+    /// Arithmetic: ≤ 2 ulp, expected 0.
+    B,
+    /// Transcendental: relative bound measured per target (port plan §2 step 8).
+    C,
+    /// Iterative: relative ≤ 1e-12.
+    D,
+}
+
+impl Class {
+    fn letter(self) -> char {
+        match self {
+            Self::A => 'A',
+            Self::B => 'B',
+            Self::C => 'C',
+            Self::D => 'D',
+        }
+    }
+}
+
+/// One typed value.
+#[allow(dead_code)] // None and Err arrive with the fallible APIs (M2 on)
+#[derive(Clone, Debug)]
+pub enum Tok {
+    /// `f:<16 hex digits>` — the IEEE-754 bit pattern, lowercase.
+    F(f64),
+    /// `i:<decimal>` — any integer; booleans are 0 / 1.
+    I(i64),
+    /// `e:<Enum>.<Variant>` — a Rust enum variant by name.
+    E(&'static str, String),
+    /// `s:<percent-encoded UTF-8>`.
+    S(String),
+    /// `n:` — `Option::None`.
+    None,
+    /// `E:<Variant>` — `Err(TanmatraError::<Variant>)`. The payload is not compared.
+    Err(String),
+    /// `v:<len>` — a sequence; its elements' tokens follow, in order.
+    V(usize),
+}
+
+pub fn f(x: f64) -> Tok {
+    Tok::F(x)
+}
+
+pub fn i(x: impl Into<i64>) -> Tok {
+    Tok::I(x.into())
+}
+
+pub fn b(x: bool) -> Tok {
+    Tok::I(i64::from(x))
+}
+
+/// An enum variant, named through its `Debug` rendering (fieldless enums only).
+pub fn e<T: Debug>(enum_name: &'static str, v: T) -> Tok {
+    Tok::E(enum_name, format!("{v:?}"))
+}
+
+pub fn s(x: impl Into<String>) -> Tok {
+    Tok::S(x.into())
+}
+
+/// `Err(TanmatraError::X(..))` → `E:X`.
+#[allow(dead_code)] // first used by the M2 emitters
+pub fn err(e: &tanmatra::error::TanmatraError) -> Tok {
+    let dbg = format!("{e:?}");
+    let end = dbg.find(['(', ' ', '{']).unwrap_or(dbg.len());
+    Tok::Err(dbg[..end].to_string())
+}
+
+/// Percent-encode every byte that is not printable ASCII, plus `%`.
+fn pct(x: &str) -> String {
+    let mut out = String::with_capacity(x.len());
+    for &byte in x.as_bytes() {
+        if (0x21..=0x7e).contains(&byte) && byte != b'%' {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+impl Tok {
+    fn wire(&self) -> String {
+        match self {
+            Self::F(x) => format!("f:{:016x}", x.to_bits()),
+            Self::I(x) => format!("i:{x}"),
+            Self::E(name, v) => format!("e:{name}.{v}"),
+            Self::S(x) => format!("s:{}", pct(x)),
+            Self::None => "n:".to_string(),
+            Self::Err(v) => format!("E:{v}"),
+            Self::V(n) => format!("v:{n}"),
+        }
+    }
+
+    fn human(&self) -> String {
+        match self {
+            Self::F(x) => format!("{x:?}"),
+            Self::I(x) => format!("{x}"),
+            Self::E(name, v) => format!("{name}::{v}"),
+            Self::S(x) => format!("{x:?}"),
+            Self::None => "None".to_string(),
+            Self::Err(v) => format!("Err({v})"),
+            Self::V(n) => format!("[{n}]"),
+        }
+    }
+}
+
+fn wire_list(toks: &[Tok]) -> String {
+    if toks.is_empty() {
+        return "-".to_string();
+    }
+    toks.iter().map(Tok::wire).collect::<Vec<_>>().join(" ")
+}
+
+fn human_list(toks: &[Tok]) -> String {
+    toks.iter().map(Tok::human).collect::<Vec<_>>().join(", ")
+}
+
+/// The rows of one `tests/golden/<name>.tsv`.
+pub struct Module {
+    pub name: &'static str,
+    rows: Vec<String>,
+}
+
+impl Module {
+    pub fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            rows: Vec::new(),
+        }
+    }
+
+    pub fn row(&mut self, func: &str, class: Class, ins: &[Tok], outs: &[Tok]) {
+        let note = format!("{func}({}) -> {}", human_list(ins), human_list(outs));
+        self.rows.push(format!(
+            "{func}\t{}\t{}\t{}\t{note}",
+            class.letter(),
+            wire_list(ins),
+            wire_list(outs)
+        ));
+    }
+
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// The file contents: a fixed header, then the rows in emission order. Deterministic —
+    /// no timestamps or paths — so `--check` can compare byte for byte.
+    pub fn render(&self, provenance: &str) -> String {
+        let mut out = String::new();
+        out.push_str(&format!(
+            "# tanmatra golden corpus, format 1: {}\n",
+            self.name
+        ));
+        out.push_str(&format!(
+            "# oracle: {provenance}. Generated by scripts/oracle; do not edit.\n"
+        ));
+        out.push_str("# regenerate: cargo run --release --locked --manifest-path scripts/oracle/Cargo.toml\n");
+        out.push_str("# columns: fn<TAB>class<TAB>inputs<TAB>outputs<TAB>note (tokens: scripts/oracle/README.md)\n");
+        out.push_str(&format!("# rows: {}\n", self.rows.len()));
+        for row in &self.rows {
+            out.push_str(row);
+            out.push('\n');
+        }
+        out
+    }
+}

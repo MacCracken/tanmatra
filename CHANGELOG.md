@@ -24,6 +24,17 @@ The Rust library and its behavior are unchanged, and `VERSION` stays 1.3.0 until
 - The scaffold's stub functions (`src/main.cyr`, `tests/tanmatra.{tcyr,bcyr,fcyr}`) have doc comments now, so `cyrius audit` is clean.
 - Filed upstream: `cyrius/docs/development/issues/2026-11-08-cyrius-port-clobbers-project-docs-and-omits-bench.md`.
 
+### Port — M0 step 5: golden corpus generator (2026-11-08)
+- **`scripts/oracle/`**: `tanmatra-oracle`, a cargo crate that drives the frozen `rust-old/` crate by path. Its lockfile is seeded from the oracle's, and `libm` is pinned `=0.2.16`. It writes `tests/golden/<module>.tsv`, format 1: typed tokens with f64s as IEEE-754 bit patterns, a tolerance class per row and a readable note. The spec is in `scripts/oracle/README.md`.
+- Output is deterministic. `--check` fails on any differing, missing or stale file.
+- **Golden corpus (M1 plus math reference):**
+  - `constants`: all 34;
+  - `particle`: all 18 functions over every variant;
+  - `relativity`: all 17 functions plus `Add`, over the §3 grid with NaN, ±∞, massless, spacelike and negative-energy edges;
+  - `libm`: every libm function tanmatra calls, the reference for the step 8 ulp baselines.
+  - 18,453 rows in total.
+- **`scripts/oracle/validate.py`** independently re-checks the corpus without the Rust code. It verifies the constants against the source literals, recomputes the 2,962 class-A/B relativity rows bit for bit in Python, and checks sqrt and cbrt.
+
 ## [1.3.0] — 2026-09-16
 
 Repairs every finding of the 2026-09-16 math and data audit

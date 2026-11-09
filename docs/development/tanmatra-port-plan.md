@@ -254,15 +254,37 @@ gets something wrong, repair the output here and file the defect upstream (step 
    `ganita_f64_cbrt`, `_pow`, `_sinh`, `_tan` and `_hypot` are present. Use the canonical `ganita_f64_*` names throughout. The short
    aliases `f64_sinh`, `f64_pow`, `f64_atan2` and `f64_hypot` are marked *Deprecated alias …
    migration window only*.
-5. **Golden-value generator in `scripts/oracle/`.**
-   - It is a small cargo crate that depends on `rust-old/` by path (`tanmatra = { path =
-     "../../rust-old", features = ["optics"] }`). It never builds inside `rust-old/` and never
-     modifies it, which keeps the oracle frozen; ranga's `scripts/oracle/rust/` works the same
-     way.
-   - It writes `tests/golden/<module>.tsv`.
-   - Each line is one call. Inputs and outputs are **IEEE-754 hex bit patterns**, followed by
-     the tolerance class (§4). ranga's `scripts/oracle` uses the same format.
-   - It covers every in-scope public function over the input grids listed per milestone.
+5. ◐ **Golden-value generator in `scripts/oracle/`. Built 2026-11-08; module coverage
+   grows per milestone.** The format spec and the rules are in
+   [`scripts/oracle/README.md`](../../scripts/oracle/README.md).
+   - **Crate.** `tanmatra-oracle` depends on `rust-old/` by path, with `features =
+     ["optics"]`; it never builds inside `rust-old/` and never modifies it. ranga's
+     `scripts/oracle/rust/` works the same way.
+     - Its `Cargo.lock` was seeded from `rust-old/Cargo.lock`, and `libm` is pinned
+       `=0.2.16`, so every shared dependency is the oracle's version.
+     - clippy `-D warnings` is clean.
+   - **Output.** It writes `tests/golden/<module>.tsv`, format 1:
+     - one row per call: `fn<TAB>class<TAB>inputs<TAB>outputs<TAB>note`;
+     - typed tokens, with every f64 as its **IEEE-754 bit pattern** (`f:3ff0000000000000`);
+     - structs flattened by field, sequences as `v:<len>` followed by their elements;
+     - a readable note per row, which the harness ignores.
+   - **Deterministic.** Two runs are byte-identical, and `--check` exits 1 on any differing,
+     missing or stale file. Grids use only the pinned `libm` crate and seeded xorshift.
+   - **Independently checked.** `scripts/oracle/validate.py` (Python, no packages):
+     - re-parses every row;
+     - checks `constants.tsv` against the Rust source literals;
+     - recomputes all 2,962 class-A/B relativity rows with Python floats in Rust's operation
+       order: bit-identical, 0 failures;
+     - checks `sqrt` against `math.sqrt` and `cbrt` on perfect cubes.
+   - **Coverage so far:**
+     - **M1:** `constants` (all 34), `particle` (all 18 functions, every variant: 102 rows),
+       `relativity` (all 17 functions plus `Add`, on the §3 grid widened with NaN, ±∞,
+       massless, spacelike and negative-energy cases: 6,768 rows);
+     - **`libm`** (11,549 rows): every `libm` function tanmatra calls, over special values,
+       the ranges tanmatra uses and seeded wide sweeps. It is the reference for step 8.
+   - **The remaining modules are added at the start of their milestone** (M2 nucleus, shell
+     model and decay; M5 timekeeping; M3 atomic; M4 reaction and scattering; M6 optics), each
+     with its §3 grid. The corpus is 2.8 MB so far.
    - It is the parity oracle and is regenerated only from Rust 1.3.0.
 6. **Table and constant generator in `scripts/oracle/`**, in the same crate as step 5. It
    reads the values through the oracle's public API, or from the primary source files the
@@ -492,7 +514,7 @@ and isnan. tanmatra uses none of them; test for NaN with `x != x`.
 
 | Milestone | Status | Golden rows | Reference tests | Benches | Notes |
 |---|---|---|---|---|---|
-| M0 Initialize | ◐ steps 0–4 done | — | — | — | 2026-11-08: the oracle is frozen green; the scaffold is in place and repaired; manifest and ganita 1.2.15 checked. All scaffold gates pass (build, test, `--bounds`, bench, lint, vet, fmt, `deps --locked`, audit). Next: steps 5–8, the generators, the parity harness and the baselines |
+| M0 Initialize | ◐ steps 0–4 done; step 5 built | 18,453 (M1 modules + `libm`) | — | — | 2026-11-08: the oracle is frozen green; the scaffold is in place and repaired; manifest and ganita 1.2.15 checked; all scaffold gates pass. The golden generator is in `scripts/oracle/`, deterministic and independently validated. Next: step 6 (tables and constants), step 7 (parity harness), step 8 (baselines from `libm.tsv`) |
 | M1 Foundation | ☐ | | | | |
 | M2 Nuclear | ☐ | | | | |
 | M5 Timekeeping | ☐ | | | | |
