@@ -146,6 +146,20 @@ fn run() -> Result<bool, String> {
             summary: format!("{} rows", module.len()),
         });
     }
+    // The harness reads this list, so a module added here can't go untested: without a
+    // dispatcher it is reported as pending, row by row.
+    let mut index = String::from(
+        "# tanmatra golden corpus: one module per line; tests/parity.tcyr replays each\n",
+    );
+    for name in &emitted {
+        index.push_str(name.trim_end_matches(".tsv"));
+        index.push('\n');
+    }
+    outputs.push(Output {
+        rel: "tests/golden/modules.txt".to_string(),
+        summary: format!("{} modules", emitted.len()),
+        text: index,
+    });
     outputs.extend(cyrius_outputs(&root, &prov)?);
 
     let mut ok = true;

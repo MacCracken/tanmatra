@@ -44,6 +44,15 @@ The Rust library and its behavior are unchanged, and `VERSION` stays 1.3.0 until
 - **`src/particle_data.cyr`**: `TmQuark`, `TmLepton`, `TmBoson` and `TmFundamentalForce`, plus every tabulated PDG 2024 property as a column indexed by enum value; mediators are flattened into start, count and member tables.
 - **`scripts/oracle/probe_tables.py`** compiles all 129 generated values through the Cyrius compiler and checks them bit for bit against the golden rows: 0 failures, 0 warnings.
 
+### Port — M0 step 7: parity harness (2026-11-08)
+- **`tests/parity.tcyr`** replays every module in `tests/golden/modules.txt`, which the generator now writes. Each row is ok, FAILED, measured (class C without a bound) or pending (not ported).
+  - Per function it prints the row counts and an ulp histogram. FAILED rows are shown with their note and both bit patterns, and class-C outliers are reported.
+  - The exit code is the number of failing modules.
+  - Constants (all 34) and libm sqrt, fabs, floor, trunc and cbrt are bit-identical. sin, cos and tan also match bit for bit; exp, log, sinh and pow are ≤ 1 ulp, and hypot ≤ 2 ulp. All are on x86_64.
+- **`tests/ulp.cyr`**: `ulp_bits_match`, `ulp_distance`, `ulp_rel_match` and `ulp_rel_err`, plus the assert wrappers `assert_bits_eq`, `assert_ulp` and `assert_rel`.
+- Negative tests (a tampered value, a malformed token, a missing golden file) each fail with exit 1. `cyrius test`, `test --bounds` and `audit` pass with no warnings.
+- Filed upstream: `ganita/docs/development/issues/2026-11-08-pow-minus-one-huge-even-exponent.md`. `ganita_f64_pow(-1, y)` returns +∞ or +0 instead of 1 for |y| > 2^64, because `_gn_pow_pos` lacks fdlibm's |x| == 1 guard. tanmatra is unaffected.
+
 ## [1.3.0] — 2026-09-16
 
 Repairs every finding of the 2026-09-16 math and data audit

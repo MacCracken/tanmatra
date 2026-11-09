@@ -1,0 +1,571 @@
+# parity.tcyr — replays the golden corpus (tests/golden/*.tsv) against the port.
+#
+# Port plan §2 step 7. Format and comparison rules: scripts/oracle/README.md. The module
+# list is tests/golden/modules.txt, which the generator writes.
+#
+# Every row of every module is one of:
+# - ok: every output matched within its class;
+# - FAILED: an output differs; the first few are printed with the row's note;
+# - measured: class C, with no bound set yet for its function. The ulp distance is
+#   recorded but not gated (port plan §2 step 8 sets the bounds);
+# - pending: its function isn't ported yet (no dispatcher entry).
+#
+# Per function it prints the row counts and the ulp histogram, which is the step 8
+# baseline. The exit code is the number of modules with a failure, at most a handful, so
+# the 8-bit exit status can't wrap.
+
+include "tests/ulp.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+
+alloc_init();
+
+# ── tokens ──────────────────────────────────────────────────────────────────────────
+# Three token lists: the row's inputs, its wanted outputs, and what the port returned.
+# Each slot is a kind byte ('f' 'i' 'e' 's' 'n' 'E' 'v'), a value word (f64 bits, an
+# integer, or a pointer to text) and a text length.
+var _PAR_MAX = 64;
+var _par_in_k = 0;
+var _par_in_v = 0;
+var _par_in_l = 0;
+var _par_in_n = 0;
+var _par_want_k = 0;
+var _par_want_v = 0;
+var _par_want_l = 0;
+var _par_want_n = 0;
+var _par_got_k = 0;
+var _par_got_v = 0;
+var _par_got_l = 0;
+var _par_got_n = 0;
+
+# 1 if text [p, p + len) equals the C string `s`.
+#must_use
+fn _par_eq(p, len, s): i64 {
+    if (len != strlen(s)) { return 0; }
+    return memeq(p, s, len);
+}
+
+# The value of hex digit byte `c`, or -1.
+#must_use
+fn _par_hex_digit(c): i64 {
+    if (c >= 48 && c <= 57) { return c - 48; }
+    if (c >= 97 && c <= 102) { return c - 87; }
+    if (c >= 65 && c <= 70) { return c - 55; }
+    return 0 - 1;
+}
+
+# Parses [p, p + len) as unsigned hex. Returns the word; sets *ok to 0 on a bad digit.
+fn _par_parse_hex(p, len, ok) {
+    var v = 0;
+    var k = 0;
+    while (k < len) {
+        var d = _par_hex_digit(load8(p + k));
+        if (d < 0) { store64(ok, 0); return 0; }
+        v = (v << 4) | d;
+        k = k + 1;
+    }
+    return v;
+}
+
+# Parses [p, p + len) as a signed decimal. Sets *ok to 0 on a bad digit.
+fn _par_parse_int(p, len, ok) {
+    var k = 0;
+    var neg = 0;
+    if (len > 0 && load8(p) == 45) { neg = 1; k = 1; }
+    if (k >= len) { store64(ok, 0); return 0; }
+    var v = 0;
+    while (k < len) {
+        var c = load8(p + k);
+        if (c < 48 || c > 57) { store64(ok, 0); return 0; }
+        v = v * 10 + (c - 48);
+        k = k + 1;
+    }
+    if (neg == 1) { return 0 - v; }
+    return v;
+}
+
+# Parses the space-separated tokens of [p, p + len) into a token list. Returns the count,
+# or -1 on a malformed token. `-` is the empty list.
+fn _par_tokens(p, len, kinds, vals, lens): i64 {
+    if (len == 1 && load8(p) == 45) { return 0; }
+    var n = 0;
+    var at = 0;
+    while (at < len) {
+        var end = at;
+        while (end < len && load8(p + end) != 32) { end = end + 1; }
+        var tp = p + at;
+        var tl = end - at;
+        if (tl < 2 || load8(tp + 1) != 58 || n >= _PAR_MAX) { return 0 - 1; }
+        var kind = load8(tp);
+        var body = tp + 2;
+        var blen = tl - 2;
+        var okw[8];
+        store64(&okw, 1);
+        var v = 0;
+        if (kind == 102) {
+            if (blen != 16) { return 0 - 1; }
+            v = _par_parse_hex(body, blen, &okw);
+        } elif (kind == 105 || kind == 118) {
+            v = _par_parse_int(body, blen, &okw);
+        } else {
+            v = body;
+        }
+        if (load64(&okw) != 1) { return 0 - 1; }
+        store64(kinds + n * 8, kind);
+        store64(vals + n * 8, v);
+        store64(lens + n * 8, blen);
+        n = n + 1;
+        at = end + 1;
+    }
+    return n;
+}
+
+# Input token k as a word (f64 bits or integer).
+#must_use
+fn _par_in(k): i64 { return load64(_par_in_v + k * 8); }
+
+# Appends an f64 result word to the got list.
+fn _par_got_f(bits) {
+    var at = _par_got_n * 8;
+    store64(_par_got_k + at, 102);
+    store64(_par_got_v + at, bits);
+    store64(_par_got_l + at, 16);
+    _par_got_n = _par_got_n + 1;
+}
+
+# ── dispatch ────────────────────────────────────────────────────────────────────────
+# Each module's dispatcher fills the got list for one row. It returns 1 when it handled
+# the function, 0 when the function is pending (not ported), or -1 when the inputs are
+# unusable (a defect, counted as a failure). Add a function the moment it's ported.
+
+# `const` rows: the generated TM_ constants (src/constants.cyr).
+fn _par_constants(fp, fl): i64 {
+    if (_par_eq(fp, fl, "const") != 1 || _par_in_n != 1) { return 0; }
+    var np = load64(_par_in_v);
+    var nl = load64(_par_in_l);
+    var x: f64 = 0.0;
+    if (_par_eq(np, nl, "ELECTRON_MASS_MEV") == 1) { x = TM_ELECTRON_MASS_MEV; }
+    elif (_par_eq(np, nl, "PROTON_MASS_MEV") == 1) { x = TM_PROTON_MASS_MEV; }
+    elif (_par_eq(np, nl, "NEUTRON_MASS_MEV") == 1) { x = TM_NEUTRON_MASS_MEV; }
+    elif (_par_eq(np, nl, "AMU_MEV") == 1) { x = TM_AMU_MEV; }
+    elif (_par_eq(np, nl, "FINE_STRUCTURE") == 1) { x = TM_FINE_STRUCTURE; }
+    elif (_par_eq(np, nl, "HBAR_EV_S") == 1) { x = TM_HBAR_EV_S; }
+    elif (_par_eq(np, nl, "RYDBERG") == 1) { x = TM_RYDBERG; }
+    elif (_par_eq(np, nl, "BOHR_RADIUS") == 1) { x = TM_BOHR_RADIUS; }
+    elif (_par_eq(np, nl, "AVOGADRO") == 1) { x = TM_AVOGADRO; }
+    elif (_par_eq(np, nl, "ELEMENTARY_CHARGE") == 1) { x = TM_ELEMENTARY_CHARGE; }
+    elif (_par_eq(np, nl, "C") == 1) { x = TM_C; }
+    elif (_par_eq(np, nl, "R0_FM") == 1) { x = TM_R0_FM; }
+    elif (_par_eq(np, nl, "BOLTZMANN_EV") == 1) { x = TM_BOLTZMANN_EV; }
+    elif (_par_eq(np, nl, "H_EV_S") == 1) { x = TM_H_EV_S; }
+    elif (_par_eq(np, nl, "HBAR_MEV_S") == 1) { x = TM_HBAR_MEV_S; }
+    elif (_par_eq(np, nl, "BOHR_MAGNETON_EV_T") == 1) { x = TM_BOHR_MAGNETON_EV_T; }
+    elif (_par_eq(np, nl, "COULOMB_MEV_FM") == 1) { x = TM_COULOMB_MEV_FM; }
+    elif (_par_eq(np, nl, "CLASSICAL_ELECTRON_RADIUS_FM") == 1) { x = TM_CLASSICAL_ELECTRON_RADIUS_FM; }
+    elif (_par_eq(np, nl, "PROTON_G_FACTOR") == 1) { x = TM_PROTON_G_FACTOR; }
+    elif (_par_eq(np, nl, "ELECTRON_ANOMALOUS_MOMENT") == 1) { x = TM_ELECTRON_ANOMALOUS_MOMENT; }
+    elif (_par_eq(np, nl, "STANDARD_GRAVITY") == 1) { x = TM_STANDARD_GRAVITY; }
+    elif (_par_eq(np, nl, "GM_EARTH") == 1) { x = TM_GM_EARTH; }
+    elif (_par_eq(np, nl, "EARTH_ROTATION_RAD_S") == 1) { x = TM_EARTH_ROTATION_RAD_S; }
+    elif (_par_eq(np, nl, "HBAR_C_MEV_FM") == 1) { x = TM_HBAR_C_MEV_FM; }
+    elif (_par_eq(np, nl, "HC_EV_NM") == 1) { x = TM_HC_EV_NM; }
+    elif (_par_eq(np, nl, "RYDBERG_EV") == 1) { x = TM_RYDBERG_EV; }
+    elif (_par_eq(np, nl, "ELECTRON_MASS_U") == 1) { x = TM_ELECTRON_MASS_U; }
+    elif (_par_eq(np, nl, "PROTON_MASS_U") == 1) { x = TM_PROTON_MASS_U; }
+    elif (_par_eq(np, nl, "NEUTRON_MASS_U") == 1) { x = TM_NEUTRON_MASS_U; }
+    elif (_par_eq(np, nl, "HYDROGEN_ATOM_MASS_U") == 1) { x = TM_HYDROGEN_ATOM_MASS_U; }
+    elif (_par_eq(np, nl, "NUCLEAR_MAGNETON_EV_T") == 1) { x = TM_NUCLEAR_MAGNETON_EV_T; }
+    elif (_par_eq(np, nl, "DEUTERON_G_FACTOR") == 1) { x = TM_DEUTERON_G_FACTOR; }
+    elif (_par_eq(np, nl, "ATOMIC_UNIT_TIME_S") == 1) { x = TM_ATOMIC_UNIT_TIME_S; }
+    elif (_par_eq(np, nl, "COULOMB_K_SI") == 1) { x = TM_COULOMB_K_SI; }
+    else { return 0 - 1; }
+    _par_got_f(x);
+    return 1;
+}
+
+# `libm::` rows: the Cyrius math function each libm call maps to (port plan §5).
+# libm::round needs the port's half-away helper (M5), and libm::ldexp the port's exp2
+# scaling (M2), so both are pending until then.
+fn _par_libm(fp, fl): i64 {
+    var x: f64 = _par_in(0);
+    if (_par_eq(fp, fl, "libm::sqrt") == 1) { var r: f64 = f64_sqrt(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::fabs") == 1) { var r: f64 = f64_abs(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::floor") == 1) { var r: f64 = f64_floor(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::trunc") == 1) { var r: f64 = f64_trunc(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::cbrt") == 1) { var r: f64 = ganita_f64_cbrt(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::sin") == 1) { var r: f64 = f64_sin(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::cos") == 1) { var r: f64 = f64_cos(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::tan") == 1) { var r: f64 = ganita_f64_tan(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::exp") == 1) { var r: f64 = f64_exp(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::log") == 1) { var r: f64 = f64_ln(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::sinh") == 1) { var r: f64 = ganita_f64_sinh(x); _par_got_f(r); return 1; }
+    var y: f64 = _par_in(1);
+    if (_par_eq(fp, fl, "libm::pow") == 1) { var r: f64 = ganita_f64_pow(x, y); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::hypot") == 1) { var r: f64 = ganita_f64_hypot(x, y); _par_got_f(r); return 1; }
+    return 0;
+}
+
+# Routes a row to its module's dispatcher. 0 (pending) for a module with none yet.
+fn _par_dispatch(mp, ml, fp, fl): i64 {
+    _par_got_n = 0;
+    if (_par_eq(mp, ml, "constants") == 1) { return _par_constants(fp, fl); }
+    if (_par_eq(mp, ml, "libm") == 1) { return _par_libm(fp, fl); }
+    return 0;
+}
+
+# The relative bound for a class-C function, as an f64 word; 0 = none set yet (measured).
+# M0 step 8 fills this from docs/development/port-parity.md, per target.
+#must_use
+fn _par_c_bound(fp, fl): i64 {
+    return 0;
+}
+
+# ── per-function statistics ─────────────────────────────────────────────────────────
+# One slot per distinct fn name in the current module: name, class, row counts and an ulp
+# histogram over the float outputs (0, 1, 2, 3–16, >16, NaN/inf mismatch).
+var _PAR_FN_MAX = 96;
+var _par_fn_p = 0;
+var _par_fn_l = 0;
+var _par_fn_cls = 0;
+var _par_fn_rows = 0;
+var _par_fn_ok = 0;
+var _par_fn_fail = 0;
+var _par_fn_meas = 0;
+var _par_fn_pend = 0;
+var _par_fn_h = 0;    # 6 buckets per fn
+var _par_fn_max = 0;
+var _par_fn_n = 0;
+
+# The stats slot for fn [fp, fp + fl), created on first sight; -1 when the table is full.
+fn _par_fn_slot(fp, fl, cls): i64 {
+    var k = 0;
+    while (k < _par_fn_n) {
+        var at = k * 8;
+        if (load64(_par_fn_l + at) == fl && memeq(load64(_par_fn_p + at), fp, fl) == 1) { return k; }
+        k = k + 1;
+    }
+    if (_par_fn_n >= _PAR_FN_MAX) { return 0 - 1; }
+    var at = _par_fn_n * 8;
+    store64(_par_fn_p + at, fp);
+    store64(_par_fn_l + at, fl);
+    store64(_par_fn_cls + at, cls);
+    store64(_par_fn_rows + at, 0);
+    store64(_par_fn_ok + at, 0);
+    store64(_par_fn_fail + at, 0);
+    store64(_par_fn_meas + at, 0);
+    store64(_par_fn_pend + at, 0);
+    store64(_par_fn_max + at, 0);
+    var b = 0;
+    while (b < 6) { store64(_par_fn_h + (_par_fn_n * 6 + b) * 8, 0); b = b + 1; }
+    _par_fn_n = _par_fn_n + 1;
+    return _par_fn_n - 1;
+}
+
+# Adds 1 to the i64 counter at `base + slot * 8`.
+fn _par_bump(base, slot) {
+    store64(base + slot * 8, load64(base + slot * 8) + 1);
+}
+
+# Records one float comparison's ulp distance in the slot's histogram and maximum.
+fn _par_hist(slot, d) {
+    var b = 5;
+    if (d == 0) { b = 0; }
+    elif (d == 1) { b = 1; }
+    elif (d == 2) { b = 2; }
+    elif (d <= 16) { b = 3; }
+    elif (d < 0x7FFFFFFFFFFFFFFF) { b = 4; }
+    _par_bump(_par_fn_h, slot * 6 + b);
+    if (d > load64(_par_fn_max + slot * 8)) { store64(_par_fn_max + slot * 8, d); }
+}
+
+# ── row comparison ──────────────────────────────────────────────────────────────────
+# Compares the got list with the wanted outputs under class `cls` ('A' 'B' 'C' 'D').
+# Returns 1 ok, 0 failed, 2 measured (class C with no bound yet). Sets _par_outlier when a
+# float is more than 16 ulp off, or a NaN / infinity disagrees.
+var _par_outlier = 0;
+fn _par_compare(slot, cls, fp, fl): i64 {
+    _par_outlier = 0;
+    if (_par_got_n != _par_want_n) { return 0; }
+    var result = 1;
+    var k = 0;
+    while (k < _par_want_n) {
+        var at = k * 8;
+        var wk = load64(_par_want_k + at);
+        var wv = load64(_par_want_v + at);
+        var wl = load64(_par_want_l + at);
+        var gk = load64(_par_got_k + at);
+        var gv = load64(_par_got_v + at);
+        var gl = load64(_par_got_l + at);
+        if (wk != gk) { return 0; }
+        if (wk == 102) {
+            var d = ulp_distance(gv, wv);
+            _par_hist(slot, d);
+            if (d > 16) { _par_outlier = 1; }
+            if (cls == 65) {
+                if (ulp_bits_match(gv, wv) != 1) { result = 0; }
+            } elif (cls == 66) {
+                if (d > 2) { result = 0; }
+            } elif (cls == 67) {
+                var bound = _par_c_bound(fp, fl);
+                if (bound == 0) {
+                    if (result == 1) { result = 2; }
+                } elif (ulp_rel_match(gv, wv, bound) != 1) {
+                    result = 0;
+                }
+            } else {
+                if (ulp_rel_match(gv, wv, 0.000000000001) != 1) { result = 0; }
+            }
+        } elif (wk == 105 || wk == 118) {
+            if (gv != wv) { result = 0; }
+        } elif (wk != 110) {
+            if (gl != wl || memeq(gv, wv, wl) != 1) { result = 0; }
+        }
+        k = k + 1;
+    }
+    return result;
+}
+
+# ── report ──────────────────────────────────────────────────────────────────────────
+
+# Prints `n` right-aligned in a field of `width`.
+fn _par_print_num(n, width) {
+    var digits = 1;
+    var t = n;
+    while (t >= 10) { t = t / 10; digits = digits + 1; }
+    while (digits < width) { print(" ", 1); digits = digits + 1; }
+    fmt_int(n);
+}
+
+# Prints the text [p, p + len) padded to `width`.
+fn _par_print_pad(p, len, width) {
+    print(p, len);
+    var k = len;
+    while (k < width) { print(" ", 1); k = k + 1; }
+}
+
+# One line per function of the current module.
+fn _par_report_fns() {
+    var k = 0;
+    while (k < _par_fn_n) {
+        var at = k * 8;
+        print("  ", 2);
+        _par_print_pad(load64(_par_fn_p + at), load64(_par_fn_l + at), 40);
+        var cls = load64(_par_fn_cls + at);
+        var cb[8];
+        store8(&cb, cls);
+        print(&cb, 1);
+        _par_print_num(load64(_par_fn_rows + at), 7);
+        print(" rows: ", 7);
+        fmt_int(load64(_par_fn_ok + at));
+        print(" ok", 3);
+        var f = load64(_par_fn_fail + at);
+        if (f > 0) { print(", ", 2); fmt_int(f); print(" FAILED", 7); }
+        var m = load64(_par_fn_meas + at);
+        if (m > 0) { print(", ", 2); fmt_int(m); print(" measured", 9); }
+        var p = load64(_par_fn_pend + at);
+        if (p > 0) { print(", ", 2); fmt_int(p); print(" pending", 8); }
+        var hb = k * 6;
+        var floats = 0;
+        var b = 0;
+        while (b < 6) { floats = floats + load64(_par_fn_h + (hb + b) * 8); b = b + 1; }
+        if (floats > 0) {
+            print("  | ulp 0:", 10);
+            fmt_int(load64(_par_fn_h + hb * 8));
+            print(" 1:", 3);
+            fmt_int(load64(_par_fn_h + (hb + 1) * 8));
+            print(" 2:", 3);
+            fmt_int(load64(_par_fn_h + (hb + 2) * 8));
+            print(" 3-16:", 6);
+            fmt_int(load64(_par_fn_h + (hb + 3) * 8));
+            print(" >16:", 5);
+            fmt_int(load64(_par_fn_h + (hb + 4) * 8));
+            print(" nan/inf:", 9);
+            fmt_int(load64(_par_fn_h + (hb + 5) * 8));
+            var mx = load64(_par_fn_max + at);
+            if (mx < 0x7FFFFFFFFFFFFFFF) { print(" max:", 5); fmt_int(mx); }
+        }
+        println("");
+        k = k + 1;
+    }
+}
+
+# ── driver ──────────────────────────────────────────────────────────────────────────
+var _par_rows_ok = 0;
+var _par_rows_fail = 0;
+var _par_rows_meas = 0;
+var _par_rows_pend = 0;
+
+# The index of the next byte `c` in [p + at, p + end), or `end`.
+#must_use
+fn _par_find(p, at, end, c): i64 {
+    var k = at;
+    while (k < end && load8(p + k) != c) { k = k + 1; }
+    return k;
+}
+
+# Replays one module. Returns 1 if it has a failure (or can't be read), else 0.
+fn _par_module(mp, ml): i64 {
+    var path[128];
+    var pre = "tests/golden/";
+    var pl = strlen(pre);
+    if (pl + ml + 5 > 127) { return 1; }
+    memcpy(&path, pre, pl);
+    memcpy(&path + pl, mp, ml);
+    memcpy(&path + pl + ml, ".tsv", 4);
+    store8(&path + pl + ml + 4, 0);
+
+    var lenw[8];
+    var buf = file_read_whole(&path, &lenw);
+    var len = load64(&lenw);
+    print("=== parity: ", 12);
+    print(mp, ml);
+    if (buf == 0) { println(" — cannot read the golden file"); return 1; }
+    println(" ===");
+
+    _par_fn_n = 0;
+    var fails_shown = 0;
+    var outliers_shown = 0;
+    var mod_fail = 0;
+    var line = 0;
+    while (line < len) {
+        var eol = _par_find(buf, line, len, 10);
+        if (eol > line && load8(buf + line) != 35) {
+            # fn <TAB> class <TAB> inputs <TAB> outputs <TAB> note
+            var t1 = _par_find(buf, line, eol, 9);
+            var t2 = _par_find(buf, t1 + 1, eol, 9);
+            var t3 = _par_find(buf, t2 + 1, eol, 9);
+            var t4 = _par_find(buf, t3 + 1, eol, 9);
+            var fp = buf + line;
+            var fl = t1 - line;
+            var cls = load8(buf + t1 + 1);
+            var bad = 0;
+            if (t4 >= eol || t2 != t1 + 2) { bad = 1; }
+            if (bad == 0) {
+                _par_in_n = _par_tokens(buf + t2 + 1, t3 - t2 - 1, _par_in_k, _par_in_v, _par_in_l);
+                _par_want_n = _par_tokens(buf + t3 + 1, t4 - t3 - 1, _par_want_k, _par_want_v, _par_want_l);
+                if (_par_in_n < 0 || _par_want_n < 0) { bad = 1; }
+            }
+            var slot = _par_fn_slot(fp, fl, cls);
+            if (slot < 0) { println("  too many functions in one module"); return 1; }
+            _par_bump(_par_fn_rows, slot);
+            var outcome = 0;
+            if (bad == 0) {
+                var h = _par_dispatch(mp, ml, fp, fl);
+                if (h == 0) { outcome = 3; }
+                elif (h == 1) { outcome = _par_compare(slot, cls, fp, fl); }
+            }
+            if (outcome == 1) { _par_bump(_par_fn_ok, slot); _par_rows_ok = _par_rows_ok + 1; }
+            elif (outcome == 2) {
+                _par_bump(_par_fn_meas, slot);
+                _par_rows_meas = _par_rows_meas + 1;
+                if (_par_outlier == 1 && outliers_shown < 10) {
+                    print("  OUTLIER (measured, not gated): ", 33);
+                    print(buf + t4 + 1, eol - t4 - 1);
+                    println("");
+                    ulp_print_pair(load64(_par_got_v), load64(_par_want_v));
+                    outliers_shown = outliers_shown + 1;
+                }
+            }
+            elif (outcome == 3) { _par_bump(_par_fn_pend, slot); _par_rows_pend = _par_rows_pend + 1; }
+            else {
+                _par_bump(_par_fn_fail, slot);
+                _par_rows_fail = _par_rows_fail + 1;
+                mod_fail = 1;
+                if (fails_shown < 10) {
+                    eprint("  FAIL: ", 8);
+                    eprint(buf + t4 + 1, eol - t4 - 1);
+                    eprint("\n", 1);
+                    if (bad == 0 && _par_got_n > 0) {
+                        ulp_print_pair(load64(_par_got_v), load64(_par_want_v));
+                    }
+                    fails_shown = fails_shown + 1;
+                }
+            }
+        }
+        line = eol + 1;
+    }
+    _par_report_fns();
+    return mod_fail;
+}
+
+# The token and statistics buffers live on the heap: as statics they would push the test
+# past the compiler's 128 KiB static-data advisory, and a warning fails the gate.
+fn _par_alloc(): i64 {
+    _par_in_k = alloc(512);
+    if (_par_in_k == 0) { println("parity: out of memory"); return 1; }
+    _par_in_v = alloc(512);
+    if (_par_in_v == 0) { println("parity: out of memory"); return 1; }
+    _par_in_l = alloc(512);
+    if (_par_in_l == 0) { println("parity: out of memory"); return 1; }
+    _par_want_k = alloc(512);
+    if (_par_want_k == 0) { println("parity: out of memory"); return 1; }
+    _par_want_v = alloc(512);
+    if (_par_want_v == 0) { println("parity: out of memory"); return 1; }
+    _par_want_l = alloc(512);
+    if (_par_want_l == 0) { println("parity: out of memory"); return 1; }
+    _par_got_k = alloc(512);
+    if (_par_got_k == 0) { println("parity: out of memory"); return 1; }
+    _par_got_v = alloc(512);
+    if (_par_got_v == 0) { println("parity: out of memory"); return 1; }
+    _par_got_l = alloc(512);
+    if (_par_got_l == 0) { println("parity: out of memory"); return 1; }
+    _par_fn_p = alloc(768);
+    if (_par_fn_p == 0) { println("parity: out of memory"); return 1; }
+    _par_fn_l = alloc(768);
+    if (_par_fn_l == 0) { println("parity: out of memory"); return 1; }
+    _par_fn_cls = alloc(768);
+    if (_par_fn_cls == 0) { println("parity: out of memory"); return 1; }
+    _par_fn_rows = alloc(768);
+    if (_par_fn_rows == 0) { println("parity: out of memory"); return 1; }
+    _par_fn_ok = alloc(768);
+    if (_par_fn_ok == 0) { println("parity: out of memory"); return 1; }
+    _par_fn_fail = alloc(768);
+    if (_par_fn_fail == 0) { println("parity: out of memory"); return 1; }
+    _par_fn_meas = alloc(768);
+    if (_par_fn_meas == 0) { println("parity: out of memory"); return 1; }
+    _par_fn_pend = alloc(768);
+    if (_par_fn_pend == 0) { println("parity: out of memory"); return 1; }
+    _par_fn_h = alloc(4608);
+    if (_par_fn_h == 0) { println("parity: out of memory"); return 1; }
+    _par_fn_max = alloc(768);
+    if (_par_fn_max == 0) { println("parity: out of memory"); return 1; }
+    return 0;
+}
+
+# Replays every module in tests/golden/modules.txt and prints the summary. Returns the number
+# of modules with a failure.
+fn main(): i64 {
+    if (_par_alloc() != 0) { return 1; }
+    var lenw[8];
+    var idx = file_read_whole("tests/golden/modules.txt", &lenw);
+    if (idx == 0) { println("parity: cannot read tests/golden/modules.txt"); return 1; }
+    var len = load64(&lenw);
+    var failing = 0;
+    var modules = 0;
+    var line = 0;
+    while (line < len) {
+        var eol = _par_find(idx, line, len, 10);
+        if (eol > line && load8(idx + line) != 35) {
+            failing = failing + _par_module(idx + line, eol - line);
+            modules = modules + 1;
+        }
+        line = eol + 1;
+    }
+    print("=== parity summary: ", 20);
+    fmt_int(modules);
+    print(" modules, ", 10);
+    fmt_int(failing);
+    print(" failing | rows: ", 17);
+    fmt_int(_par_rows_ok);
+    print(" ok, ", 5);
+    fmt_int(_par_rows_fail);
+    print(" failed, ", 9);
+    fmt_int(_par_rows_meas);
+    print(" measured, ", 11);
+    fmt_int(_par_rows_pend);
+    println(" pending ===");
+    return failing;
+}
+
+var exit_code = main();
+sys_exit_group(exit_code);

@@ -338,14 +338,44 @@ gets something wrong, repair the output here and file the defect upstream (step 
      - Three have none: the proton/neutron level orders, the leap-second table and the USNO
        segments. Each needs a decision at its milestone, and none may be re-typed.
    - Class-A golden rows (§4) pin every generated constant and table cell bit for bit.
-7. **Parity harness.**
-   - `tests/parity.tcyr` loads `tests/golden/*.tsv` and checks each row within its class. It
-     prints counts per module.
-   - Its exit code is the number of failing modules, following the ecosystem repro
-     convention. That is at most 13, so the 8-bit exit status can't wrap.
-   - `lib/assert.cyr` has no float assertion, so add `tests/ulp.cyr` with
-     `assert_bits_eq(got, want, label)` and `assert_ulp(got, want, max_ulp, label)`. The
-     reference-value tests use the same file.
+7. ✅ **Parity harness. Done 2026-11-08.**
+   - **`tests/parity.tcyr`** replays every module listed in `tests/golden/modules.txt`. The
+     generator writes that list, so a new module can't go untested. It checks each row
+     within its class (README *Comparison*) and gives it one outcome:
+     - ok;
+     - **FAILED**: the first 10 per module are printed with the row's note and both bit
+       patterns;
+     - **measured**: class C with no bound set yet, recorded but not gated until step 8;
+       outliers beyond 16 ulp or with a NaN/∞ mismatch are printed;
+     - **pending**: the function isn't ported yet.
+   - **Report.** Per function it prints the row counts and an ulp histogram (0, 1, 2, 3–16,
+     >16, NaN/∞), which is the step 8 baseline.
+   - **Exit code.** It is the number of failing modules, following the ecosystem repro
+     convention, at most 13. A missing golden file fails its module.
+   - **Dispatchers.** One per module maps a golden `fn` name to the Cyrius call. A function
+     gets its entry the moment it is ported. So far:
+     - `constants`: all 34, bit-identical;
+     - `libm`: sqrt, fabs, floor, trunc and cbrt are class A, and all are bit-identical;
+       sin, cos, tan, exp, log, sinh, pow and hypot are class C, measured. `libm::round`
+       (the half-away helper, M5) and `libm::ldexp` (the exp2 scaling, M2) are pending.
+   - **Buffers.** The token and statistics buffers are heap-allocated: as statics they
+     would cross the compiler's 128 KiB static-data advisory, and a warning fails the gate.
+   - **`tests/ulp.cyr`** (`lib/assert.cyr` has no float assertion) provides:
+     - `ulp_bits_match`, `ulp_distance` (ordered-integer, ±0 as one point), `ulp_rel_match`
+       and `ulp_rel_err`;
+     - the assert wrappers `assert_bits_eq`, `assert_ulp` and `assert_rel`, which count
+       through `assert`, so the reference-value tests use the same file.
+   - **Verified.**
+     - Negative tests all fail as they should, with exit 1: a tampered constant, a
+       malformed token and a missing golden file.
+     - `cyrius test`, `test --bounds` and `audit` pass, with no warnings.
+   - **First x86_64 result:** 4,574 rows ok, 0 failed, 6,044 measured, 7,835 pending.
+     - cbrt (2,074 rows), sqrt, sin, cos and tan are bit-identical to libm.
+     - exp, log, sinh and pow are within 1 ulp, and hypot within 2.
+     - **One real defect:** ganita `pow(-1, y)` gives +∞ for y > 2^64, and +0 for
+       y < −2^64, instead of 1. It is filed as
+       `ganita/docs/development/issues/2026-11-08-pow-minus-one-huge-even-exponent.md`, with
+       a self-proving repro. tanmatra's own `pow` bases are all positive.
 8. **Baseline measurements.** Before porting any formula, run the golden inputs through each
    Cyrius function tanmatra uses (§5 table) against Rust `libm`.
    - Run it **on every CI target**. On x86_64, `f64_exp` and `f64_ln` go through x87, so
@@ -552,7 +582,7 @@ and isnan. tanmatra uses none of them; test for NaN with `x != x`.
 
 | Milestone | Status | Golden rows | Reference tests | Benches | Notes |
 |---|---|---|---|---|---|
-| M0 Initialize | ◐ steps 0–4 done; steps 5–6 built | 18,453 (M1 modules + `libm`) | — | — | 2026-11-08: the oracle is frozen green; the scaffold is in place and repaired; manifest and ganita 1.2.15 checked; all gates pass. `scripts/oracle/` generates the golden corpus and the M1 data modules (`constants.cyr`, `particle_data.cyr`), all verified through the Cyrius compiler. Next: step 7 (parity harness), step 8 (baselines from `libm.tsv`) |
+| M0 Initialize | ◐ steps 0–4 and 7 done; steps 5–6 built | 18,453 (M1 modules + `libm`); 4,574 ok, 0 failed | — | — | 2026-11-08: the oracle is frozen green; the scaffold is in place and repaired; all gates pass. `scripts/oracle/` generates the golden corpus and the M1 data modules. `tests/parity.tcyr` replays the corpus: constants and the class-A libm functions are bit-identical. It found a ganita pow defect, filed upstream. Next: step 8 (per-target baselines and class-C bounds) |
 | M1 Foundation | ☐ | | | | |
 | M2 Nuclear | ☐ | | | | |
 | M5 Timekeeping | ☐ | | | | |

@@ -32,6 +32,9 @@ python3 -I scripts/oracle/probe_tables.py .                                     
   emitter (`src/m_<module>.rs`, with the grid from the port plan §3) and its data-module
   emitter (`src/t_<module>.rs`), and registering them in `src/main.rs`.
 - **`--check` flags any `.tsv` in `tests/golden/` without an emitter as stale.**
+- **`tests/golden/modules.txt`**, also generated, lists every module. `tests/parity.tcyr`
+  replays exactly that list, so an emitter added here is replayed at once, as pending until
+  its functions get dispatcher entries.
 
 | Module | Milestone | Golden rows | Golden emitter | Generated Cyrius |
 |---|---|---|---|---|
