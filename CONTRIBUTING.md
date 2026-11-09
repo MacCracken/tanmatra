@@ -12,41 +12,45 @@ Thank you for your interest in contributing to tanmatra.
 
 ## Prerequisites
 
-- Rust stable (MSRV 1.89)
-- Components: `rustfmt`, `clippy`
-- Optional: `cargo-audit`, `cargo-deny`
+- The Cyrius toolchain at the version pinned in `cyrius.cyml` (`[package].cyrius`)
+- Rust stable (MSRV 1.89), only to run the frozen oracle in `rust-old/` and the generators in `scripts/oracle/`
+
+tanmatra is being ported from Rust to Cyrius. The plan of record is
+[`docs/development/tanmatra-port-plan.md`](docs/development/tanmatra-port-plan.md).
+`rust-old/` is the parity oracle: never edit it.
 
 ## Cleanliness Check
 
 Every change must pass:
 
 ```bash
-cargo fmt --check
-cargo clippy --all-features --all-targets -- -D warnings
-cargo test --all-features
-cargo test --no-default-features
-RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps
-cargo audit
-cargo deny check
+cyrius fmt --check src/*.cyr tests/*.tcyr
+cyrius lint src/*.cyr
+cyrius build src/main.cyr build/tanmatra
+cyrius test            # must also be warning-free
+cyrius test --bounds
+cyrius bench
+cyrius deps --locked
+cyrius audit
 ```
 
 ## Code Conventions
 
-- `#[non_exhaustive]` on all public enums
-- `#[must_use]` on all pure functions
-- Serde (`Serialize + Deserialize`) on all public types
-- Zero `unwrap`/`panic` in library code
-- `no_std` compatible -- use `alloc` not `std` collections
-- All physics values must use CODATA 2022 / NIST data
-- Feature-gate optional modules
+- Public enums have explicit, append-only numeric values; never renumber them
+- `#must_use` on all pure functions
+- No aborts in library code: no `+?` / `-?` / `*?`, `assert_fatal` or `result_unwrap` in `src/`
+- f64 hygiene: bind call results to `: f64` locals; no hex in a `const`; `-x`, never `(0 - x)`, on an f64
+- All physics values must use CODATA 2022 / NIST / PDG / NNDC data. Tables are generated, never typed by hand
+- Feature-gate optional modules (`[features]` + `[lib.<profile>]`)
 
-## Adding a New Module
+## Porting a Module
 
-1. Create `src/my_module.rs` following the pattern in existing modules
-2. Register in `lib.rs`: module declaration, prelude export, Send+Sync assertion
-3. Add integration tests: physics accuracy, edge cases, serde roundtrip
-4. Add a criterion benchmark
-5. Document data sources (CODATA, NIST, etc.)
+1. Read the module's milestone in the port plan (§3) and its golden grid
+2. Write `src/<module>.cyr` and append it to `[lib] modules` in dependency order
+3. Add its golden rows (`scripts/oracle/`) and port its reference-value tests to `tests/*.tcyr`
+4. Add a bench to `tests/*.bcyr` and record it against the Rust number
+5. Check surface parity: every in-scope Rust `pub fn` has a Cyrius counterpart or a written reason
+6. Update the CHANGELOG, `docs/development/state.md` and the port plan's tracking table
 
 ## License
 

@@ -1,0 +1,65 @@
+# tanmatra — Current State
+
+> Refreshed every release and at every port milestone. `CLAUDE.md` is
+> preferences/process/procedures (durable); this file is **state** (volatile).
+
+## Version
+
+**1.3.0** (`VERSION`). This is the last release, the Rust crate, now frozen as the oracle
+in `rust-old/`. The Cyrius port ships as **2.0.0** at M7, and `VERSION` stays 1.3.0 until
+then. `cyrius.cyml` reads it through `version = "${file:VERSION}"`.
+
+## Port progress
+
+Plan of record: [`tanmatra-port-plan.md`](tanmatra-port-plan.md).
+
+| Milestone | Status |
+|---|---|
+| M0 Initialize | ◐ steps 0–4 done 2026-11-08. Rust oracle frozen green; `cyrius port` scaffold; CLAUDE.md, roadmap and docs repaired; manifest configured; ganita 1.2.15 confirmed. **Next: steps 5–8**: golden and table generators in `scripts/oracle/`, the parity harness with `tests/ulp.cyr`, per-target ulp baselines |
+| M1 – M7 | ☐ not started |
+
+## Toolchain
+
+- **Cyrius pin**: `6.7.18` (in `cyrius.cyml` `[package].cyrius`)
+- **ganita**: 1.2.15, from the 6.7.18 stdlib bundle (`lib/ganita.cyr`)
+- **Rust oracle**: tanmatra 1.3.0 at `rust-old/`. It is green on rustc 1.99.1: 476 unit + 20 integration + 2 doc tests, clippy `-D warnings` and `cargo deny`
+
+## Source
+
+- **Rust reference:** 11,419 lines at `rust-old/`, frozen; do not edit. `rust-old/docs/` keeps the Rust testing guide and
+  architecture overview; `rust-old/.github/` and `rust-old/scripts/` keep the Rust CI and the cargo scripts.
+- **Cyrius port:** the scaffold only, with a `src/main.cyr` stub. `[lib]` gets its first module (`src/error.cyr`) in M1.
+
+## Tests
+
+- `tests/tanmatra.tcyr`: scaffold smoke test (2 assertions)
+- `tests/tanmatra.bcyr`: scaffold noop bench
+- `tests/tanmatra.fcyr`: scaffold fuzz stub
+- Parity harness and golden corpus: not yet (M0 steps 5–7)
+
+Gates green on the scaffold (2026-11-08):
+- `cyrius build`, `test`, `test --bounds` and `bench`
+- `lint`, `vet` and `fmt --check`
+- `deps --locked` and `audit`
+
+## Dependencies
+
+Direct (declared in `cyrius.cyml`):
+
+- **stdlib:** syscalls, string, alloc, str, fmt, io, vec, math, ganita, overflow
+- **test stdlib** (`[test] stdlib`; test, bench and fuzz builds only): assert, bench
+- **prakash 2.15.1:** optional, behind the `optics` feature, from M6
+
+## Consumers
+
+prakash, kiran and joshua consume the Rust crate. No Cyrius consumer builds against tanmatra yet.
+
+## Upstream issues filed
+
+- `cyrius/docs/development/issues/2026-11-08-cyrius-port-clobbers-project-docs-and-omits-bench.md`. `cyrius port` overwrites
+  CLAUDE.md, the roadmap, state.md and the workflows. It also pins `version = "0.1.0"` and omits `bench` from `[test] stdlib`.
+  Its stubs fail `cyrius audit` (undocumented functions), and its `--dry-run` under-reports.
+
+## Next
+
+M0 steps 5–8; see the port plan §2.

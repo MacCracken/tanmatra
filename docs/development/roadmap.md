@@ -4,7 +4,7 @@
 
 **Plan of record: [`tanmatra-port-plan.md`](tanmatra-port-plan.md).**
 
-▶ **Starts on Cyrius 6.7.18**, which bundles ganita 1.2.15 with a correctly rounded `f64_cbrt`. The plan was revised against 6.7.18 on 2026-11-08. M0 step 0 is done: the Rust oracle is frozen green on rustc 1.99.1. Next is `cyrius port`.
+▶ **Starts on Cyrius 6.7.18**, which bundles ganita 1.2.15 with a correctly rounded `f64_cbrt`. The plan was revised against 6.7.18 on 2026-11-08. **M0 is in progress.** The Rust oracle was frozen green on rustc 1.99.1 (step 0), and `cyrius port` has scaffolded the Cyrius project with Rust 1.3.0 in `rust-old/` (steps 1–4). Next: the golden and table generators in `scripts/oracle/`, the parity harness and the per-target ulp baselines. Live status is in [`state.md`](state.md).
 
 - **Rust 1.3.0 is the final Rust feature release** and the reference implementation: every finding of the [2026-09-16 audit](../audit/2026-09-16-math-audit.md) is repaired and pinned by reference-value tests.
 - **tanmatra 2.0.0 is the Cyrius port**, initialized with `cyrius port` (Rust moves to `rust-old/` as the parity oracle).

@@ -1,7 +1,7 @@
 # ADR-003: `no_std` First
 
 **Date**: 2026-03-26
-**Status**: Accepted
+**Status**: Superseded by 0006 (2026-11-08). `no_std`, `alloc` and `libm` are Rust-only mechanics; tanmatra 2.0.0 is Cyrius, where the port plan sets the math surface.
 
 ## Context
 

@@ -7,6 +7,11 @@
 [![docs.rs](https://docs.rs/tanmatra/badge.svg)](https://docs.rs/tanmatra)
 [![license](https://img.shields.io/crates/l/tanmatra.svg)](LICENSE)
 
+> **Status: porting to Cyrius.** tanmatra **2.0.0** will be a Cyrius library. The Rust crate
+> **1.3.0** (the crates.io and docs.rs release) is frozen in [`rust-old/`](rust-old/) as the
+> reference implementation, and every ported function is checked against it value by value.
+> See the [port plan](docs/development/tanmatra-port-plan.md) and [current state](docs/development/state.md).
+
 ## Modules
 
 | Module | Description |
@@ -23,7 +28,9 @@
 | `optics` | prakash integration for spectral line visualization (feature-gated) |
 | `error` | `TanmatraError` with 6 variants |
 
-## Quick Start
+## Quick Start (Rust 1.3.0)
+
+The Cyrius API lands module by module during the port. Until then, this is the Rust API in `rust-old/`:
 
 ```rust
 use tanmatra::prelude::*;
@@ -47,14 +54,22 @@ println!("gamma = {:.3}", p.gamma());
 
 ## Building
 
+Cyrius (toolchain pinned in `cyrius.cyml`):
+
 ```bash
-make check    # fmt + clippy + test + audit
-make bench    # criterion benchmarks (19 suites)
-make doc      # rustdoc with -D warnings
-make coverage # tarpaulin coverage report
+cyrius deps                               # vendor the stdlib into lib/
+cyrius build src/main.cyr build/tanmatra  # compile
+cyrius test                               # tests/*.tcyr
+cyrius bench                              # tests/*.bcyr
+cyrius audit                              # fmt + lint + test + bench
 ```
 
-**MSRV**: Rust 1.89
+Rust oracle (1.3.0, MSRV 1.89), read-only:
+
+```bash
+cargo test --manifest-path rust-old/Cargo.toml --all-features
+cargo bench --manifest-path rust-old/Cargo.toml
+```
 
 ## Data Sources
 
@@ -71,7 +86,9 @@ make coverage # tarpaulin coverage report
 | CIPM 2025, IERS Conventions 2010, IERS Bulletin C | Frequency standards, time scales, leap seconds |
 | Storey & Hummer (1995) | Case B Balmer intensities |
 
-## Feature Flags
+## Feature Flags (Rust 1.3.0)
+
+In Cyrius 2.0.0, `optics` becomes a `[features]` entry plus a `[lib.optics]` bundle (port plan M6).
 
 | Feature | Default | Description |
 |---------|---------|-------------|

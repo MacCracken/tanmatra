@@ -1,0 +1,30 @@
+[package]
+name = "tanmatra"
+version = "${file:VERSION}"
+description = "tanmatra — atomic and subatomic physics: Standard Model, nuclear structure, radioactive decay, spectral lines, atomic timekeeping"
+license = "GPL-3.0-only"
+repository = "https://github.com/MacCracken/tanmatra"
+language = "cyrius"
+cyrius = "6.7.18"
+
+[build]
+entry = "src/main.cyr"
+output = "build/tanmatra"
+
+# stdlib leaves, vendored into lib/ by `cyrius deps` and prepended to every compile.
+#   math     — f64_sin / f64_cos on every target; exp / ln / atan on aarch64
+#   ganita   — ganita_f64_cbrt / pow / sinh / tan / hypot (ganita 1.2.15 in the 6.7.18 bundle)
+#   overflow — the saturating `+|` / `-|` / `*|` operators (AtomicInstant)
+[deps]
+stdlib = ["syscalls", "string", "alloc", "str", "fmt", "io", "vec", "math", "ganita", "overflow"]
+
+# Test / bench / fuzz compiles only.
+[test]
+stdlib = ["assert", "bench"]
+
+# [lib] arrives in M1 with its first module (an empty `modules = []` is invalid for distlib).
+# Dependency order, per the port plan §2 step 3:
+#   error → constants → particle → relativity → nucleus_data → nucleus → shell_model →
+#   decay_data → decay → atomic_data → atomic_config → atomic_hydrogenic → atomic_qed →
+#   reaction_data → reaction → scattering → timekeeping
+# [lib.optics], [features] optics and the optional [deps.prakash] (tag 2.15.1) arrive in M6.

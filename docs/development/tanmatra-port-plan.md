@@ -160,23 +160,24 @@ gets something wrong, repair the output here and file the defect upstream (step 
      Apache-2.0, GPL-3.0-only and Unicode-3.0. The other seven were never matched.
    - Only tests and lint config changed, so `VERSION` stays **1.3.0**.
    - The full P(-1) cleanliness check is clean on rustc 1.99.1.
-1. **Scaffold.**
+1. ✅ **Scaffold. Done 2026-11-08.**
    ```sh
    cd /home/macro/Repos/tanmatra
    cyrius port --dry-run .
    cyrius port .
    ```
-   This was verified on a copy of the repo on 2026-11-08.
    - **Moved into `rust-old/`:** `Cargo.toml`, `Cargo.lock`, `src/`, `tests/`, `benches/`,
-     `examples/`, `Makefile`, `codecov.yml` and `deny.toml`.
+     `examples/`, `Makefile`, `codecov.yml`, `deny.toml` and `target/`. `--dry-run` lists
+     none of these by name.
    - **Written:** `src/main.cyr`, `cyrius.cyml` (pinned to `cyrius = "6.7.18"`, with no
-     `[lib]`), `cyrius.lock`, `lib/`, `tests/tanmatra.{tcyr,bcyr,fcyr}`,
-     `docs/{adr,architecture,guides,examples}/` and `docs/development/state.md`.
+     `[lib]`), `.gitattributes` (`lib/** -text`), `tests/tanmatra.{tcyr,bcyr,fcyr}`,
+     `docs/{adr,architecture,guides,examples}/` and `docs/development/state.md`. `lib/` and
+     `cyrius.lock` come from the first `cyrius deps` (step 3).
    - **Left alone:** `CHANGELOG.md`, `README.md`, `docs/audit/`, this plan and `scripts/`.
-2. **Repair what the scaffold overwrites.**
-   - **`CLAUDE.md` is replaced.** Restore it with `git show HEAD:CLAUDE.md` and merge in the
-     scaffold's Cyrius gate commands. Keep the project identity, consumers, process and
-     DO NOT list. Translate the Rust key principles:
+2. ✅ **Repair what the scaffold overwrites. Done 2026-11-08.**
+   - **`CLAUDE.md` is replaced.** It was merged from `git show HEAD:CLAUDE.md` and the
+     scaffold's Cyrius rules, keeping the project identity, consumers, process and DO NOT
+     list. The Rust key principles were translated:
 
      | Rust principle | Cyrius equivalent |
      |---|---|
@@ -185,20 +186,34 @@ gets something wrong, repair the output here and file the defect upstream (step 
      | serde on every type | JSON only for exchange types (M7) |
      | zero unwrap/panic | no `+?`, `-?`, `*?`, `assert_fatal` or `result_unwrap` in `src/` |
 
-   - **`docs/development/roadmap.md` is replaced** (123 → 36 lines). Restore it from git.
-   - **`.gitignore` and `.github/workflows/{ci,release}.yml` are replaced.** Keep the
-     scaffold's Cyrius CI. Re-add the Rust oracle job only if the golden corpus is to be
-     regenerated in CI; otherwise regenerate it locally.
-   - Move `scripts/bench-history.sh` and `scripts/version-bump.sh` (cargo scripts) to
-     `rust-old/scripts/`, and replace them with Cyrius equivalents when needed.
-   - **File upstream** in `cyrius/docs/development/issues/`:
-     - `cyrius port` overwrites an existing `CLAUDE.md` and roadmap without merging;
-     - it writes `version = "0.1.0"` when `VERSION` already exists;
-     - it leaves `bench` out of `[test] stdlib`, so `cyrius bench` and `cyrius audit` fail
-       straight after scaffolding.
-3. **`cyrius.cyml`.** The shape below is from `cyrius help manifest` and prakash's manifest.
-   Confirm the `[features]` / `optional` keys when M6 adds the profile; prakash doesn't use
-   them, so this is new ground.
+   - **`docs/development/roadmap.md` is replaced** (123 → 36 lines). It was restored from
+     git. `docs/development/state.md` was rewritten for the real version (1.3.0, not 0.1.0).
+   - **`.github/workflows/{ci,release}.yml` are replaced.**
+     - The scaffold's Cyrius CI is kept, extended with `test --bounds`, `deps --locked` and
+       `audit` steps.
+     - The Rust workflows are kept for reference in `rust-old/.github/workflows/`; GitHub
+       doesn't run them there.
+     - The golden corpus is regenerated locally, so CI has no Rust job.
+     - `.gitignore` is appended to, not replaced: `/rust-old/target/` and `/build/`.
+   - **Other Rust-only material moved to `rust-old/`:**
+     - `scripts/bench-history.sh` and `scripts/version-bump.sh` → `rust-old/scripts/`;
+     - `docs/guides/testing.md` and `docs/architecture/overview.md` → `rust-old/docs/`.
+   - **ADRs.** `docs/decisions/001`–`005` → `docs/adr/0001`–`0005`, the scaffold's four-digit
+     convention. ADR 0006 records the port decision and supersedes 0003 (`no_std`).
+   - **Filed upstream:**
+     `cyrius/docs/development/issues/2026-11-08-cyrius-port-clobbers-project-docs-and-omits-bench.md`.
+     - It overwrites `CLAUDE.md`, the roadmap, `state.md` and the workflows.
+     - It writes `version = "0.1.0"` despite `VERSION`, and its own `release.yml` then fails the
+       first tag.
+     - It leaves `bench` out of `[test] stdlib`.
+     - Its stub files have six undocumented functions, so `cyrius audit` fails (exit 1) until
+       they get doc comments. tanmatra's stubs are documented now.
+     - `--dry-run` doesn't list what it moves or overwrites.
+3. ✅ **`cyrius.cyml`. Done 2026-11-08** for everything except `[lib]` (M1) and
+   `[deps.prakash]` / `[features]` / `[lib.optics]` (M6). `cyrius deps` vendors `lib/` and
+   writes `cyrius.lock`. Both are committed, as in prakash. The shape below comes from
+   `cyrius help manifest` and prakash's manifest. Confirm the `[features]` / `optional` keys
+   when M6 adds the profile; prakash doesn't use them, so this is new ground.
    ```toml
    [package]
    name = "tanmatra"
@@ -235,17 +250,23 @@ gets something wrong, repair the output here and file the defect upstream (step 
      shell_model → decay_data → decay → atomic_data → atomic_config → atomic_hydrogenic →
      atomic_qed → reaction_data → reaction → scattering → timekeeping.
    - `[lib] modules = []` is invalid, so `[lib]` gets its first entry, `src/error.cyr`, in M1.
-4. **ganita check.** Confirm that `lib/ganita.cyr` reports `1.2.15` and that
-   `ganita_f64_cbrt` is present. Use the canonical `ganita_f64_*` names throughout. The short
+4. ✅ **ganita check. Done 2026-11-08.** `lib/ganita.cyr` reports `1.2.15`, and
+   `ganita_f64_cbrt`, `_pow`, `_sinh`, `_tan` and `_hypot` are present. Use the canonical `ganita_f64_*` names throughout. The short
    aliases `f64_sinh`, `f64_pow`, `f64_atan2` and `f64_hypot` are marked *Deprecated alias …
    migration window only*.
-5. **Golden-value generator in `rust-old/`.**
-   - A Rust example, e.g. `rust-old/examples/golden.rs`, writes `tests/golden/<module>.tsv`.
+5. **Golden-value generator in `scripts/oracle/`.**
+   - It is a small cargo crate that depends on `rust-old/` by path (`tanmatra = { path =
+     "../../rust-old", features = ["optics"] }`). It never builds inside `rust-old/` and never
+     modifies it, which keeps the oracle frozen; ranga's `scripts/oracle/rust/` works the same
+     way.
+   - It writes `tests/golden/<module>.tsv`.
    - Each line is one call. Inputs and outputs are **IEEE-754 hex bit patterns**, followed by
      the tolerance class (§4). ranga's `scripts/oracle` uses the same format.
    - It covers every in-scope public function over the input grids listed per milestone.
    - It is the parity oracle and is regenerated only from Rust 1.3.0.
-6. **Table and constant generator in `rust-old/`.** Tables are generated, never re-typed: the
+6. **Table and constant generator in `scripts/oracle/`**, in the same crate as step 5. It
+   reads the values through the oracle's public API, or from the primary source files the
+   audit names, and never by parsing Rust source. Tables are generated, never re-typed: the
    audit found 17 of 32 AME rows and about 30 of 118 EA rows hand-transcribed wrong.
    - **Data modules** (`src/*_data.cyr`) are written as **baked typed column arrays**. Each
      array holds one field of the table, with a trailing comment giving the decimal value:
@@ -303,7 +324,8 @@ Each milestone ends with the same gates:
     *comparison mixes f64 and integer*.
   - From M6, also `cyrius test --features optics`.
 - `cyrius bench`, with the module's benches recorded against the Rust numbers.
-- `cyrius vet`, `cyrius lint` and `cyrius fmt --check`.
+- `cyrius vet <file>`, `cyrius lint <file>…` and `cyrius fmt --check <file>…`, which take file
+  arguments, and `cyrius audit`, which runs fmt, lint, test and bench over the project.
 - `cyrius distlib --all`, then `cyrius distlib --check` for the base bundle and every profile;
   then `cyrius deps --locked`.
 - **Surface parity** (ranga pattern):
@@ -470,7 +492,7 @@ and isnan. tanmatra uses none of them; test for NaN with `x != x`.
 
 | Milestone | Status | Golden rows | Reference tests | Benches | Notes |
 |---|---|---|---|---|---|
-| M0 Initialize | ◐ step 0 done | — | — | — | Cyrius 6.7.18 is installed (ganita 1.2.15, correctly rounded `f64_cbrt`). The Rust oracle is frozen green on rustc 1.99.1. Next: step 1, `cyrius port` |
+| M0 Initialize | ◐ steps 0–4 done | — | — | — | 2026-11-08: the oracle is frozen green; the scaffold is in place and repaired; manifest and ganita 1.2.15 checked. All scaffold gates pass (build, test, `--bounds`, bench, lint, vet, fmt, `deps --locked`, audit). Next: steps 5–8, the generators, the parity harness and the baselines |
 | M1 Foundation | ☐ | | | | |
 | M2 Nuclear | ☐ | | | | |
 | M5 Timekeeping | ☐ | | | | |

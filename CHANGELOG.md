@@ -7,12 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Maintenance only. The library and its behavior are unchanged, and `VERSION` stays 1.3.0.
+The Rust library and its behavior are unchanged, and `VERSION` stays 1.3.0 until the Cyrius port ships as 2.0.0.
 
 ### Changed
 - **tests**: 8 assertions updated for lints new in clippy 1.99 (`assert_is_empty`, `manual_midpoint`), so the Rust oracle is clean on rustc 1.99.1 before the Cyrius port freezes it.
 - **deny.toml**: the license allowlist is trimmed to the four licenses in the dependency graph (MIT, Apache-2.0, GPL-3.0-only, Unicode-3.0).
 - **docs**: `docs/development/tanmatra-port-plan.md` revised for Cyrius 6.7.18 (ganita 1.2.15). The 6.6.5 start condition is met.
+
+### Port — M0 steps 1–4 (2026-11-08)
+- **`cyrius port`** scaffolded the Cyrius project on 6.7.18. The Rust 1.3.0 crate moved to `rust-old/` as the frozen parity oracle: sources, tests, benches, examples, manifests and `target/`, plus the Rust CI (`rust-old/.github/`), cargo scripts (`rust-old/scripts/`), testing guide and architecture overview (`rust-old/docs/`). The oracle is green from its new location: 476 + 20 + 2 tests, clippy and deny.
+- **cyrius.cyml**: `version = "${file:VERSION}"`; stdlib `math`, `ganita` (1.2.15) and `overflow`; `bench` in `[test] stdlib`. `lib/` and `cyrius.lock` are vendored.
+- **CLAUDE.md**, **roadmap** and **state.md**: restored or rewritten after the scaffold replaced them, with the Cyrius gates and rules merged in.
+- **CI** keeps the scaffold's Cyrius workflow, plus `test --bounds`, `deps --locked` and `audit` steps.
+- **ADRs**: `docs/decisions/` → `docs/adr/` (four-digit names). New ADR 0006, the Cyrius port with the Rust oracle, supersedes 0003 (`no_std`).
+- **README** and **CONTRIBUTING** describe the port, the Cyrius build and the oracle.
+- The scaffold's stub functions (`src/main.cyr`, `tests/tanmatra.{tcyr,bcyr,fcyr}`) have doc comments now, so `cyrius audit` is clean.
+- Filed upstream: `cyrius/docs/development/issues/2026-11-08-cyrius-port-clobbers-project-docs-and-omits-bench.md`.
 
 ## [1.3.0] — 2026-09-16
 
