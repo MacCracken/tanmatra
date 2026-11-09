@@ -39,6 +39,7 @@ include "src/reaction.cyr"
 include "src/scattering.cyr"
 include "src/timekeeping_data.cyr"
 include "src/timekeeping.cyr"
+include "src/bridge.cyr"
 
 alloc_init();
 
@@ -1104,6 +1105,24 @@ fn _par_scattering(fp, fl): i64 {
     return 0;
 }
 
+# `bridge` rows: src/bridge.cyr, the chrono bridge.
+fn _par_bridge(fp, fl): i64 {
+    if (_par_eq(fp, fl, "utc_date_to_tai_offset") == 1) {
+        _par_got_i(utc_date_to_tai_offset(_par_in(0), _par_in(1)));
+        return 1;
+    }
+    var s: f64 = _par_in(0);
+    if (_par_eq(fp, fl, "tai_to_utc_seconds") == 1) {
+        _par_got_f(tai_to_utc_seconds(s, _par_in(1), _par_in(2)));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "utc_to_tai_seconds") == 1) {
+        _par_got_f(utc_to_tai_seconds(s, _par_in(1), _par_in(2)));
+        return 1;
+    }
+    return 0;
+}
+
 fn _par_dispatch(mp, ml, fp, fl): i64 {
     _par_got_n = 0;
     if (_par_eq(mp, ml, "constants") == 1) { return _par_constants(fp, fl); }
@@ -1116,6 +1135,7 @@ fn _par_dispatch(mp, ml, fp, fl): i64 {
     if (_par_eq(mp, ml, "atomic") == 1) { return _par_atomic(fp, fl); }
     if (_par_eq(mp, ml, "reaction") == 1) { return _par_reaction(fp, fl); }
     if (_par_eq(mp, ml, "scattering") == 1) { return _par_scattering(fp, fl); }
+    if (_par_eq(mp, ml, "bridge") == 1) { return _par_bridge(fp, fl); }
     return 0;
 }
 

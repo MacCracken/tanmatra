@@ -2,7 +2,7 @@
 # (port of rust-old/src/optics.rs, the Rust crate's `optics` feature).
 #
 # OPTIONAL: only the [lib.optics] profile (dist/tanmatra-optics.cyr) has this module; the core
-# bundle never pulls in prakash. prakash 2.15.1 is vendored by `cyrius deps --features optics`,
+# bundle never pulls in prakash. prakash 2.15.2 is vendored by `cyrius deps --features optics`,
 # and this is the one src/ file with an include. The Storey & Hummer intensities are the
 # generated optics_data.cyr.
 #

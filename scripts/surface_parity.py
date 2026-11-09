@@ -12,9 +12,11 @@ For each ported module it lists rust-old/src/<module>.rs's public items before
 - `impl Add for Struct`              -> `fn add(` inside `impl Tm<Struct> {` (the `+` operator)
 - `pub const X` (constants.rs)       -> `const TM_X =`
 - `TanmatraError::Variant`           -> `TM_ERR_<SNAKE>` in enum TmError
-Anything else needs an entry in EXCEPTIONS with its reason. Every file under rust-old/src must be in
+Anything else needs an entry in EXCEPTIONS with its reason. In a partly ported module (bridge), an item
+that waits on its consumer is listed in DEFERRED_ITEMS instead. Every file under rust-old/src must be in
 MODULES, DEFERRED_MODULES or NOT_APPLICABLE_MODULES (the full diff, port plan M7). Exits 1 on any item
-missing or any file unaccounted.
+missing, any file unaccounted, or a DEFERRED_ITEMS entry that is stale (no such Rust item) or already
+ported.
 """
 import re, sys
 from pathlib import Path
@@ -35,11 +37,32 @@ MODULES = {
     "reaction": {"values": set(), "structs": {"NuclearReaction"}},
     "scattering": {"values": set(), "structs": set()},
     "optics": {"values": set(), "structs": {"SpectralLine"}},
+    "bridge": {"values": set(), "structs": set()},
+}
+
+# The items of a partly ported module that wait on their consumers (port plan §1 and §6): module ->
+# {who they wait on: [items]}. They are counted, not checked. bridge.rs's chrono bridge is ported,
+# and its jyotish bridge `tai_to_tt` only calls timekeeping's, which the flat namespace already has.
+DEFERRED_ITEMS = {
+    "bridge": {
+        "bijli": ["energy_to_wavelength_nm", "nuclear_charge_field"],
+        "kimiya": ["atomic_number_to_valence", "neutron_count", "mass_to_binding_deficit_mev",
+                   "half_life_to_decay_constant"],
+        "the prakash-labelled helpers' later bridge port": ["transitions_to_wavelengths",
+                                                             "nuclear_spin_to_hyperfine_scale"],
+        "hisab-mimamsa": ["gravitational_time_dilation", "gravitational_time_offset_s"],
+        "falak": ["tai_seconds_to_jd_tt", "jd_tt_to_tai_seconds", "tai_seconds_to_mjd_tt"],
+        "kiran/joshua": ["SimulationClock::new", "SimulationClock::simulation_time", "SimulationClock::multiplier",
+                         "SimulationClock::is_paused", "SimulationClock::set_multiplier", "SimulationClock::pause",
+                         "SimulationClock::resume"],
+        "bhava": ["TimeContext::real_time", "TimeContext::from_simulation_clock", "TimeContext::tai_seconds",
+                  "TimeContext::effective_elapsed_s", "TimeContext::is_paused", "TimeContext::is_real_time",
+                  "TimeContext::multiplier"],
+    },
 }
 
 # Whole Rust files the port does not carry, with why; their public items are counted, not checked.
 DEFERRED_MODULES = {
-    "bridge": "deferred: waits on its consumers (bijli, kimiya) being in Cyrius (port plan §1)",
     "integration/soorat": "deferred: waits on soorat (port plan §1)",
 }
 NOT_APPLICABLE_MODULES = {
@@ -110,30 +133,45 @@ def impl_methods(struct):
     return set(re.findall(r"^\s+fn (\w+)\(", m.group(1), re.M)) if m else set()
 
 
+def has_counterpart(label, ty, name, kinds):
+    if label.startswith("const "):
+        return re.search(rf"^const TM_{name} =", cyr, re.M) is not None
+    if ty == "TanmatraError":
+        return re.search(rf"\bTM_ERR_{snake(name).upper()} =", cyr) is not None
+    if ty in kinds["structs"]:
+        return name in impl_methods(ty)
+    if ty in kinds["values"]:
+        return re.search(rf"^fn {snake(ty)}_{name}\(", cyr, re.M) is not None
+    return re.search(rf"^fn {name}\(", cyr, re.M) is not None
+
+
 missing = 0
 for module, kinds in MODULES.items():
     found = 0
     items = rust_items(module)
+    deferred = {lab: who for who, labs in DEFERRED_ITEMS.get(module, {}).items() for lab in labs}
+    labels = {label for label, _, _ in items}
+    for lab in deferred:
+        if lab not in labels:
+            missing += 1
+            print(f"STALE    {module}: DEFERRED_ITEMS names {lab}, which is not a Rust public item")
     for label, ty, name in items:
         if label in EXCEPTIONS:
             found += 1
             continue
-        if label.startswith("const "):
-            ok = re.search(rf"^const TM_{name} =", cyr, re.M) is not None
-        elif ty == "TanmatraError":
-            ok = re.search(rf"\bTM_ERR_{snake(name).upper()} =", cyr) is not None
-        elif ty in kinds["structs"]:
-            ok = name in impl_methods(ty)
-        elif ty in kinds["values"]:
-            ok = re.search(rf"^fn {snake(ty)}_{name}\(", cyr, re.M) is not None
-        else:
-            ok = re.search(rf"^fn {name}\(", cyr, re.M) is not None
+        ok = has_counterpart(label, ty, name, kinds)
+        if label in deferred:
+            if ok:
+                missing += 1
+                print(f"PORTED   {module}: {label} has its Cyrius name but is listed in DEFERRED_ITEMS")
+            continue
         if ok:
             found += 1
         else:
             missing += 1
             print(f"MISSING  {module}: {label}")
-    print(f"{module:<12} {found}/{len(items)} Rust public items have a Cyrius counterpart")
+    tail = f"; {len(deferred)} deferred until their consumers port" if deferred else ""
+    print(f"{module:<12} {found}/{len(items) - len(deferred)} Rust public items have a Cyrius counterpart{tail}")
 # Every file under rust-old/src must be ported, deferred or not applicable.
 known = set(MODULES) | set(DEFERRED_MODULES) | set(NOT_APPLICABLE_MODULES)
 for path in sorted((root / "rust-old/src").rglob("*.rs")):

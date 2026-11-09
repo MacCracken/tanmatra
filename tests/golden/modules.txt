@@ -1,5 +1,6 @@
 # tanmatra golden corpus: one module per line; tests/parity.tcyr replays each
 atomic
+bridge
 constants
 decay
 libm

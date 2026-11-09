@@ -3,8 +3,7 @@
 # round-trip test serde_roundtrip_spectral_line (SpectralLine is not an M7 exchange type).
 # The golden corpus separately checks every function against the oracle (tests/optics_parity.tcyr).
 #
-# Needs prakash: `cyrius deps --features optics`. prakash 2.15.1's bundle adds three compile
-# warnings of its own, accepted until prakash fixes them (see tests/optics_parity.tcyr).
+# Needs prakash 2.15.2: `cyrius deps --features optics`.
 
 include "tests/ulp.cyr"
 include "src/error.cyr"

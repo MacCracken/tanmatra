@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-11-09
+
+The chrono bridge, the first post-2.0.0 item (port plan §6), and prakash 2.15.2 for the optics profile. No API is
+removed or changed, and no golden value moves: the corpus grows by the bridge's 6,588 rows to 191,583, all within
+their class on x86_64 ELF, PE and aarch64.
+
+### Added
+- **The chrono bridge, the first bridge** (port plan §6), in the new `src/bridge.cyr`: `utc_date_to_tai_offset`,
+  `tai_to_utc_seconds` and `utc_to_tai_seconds`, with Rust's names and signatures, over the ported
+  `leap_seconds_at`. It is in both bundles.
+  - As in Rust, it takes plain values. A `lib/chrono.cyr` datetime supplies them: `dt_year`, `dt_month`, and
+    `dt_epoch_secs` + 378,691,200 s for this crate's 1958 epoch.
+  - **Verified.** All 6,588 `bridge.tsv` golden rows are 0 ulp on x86_64 ELF, PE and aarch64. `validate.py`
+    recomputes the conversions in Python and checks the offsets against `timekeeping.tsv` and the IERS shape.
+  - `tests/bridge.tcyr` ports the 4 Rust chrono tests. Three Cyrius-only tests drive the bridge from `lib/chrono.cyr`
+    for every month 1972–2035 and check ΔAT against tanmatra's MJD calendar (3,854 assertions). `chrono` joins
+    `[test] stdlib`; the library never includes it.
+  - Bench `bridge/utc_to_tai_seconds_1000`: 51.8 µs, 12× Rust's `Instant` time (the leap-table scan).
+- **Rust-test ledger:** 424 ported, 1 partial, 25 n/a, 48 deferred (was 420 / 52). **Surface parity** handles a
+  partly ported file. The bridge has 4 of 4 ported items present, and its other 27 are listed by the consumer each
+  waits on. A stale or already-ported entry fails the check.
+
+### Known limitation, filed upstream
+- **`lib/chrono.cyr` 6.7.18 gets every date before 1970 wrong, with no error**, so the chrono recipe holds from 1970
+  on (`src/bridge.cyr` says so). The bridge's ΔAT is 0 before 1972 anyway. Filed as
+  `cyrius/docs/development/issues/2026-11-09-chrono-dates-before-1970-silently-wrong.md`, with a self-proving repro.
+
+### Changed
+- **The optics profile pins prakash 2.15.2** (was 2.15.1). The 21 prakash functions that `src/optics.cyr` reaches
+  (`spd_new`, `spd_at`, `wavelength_to_rgb` and their callees) are byte-identical across the two releases. All
+  1,039 optics golden rows pass on x86_64, PE and aarch64, with the same ulp table, and the optics benches are
+  unchanged.
+- **hisab is no longer vendored.** prakash 2.15.2 made hisab a test-scope dependency, so `lib/hisab.cyr` (3.6 MB)
+  is gone. `cyrius.lock` was re-pinned, and its one commit pin is now prakash; the `sakshi` stdlib leaf stays, with
+  the same hash.
+- **`dist/tanmatra-optics.deps`**, which `cyrius distlib` derives by compile-verifying the fold, no longer lists
+  `sakshi` and `ganita`, which hisab had required. sakshi, the AGNOS logging library, still reaches an optics
+  consumer: prakash's own sidecar lists it, its bundle includes it, and the README has consumers list it in
+  `[deps] stdlib`, as tanmatra does.
+
+### Fixed
+- **`cyrius test` is warning-free in every file again.** prakash 2.15.2 fixed the three bundle warnings that 2.0.0
+  accepted in `tests/optics.tcyr` and `tests/optics_parity.tcyr`. tanmatra filed the issue, and prakash archived
+  it as fixed.
+
 ## [2.0.0] — 2026-11-08
 
 **tanmatra is a Cyrius library.** 2.0.0 ports the Rust crate 1.3.0, frozen in `rust-old/` as the parity oracle, to

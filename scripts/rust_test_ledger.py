@@ -28,7 +28,7 @@ FILES = {
     "src/reaction.rs": "tests/reaction.tcyr",
     "src/scattering.rs": "tests/scattering.tcyr",
     "src/optics.rs": "tests/optics.tcyr",
-    "src/bridge.rs": None,
+    "src/bridge.rs": "tests/bridge.tcyr",
     "src/integration/soorat.rs": None,
     "tests/integration.rs": "tests/integration.tcyr",
 }
@@ -42,11 +42,13 @@ DOC_TESTS = {
 SERDE = "n/a: serde round-trip. JSON is carried only for the exchange types (port plan §1, M7)"
 EXCHANGE = ("deferred: JSON for an exchange type, which M7 adds when a consumer needs it; no Cyrius "
             "consumer exists yet (port plan M7)")
-BRIDGE = ("deferred: bridge.rs waits on its consumers (bijli, kimiya) being in Cyrius "
-          "(port plan §1, *Deferred until the consumers exist*)")
+BRIDGE = ("deferred: the bridges to bijli, kimiya, hisab-mimamsa, falak, kiran/joshua and bhava, and the "
+          "prakash-labelled helpers, wait on their consumers being in Cyrius (port plan §1, *Deferred until the "
+          "consumers exist*). The chrono bridge is ported")
 SOORAT = "deferred: the soorat integration waits on soorat (port plan §1)"
 
-# (Rust file, test) -> why it has no port. Bridge and soorat tests are covered by file below.
+# (Rust file, test) -> why it has no port. Bridge and soorat tests are covered by file below
+# (for bridge.rs, the tests it has not ported).
 REASONS = {
     ("src/particle.rs", "serde_roundtrip_quark"): SERDE,
     ("src/particle.rs", "serde_roundtrip_lepton"): SERDE,
@@ -87,6 +89,7 @@ REASONS = {
     ("tests/integration.rs", "serde_roundtrip_decay_mode"): SERDE,
     ("tests/integration.rs", "serde_roundtrip_quantum_numbers"): SERDE,
 }
+# Rust file -> the reason for each of its tests that is not ported (the whole file, for soorat).
 WHOLE_FILE = {"src/bridge.rs": BRIDGE, "src/integration/soorat.rs": SOORAT}
 
 
@@ -177,7 +180,9 @@ md.append("|---|---|---|")
 for rel, t, reason in notes:
     md.append(f"| `{rel}` | `{t}` | {reason} |")
 for rel, reason in WHOLE_FILE.items():
-    md.append(f"| `{rel}` | all {len(rust_tests(rel))} | {reason} |")
+    left = [t for t in rust_tests(rel) if t not in cyrius_tests(FILES[rel])]
+    which = f"all {len(left)}" if len(left) == len(rust_tests(rel)) else f"the other {len(left)}"
+    md.append(f"| `{rel}` | {which} | {reason} |")
 md.append("")
 text = "\n".join(md)
 

@@ -25,6 +25,7 @@ include "src/reaction.cyr"
 include "src/scattering.cyr"
 include "src/timekeeping_data.cyr"
 include "src/timekeeping.cyr"
+include "src/bridge.cyr"
 
 # A sink the timed loops write to, so their results are used.
 var _bench_sink = 0;
@@ -346,6 +347,19 @@ fn bench_atomic_instant_add_seconds_1000() {
     _bench_sink = x.nanos;
 }
 
+# bridge/utc_to_tai_seconds_1000 (Cyrius-only; Rust has no bridge bench): 1000 UTC → TAI
+# conversions, year 1955 + k mod 81 and month 1 + k mod 12, so the leap lookup runs over the whole
+# table and both sides of it.
+fn bench_utc_to_tai_seconds_1000() {
+    var k = 0;
+    while (k < 1000) {
+        var utc: f64 = 1000000000.0 + f64_from(k);
+        var s: f64 = utc_to_tai_seconds(utc, 1955 + k % 81, 1 + k % 12);
+        _bench_sink = s;
+        k = k + 1;
+    }
+}
+
 # Times `rounds` calls of a body fn per batch, over `batches` batches.
 fn run(name, fp, rounds, batches) {
     var b = bench_new(name);
@@ -386,6 +400,7 @@ fn main(): i64 {
     run("scattering/rutherford_1000", &bench_rutherford_1000, 20, 20);
     run("scattering/pair_production_1000", &bench_pair_production_1000, 20, 20);
     run("timekeeping/atomic_instant_add_seconds_1000", &bench_atomic_instant_add_seconds_1000, 50, 20);
+    run("bridge/utc_to_tai_seconds_1000", &bench_utc_to_tai_seconds_1000, 50, 20);
     return 0;
 }
 

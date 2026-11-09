@@ -141,3 +141,21 @@ Rust's suite has no optics bench, so the Rust column is the `Instant` method (me
 
 The SPD is 2,406 exp calls (401 samples × 6 lines), so the gap is mostly `f64_exp`. The Lyman series is mostly
 Einstein A, whose hoisted dipole integral (M3) keeps it within 2× of Rust.
+
+Re-measured on prakash 2.15.2 (2026-11-09), two runs each: `balmer_spd_401` 68.2 and 68.6 µs, and
+`spectral_series_lyman_10` 14.1 and 14.2 µs. Both are unchanged, as expected: the prakash code they call is
+byte-identical.
+
+## Chrono bridge (2026-11-09, 2.0.1)
+
+Rust's suite has no bridge bench, so the Rust column is the `Instant` method, as for M6 (median of 21 batches of 200
+calls, `black_box` on every input and result).
+
+| Bench | Body | Rust | Cyrius | Cyrius / Rust |
+|---|---|---|---|---|
+| `bridge/utc_to_tai_seconds_1000` | 1000 UTC → TAI conversions, year 1955 + k mod 81 and month 1 + k mod 12 | 4.34 µs (Instant) | 51.8 µs | 12× |
+
+The bridge is one add on top of `leap_seconds_at`, so the time is the lookup. Both sides do the same forward scan of
+the 28-entry table with an early exit (M5 ported it as written). Rust compiles that scan, and the body's two
+constant modulos, to tight code. Cyrius pays a typed-array load per field per entry and two integer divisions per
+call. That puts it with the call-bound benches of M3 (6–43×).

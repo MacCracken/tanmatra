@@ -16,7 +16,7 @@
 | Correctness baseline | Every finding of the 2026-09-16 audit is repaired and pinned by reference-value tests | [`../audit/2026-09-16-math-audit.md`](../audit/2026-09-16-math-audit.md) |
 | Cyrius toolchain | **6.7.18** (installed; `cyrius port` pins it) | `~/.cyrius/current` |
 | ganita | **1.2.15**, bundled in the 6.7.18 stdlib. There is no separate pin | `~/.cyrius/versions/6.7.18/lib/ganita.cyr:2` |
-| prakash | **2.15.1**, Cyrius, pinned to 6.7.18. `spd_new` and `wavelength_to_rgb` keep their 2.4.0 signatures | `/home/macro/Repos/prakash` |
+| prakash | **2.15.2**, Cyrius, pinned to 6.7.18. `spd_new` and `wavelength_to_rgb` keep their 2.4.0 signatures | `/home/macro/Repos/prakash` |
 | Deferred consumers | Still in Rust and untouched since spring: kimiya 1.1.1, soorat 1.0.0, bhava 2.0.0. bijli, jyotish, falak, hisab-mimamsa, kiran and joshua have no local repo | respective repos |
 | Target | tanmatra **2.0.0**, Cyrius | this document |
 
@@ -59,7 +59,7 @@ the mechanics underneath them:
 
 ## Porting models and references
 
-- **prakash 2.15.1**, `/home/macro/Repos/prakash`. It has tanmatra's shape: a science library
+- **prakash 2.15.2**, `/home/macro/Repos/prakash`. It has tanmatra's shape: a science library
   with flat modules, heavy f64 math, generated constant tables and a Rust-vs-Cyrius
   benchmark record.
   - Copy the `cyrius.cyml` `[lib]` / `[lib.ai]` layout. A profile repeats the whole module
@@ -102,7 +102,7 @@ the mechanics underneath them:
 | `reaction.rs` | 780 | 25 | 43 | `src/reaction_data.cyr`, `src/reaction.cyr` |
 | `scattering.rs` | 543 | 18 | 53 | `src/scattering.cyr` |
 | `timekeeping.rs` | 747 | 35 | 74 | `src/timekeeping.cyr` |
-| `optics.rs` (feature `optics`) | 172 | 4 | 5 | `src/optics.cyr`, behind the `optics` feature and the `[lib.optics]` profile, against **prakash 2.15.1** |
+| `optics.rs` (feature `optics`) | 172 | 4 | 5 | `src/optics.cyr`, behind the `optics` feature and the `[lib.optics]` profile, against **prakash 2.15.2** |
 
 The counts were re-verified 2026-11-08. They are unchanged.
 
@@ -123,15 +123,21 @@ shows the feature wiring.
 | `bridge.rs`: bijli bridges (`energy_to_wavelength_nm`, `nuclear_charge_field`) | bijli is not in Cyrius (no repo yet) | bijli ports |
 | `bridge.rs`: kimiya bridges (`atomic_number_to_valence`, `neutron_count`, `mass_to_binding_deficit_mev`, `half_life_to_decay_constant`) | kimiya is Rust (1.1.1) | kimiya ports |
 | `bridge.rs`: prakash-labelled helpers (`transitions_to_wavelengths`, `nuclear_spin_to_hyperfine_scale`) | kept with the bridge module for one coherent later port | bridge phase |
-| `bridge.rs`: jyotish, hisab-mimamsa and falak bridges, and `SimulationClock` (kiran/joshua) | consumers not in Cyrius | each consumer ports |
-| `bridge.rs`: chrono bridge (`utc_date_to_tai_offset`, `utc_to_tai_seconds`, `tai_to_utc_seconds`) | Rust targets the `chrono` crate | **unblocked**: the Cyrius stdlib has `lib/chrono.cyr`. Port it in the first bridge release |
+| `bridge.rs`: hisab-mimamsa and falak bridges, and `SimulationClock` (kiran/joshua) | consumers not in Cyrius | each consumer ports |
 | `bridge.rs`: bhava `TimeContext` | bhava is Rust (2.0.0) | bhava ports |
 | `integration/soorat.rs` (feature `soorat-compat`) | soorat is Rust (1.0.0) | soorat ports |
 
-Every deferred function is a thin wrapper over in-scope physics; for example, `tai_to_tt`
-wraps timekeeping and `mass_to_binding_deficit_mev` wraps constants. Porting the physics
-first makes each later bridge a small file that can be parity-tested. Until then,
-`rust-old/` keeps the Rust bridge code and its tests as the reference.
+Every deferred function is a thin wrapper over in-scope physics; for example,
+`mass_to_binding_deficit_mev` wraps constants. Porting the physics first makes each later
+bridge a small file that can be parity-tested. Until then, `rust-old/` keeps the Rust bridge
+code and its tests as the reference.
+
+Ported since 2.0.0:
+- **The chrono bridge** (`utc_date_to_tai_offset`, `utc_to_tai_seconds`, `tai_to_utc_seconds`), in 2.0.1, as
+  `src/bridge.cyr`. Like the Rust bridge, it takes plain values; the stdlib `lib/chrono.cyr` supplies them, and
+  `tests/bridge.tcyr` checks that recipe.
+- **The jyotish bridge `tai_to_tt`** needs no port. It only calls `timekeeping::tai_to_tt`, which Cyrius's one flat
+  namespace already has, so surface parity finds it.
 
 ### Not carried over
 
@@ -228,7 +234,7 @@ gets something wrong, repair the output here and file the defect upstream (step 
 
    [deps.prakash]
    git = "https://github.com/MacCracken/prakash.git"
-   tag = "2.15.1"
+   tag = "2.15.2"
    modules = ["dist/prakash.cyr"]
    optional = true
 
@@ -444,7 +450,7 @@ Each milestone ends with the same gates:
 | **M3 Atomic** | atomic_data, atomic_config, atomic_hydrogenic, atomic_qed | Generated IE (118) and EA (118, 3-state) tables; `ElectronAffinity` as a `: stack` enum. Configurations with the 20 NIST exceptions. Rydberg and reduced-mass lines. Dirac and first-order fine structure. Radial functions (Laguerre coefficients and factorial-ratio normalization) for n ≤ 60. Exact radial dipole integrals → Einstein A/B. Lamb shift with Bethe logarithms, VP, hyperfine, g-factors, Breit. Write the `powi` sites in Rust's evaluation order (§5) | Z = 1..118 (configs, IE, EA); n1 < n2 ≤ 12, Z ∈ {1, 2, 3, 26, 92}; R_nl for all n ≤ 10, l < n, at 50 radii; A-values for every allowed n_u ≤ 10 → n_l; all (n, l, j) with n ≤ 4 |
 | **M4 Reactions & scattering** | reaction_data, reaction, scattering | ENDF/B-VIII.0 thermal cross sections, resonance integrals and yields (generated). `NuclearReaction` layout with an optional projectile, neutron counts and a lepton vec. Presets. Rutherford (`ganita_f64_tan`), Mott (p·β), Born, the form factor (series branch), Klein–Nishina (series branch), Maximon pair production (both branches). The 7-argument `breit_wigner_cross_section` and `born_screened_coulomb_with_masses` keep their Rust signatures | all presets; energies on both sides of each branch point (KN γ = 1e-2, form factor qR = 0.5, pair k = 4); θ ∈ {1e-3, 0.1, π/2, π} |
 | **M5 Timekeeping** | timekeeping | CIPM 2025 standards. Leap-second table, plus the 1961–1971 USNO segments and MJD → calendar. `AtomicInstant` as a value struct in integer nanoseconds; `+|` at Rust's three `saturating_add` sites; local round-half-away (§5); `nanoseconds_since` returns a `(seconds, nanos)` tuple. Geoid-referenced satellite correction. Sagnac (loop and one-way). TCG/TT and TCB/TDB conversions | leap lookups 1961–2030; `AtomicInstant` add/diff at epoch 0, at 2.1e9 s and at the ±9.2e18 s edges, plus **exact .5 ns ties** in `from_tai_seconds` and `add_seconds`; J2000 and T0 conversions |
-| **M6 Optics profile** | optics (prakash 2.15.1) | `[features] optics` + optional `[deps.prakash]` + `[lib.optics]`. `lines_to_spd` → `spd_new`; the Storey & Hummer Balmer series; A-value series intensities; `line_to_rgb` → `wavelength_to_rgb` | Balmer SPD at 0.1 and 1 nm FWHM; invalid-range guards |
+| **M6 Optics profile** | optics (prakash 2.15.2) | `[features] optics` + optional `[deps.prakash]` + `[lib.optics]`. `lines_to_spd` → `spd_new`; the Storey & Hummer Balmer series; A-value series intensities; `line_to_rgb` → `wavelength_to_rgb` | Balmer SPD at 0.1 and 1 nm FWHM; invalid-range guards |
 | **M7 Release 2.0.0** | all | JSON for the exchange types (`Nucleus`, `Isotope`, `FourMomentum`, `AtomicInstant`, `NuclearReaction`) if a consumer needs them. Use `#derive(Serialize)` only once cyrius issue `2026-11-07-derive-serialize-key-scan-reads-past-nul` is fixed; until then, write it by hand on bayan. Rust-test ledger (mela pattern): each of the 476 + 20 + 2 Rust tests is ported, folded into golden rows, or marked not applicable / deferred-bridge. Full surface-parity diff. `cyrius distlib --all`. `docs/benchmarks-rust-v-cyrius.md`. `cyrius audit`. VERSION 2.0.0 | full golden corpus green on every CI target |
 
 Suggested order: M1 → M2 → M5 → M3 → M4 → M6 → M7. Timekeeping is self-contained and
@@ -612,9 +618,9 @@ compare. To work on the bits, take them through a helper with an untyped paramet
 ## 6. After 2.0.0
 
 1. **Bridges** (`src/bridge.cyr`), ported per consumer as each lands in Cyrius:
-   - chrono first, against stdlib `lib/chrono.cyr`, which is unblocked now;
+   - chrono first, against stdlib `lib/chrono.cyr`: ✅ done in 2.0.1;
    - kimiya, bijli and bhava;
-   - jyotish, hisab-mimamsa and falak;
+   - hisab-mimamsa and falak (jyotish's one bridge, `tai_to_tt`, is timekeeping's);
    - kiran/joshua (`SimulationClock`).
 
    Parity comes from the Rust bridge tests in `rust-old/`.
@@ -641,7 +647,8 @@ compare. To work on the bits, take them through a helper with an untyped paramet
 | M5 Timekeeping | ✅ done 2026-11-08 | timekeeping 20,703: **all 0 ulp** on all three targets (leap lookups 1955–2035, 14,695 TAI − UTC rows, `AtomicInstant` at the ±9.2e18 s and MIN/MAX edges with the 128-bit `nanoseconds_since`, exact .5 ns ties); `sagnac_correction_ns` (C, K = 6) 0 ulp; `libm::round` 659/659 bit-identical. **The corpus has 0 pending rows** | timekeeping.tcyr: 69 Rust tests (193 assertions); 5 not carried over (4 serde, 1 deprecated) | 1 (`atomic_instant_add_seconds_1000` 2.6×) | `timekeeping_data.cyr` generated: the leap table derived from the API and proven, the USNO segments extracted and proven; `timekeeping.cyr`; `_tm_round_half_away`, `_tm_f64_to_i64_sat`; surface parity 43/43 |
 | M3 Atomic | ✅ done 2026-11-08 | atomic 43,309: **every class A/B row 0 ulp** on all three targets, and Einstein A/B (D) **0 ulp** too. Lamb shift (C, K = 10) ≤ 2 ulp on x86_64, ≤ 1 on aarch64; R_nl (C, K = 6) ≤ 2 and R²r² (C, K = 18) ≤ 7 on x86_64, **0 on aarch64**. Dirac is class B (sqrt only), not C | atomic.tcyr: 110 Rust tests (597 assertions); the 4 serde ones are not carried over | 7 (1.9–3.3× Rust for the computed bodies, 6–43× for the call-bound ones; see the benchmarks doc) | `atomic_data.cyr` generated: IE and EA through the API with each entry's citation; the filling order and Bethe logarithms extracted, the 20 NIST exceptions derived from `electron_configuration`, all proven. `atomic_config.cyr`, `atomic_hydrogenic.cyr`, `atomic_qed.cyr`; surface parity 41/41; `validate.py` re-derives the configurations and the class-B lines independently |
 | M4 Reactions & scattering | ✅ done 2026-11-08 | reaction 7,965 + scattering 10,704: **all 0 ulp on all three targets.** The port-parity rule (12 of 16 transcendental functions past K = 64) made sin, cos and log bit-exact: `_tm_sin`, `_tm_cos`, `_tm_log`, Rust libm transcribed, verified on a 680,010-input sweep. So every function is class B except `rutherford_total_above_angle` (ganita tan, C, K = 10) | reaction.tcyr: 39 Rust tests (133 assertions; 4 serde not carried over); scattering.tcyr: all 53 (770 assertions) | 2 (`rutherford_1000` 9.5×, `pair_production_1000` 6.1× Rust; a sin or log call is most of each) | `reaction_data.cyr` generated, with the resonance integrals and ζ(3) extracted and proven; `reaction.cyr` (`TmNuclearReaction`, presets, pathways, moderation, yields); `scattering.cyr`; libm sin/cos/log rows now class A; surface parity 26/26 + 18/18 |
-| M6 Optics profile | ✅ done 2026-11-08 | optics 1,039, replayed against the Cyrius prakash 2.15.1 by `tests/optics_parity.tcyr`: `line_to_rgb` and the Balmer series 0 ulp; `lines_to_spd` (C, K = 38) ≤ 2 ulp on x86_64, **0 on aarch64**; `spectral_series_lines` (D) 3 values at 55–95 ulp (49p → 1s Einstein A, ~2e-14 relative), the rest 0. All three targets | optics.tcyr: 4 Rust tests (8 assertions); 1 serde not carried over | 2 (`balmer_spd_401` 5.5×, `spectral_series_lyman_10` 1.9× Rust, Instant) | `[deps.prakash]` optional (tag 2.15.1), `[features] optics`, `[lib.optics]` → `dist/tanmatra-optics.cyr`; the core bundle is unchanged and prakash-free. The parity harness is split (`parity_core.cyr`), so the core suite never needs prakash. ⚠ prakash 2.15.1's bundle adds 3 compile warnings to the optics test files (two documented raw-bit compares, `lib/prakash.cyr:9213–9214`, and an unreachable `num_fft`); tanmatra's code adds none. Accepted until prakash fixes them, and filed as `prakash/docs/development/issues/2026-11-08-bundle-consumer-compile-warnings.md` |
+| M6 Optics profile | ✅ done 2026-11-08 | optics 1,039, replayed against the Cyrius prakash 2.15.2 by `tests/optics_parity.tcyr`: `line_to_rgb` and the Balmer series 0 ulp; `lines_to_spd` (C, K = 38) ≤ 2 ulp on x86_64, **0 on aarch64**; `spectral_series_lines` (D) 3 values at 55–95 ulp (49p → 1s Einstein A, ~2e-14 relative), the rest 0. All three targets | optics.tcyr: 4 Rust tests (8 assertions); 1 serde not carried over | 2 (`balmer_spd_401` 5.5×, `spectral_series_lyman_10` 1.9× Rust, Instant) | `[deps.prakash]` optional (tag 2.15.2), `[features] optics`, `[lib.optics]` → `dist/tanmatra-optics.cyr`; the core bundle is unchanged and prakash-free. The parity harness is split (`parity_core.cyr`), so the core suite never needs prakash. At 2.0.0 the pin was prakash 2.15.1, whose bundle added 3 compile warnings to the optics test files; they were accepted and filed upstream. prakash 2.15.2 fixed them (`prakash/docs/development/issues/archived/2026-11-08-bundle-consumer-compile-warnings.md`), and tanmatra pins it, so the optics files are warning-free |
 | M7 Release 2.0.0 | ✅ done 2026-11-08 | the full corpus, 184,995 rows, green on x86_64 ELF, x86_64 PE and aarch64 | the Rust-test ledger: all 498 Rust tests accounted for (420 ported, 1 partial, 25 n/a, 52 deferred), gated by `scripts/rust_test_ledger.py --check`; `tests/integration.tcyr` ports the integration and doc tests | every bench recorded (`docs/benchmarks-rust-v-cyrius.md`) | surface parity is the full diff (254/254, and every `rust-old/src` file classified); JSON for the exchange types deferred (no Cyrius consumer yet; the derive issue is open); VERSION 2.0.0. The tag and the release are the maintainer's |
-| Bridges (deferred) | ⏸ | | | | chrono is unblocked (stdlib `lib/chrono.cyr`). The rest wait on bijli, kimiya, bhava, jyotish, falak, hisab-mimamsa and kiran/joshua |
+| Chrono bridge (2.0.1) | ✅ done 2026-11-09 | bridge 6,588: **all 0 ulp** on x86_64 ELF, x86_64 PE and aarch64 (`utc_date_to_tai_offset` A, 1,170 rows; `tai_to_utc_seconds` and `utc_to_tai_seconds` B, 2,709 each) | bridge.tcyr: the 4 chrono Rust tests, plus 3 Cyrius-only tests driving the bridge from `lib/chrono.cyr` for every month 1972–2035 (3,854 assertions) | 1 (`bridge/utc_to_tai_seconds_1000` 12× Rust, Instant) | `src/bridge.cyr` in `[lib]` and `[lib.optics]`; `chrono` in `[test] stdlib`; surface parity 4/4 for the bridge, its 27 other items deferred by consumer; `validate.py` recomputes the conversions. `lib/chrono.cyr` gets dates before 1970 wrong, so the recipe holds from 1970 on (filed: `cyrius/docs/development/issues/2026-11-09-chrono-dates-before-1970-silently-wrong.md`) |
+| Bridges (deferred) | ⏸ | | | | wait on bijli, kimiya, bhava, falak, hisab-mimamsa and kiran/joshua |
 | soorat integration (deferred) | ⏸ | | | | waits on soorat |

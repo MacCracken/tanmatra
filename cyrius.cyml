@@ -17,17 +17,18 @@ output = "build/tanmatra"
 #   overflow — the saturating `+|` / `-|` / `*|` operators (AtomicInstant)
 #   tagged / result — the value-form Option and Result
 #   freelist — fl_alloc / fl_free, so Bateman's scratch is returned, not leaked
+#   sakshi   — the AGNOS logging library; prakash's bundle includes it (the optics profile)
 [deps]
 stdlib = ["syscalls", "string", "alloc", "str", "fmt", "io", "vec", "math", "ganita", "overflow", "tagged", "result", "freelist",
     "sakshi"]
 
-# prakash 2.15.1, pinned by tag, for the optics profile only (port plan M6). Optional, so a plain
+# prakash 2.15.2, pinned by tag, for the optics profile only (port plan M6). Optional, so a plain
 # `cyrius deps` never vendors it: the core bundle stays prakash-free, as prakash keeps its own
 # `ai` module out of its core. No `path =` override, which would bypass the commit pin that
 # cyrius.lock records.
 [deps.prakash]
 git = "https://github.com/MacCracken/prakash.git"
-tag = "2.15.1"
+tag = "2.15.2"
 modules = ["dist/prakash.cyr"]
 optional = true
 
@@ -39,7 +40,7 @@ optics = ["prakash"]
 
 # Test / bench / fuzz compiles only.
 [test]
-stdlib = ["assert", "bench"]
+stdlib = ["assert", "bench", "chrono"]
 
 # `[lib]` is the bundle `cyrius distlib` writes to dist/tanmatra.cyr. The list IS the
 # concatenation order, and it is load-bearing: no src/ file has an `include`, so each module
@@ -71,6 +72,7 @@ modules = [
     "src/scattering.cyr",
     "src/timekeeping_data.cyr",
     "src/timekeeping.cyr",
+    "src/bridge.cyr",
 ]
 
 # The optics profile: the core plus src/optics.cyr, which needs prakash. Consumers who want it
@@ -98,6 +100,7 @@ modules = [
     "src/scattering.cyr",
     "src/timekeeping_data.cyr",
     "src/timekeeping.cyr",
+    "src/bridge.cyr",
     "src/optics_data.cyr",
     "src/optics.cyr",
 ]

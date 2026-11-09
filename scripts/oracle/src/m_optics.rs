@@ -1,5 +1,5 @@
 //! `optics.tsv` — the port plan M6 grid for `tanmatra::optics` (the `optics` feature, against
-//! the Rust prakash 1.2.0 the oracle links; the port runs against the Cyrius prakash 2.15.1).
+//! the Rust prakash 1.2.0 the oracle links; the port runs against the Cyrius prakash 2.15.2).
 //!
 //! - **`hydrogen_balmer_series`** (class B): the six Storey & Hummer Case B lines.
 //! - **`spectral_series_lines`** (class D: its intensities sum Einstein A-values): Z ∈ {0, 1, 2,

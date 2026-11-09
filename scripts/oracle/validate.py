@@ -7,6 +7,10 @@
 5. atomic.tsv: the class-B Rydberg lines and fine-structure levels recomputed in Python with
    Rust's operation order are bit-identical; every configuration holds Z electrons, never
    overfills a subshell, and is the Madelung filling except at the 20 NIST exceptions.
+6. bridge.tsv: utc_date_to_tai_offset is timekeeping.tsv's leap_seconds_at wherever both have the
+   date, and has the IERS shape: 0 before 1972, 10 from 1972-01, every later step +1 s, 37 from
+   2017-01. tai_to_utc_seconds and utc_to_tai_seconds recomputed in Python (s ∓ ΔAT) are
+   bit-identical.
 """
 import math, re, struct, sys
 from pathlib import Path
@@ -181,5 +185,29 @@ for fn, cls, ins, outs in rows("atomic"):
     check((cfg == madelung(z)) == (z not in NIST), f"Z={z}: Madelung filling iff not a NIST exception")
     n += 1
 print("atomic configurations checked:", n)
+
+# 6. bridge.tsv: the chrono bridge
+leap = {(ins[0][1], ins[1][1]): outs[0][1] for fn, cls, ins, outs in rows("timekeeping") if fn == "leap_seconds_at"}
+off = {(ins[0][1], ins[1][1]): outs[0][1] for fn, cls, ins, outs in rows("bridge") if fn == "utc_date_to_tai_offset"}
+both = [k for k in off if k in leap]
+check(len(both) == 81 * 14, f"bridge: {len(both)} dates shared with timekeeping.tsv")
+for k in both:
+    check(off[k] == leap[k], f"utc_date_to_tai_offset{k} = {off[k]}, leap_seconds_at = {leap[k]}")
+seq = [off[(y, m)] for y in range(1955, 2036) for m in range(1, 13)]
+first = (1972 - 1955) * 12
+check(all(v == 0 for v in seq[:first]), "ΔAT is 0 before 1972")
+check(seq[first] == 10, "ΔAT is 10 at 1972-01")
+check(all(b - a in (0, 1) for a, b in zip(seq[first:], seq[first + 1:])), "every later ΔAT step is +1 s")
+check(seq[(2017 - 1955) * 12:] == [37] * len(seq[(2017 - 1955) * 12:]), "ΔAT is 37 from 2017-01")
+n = 0
+for fn, cls, ins, outs in rows("bridge"):
+    if fn not in ("tai_to_utc_seconds", "utc_to_tai_seconds"):
+        continue
+    s, d = ins[0][2], float(off[(ins[1][1], ins[2][1])])
+    x = bits_to_f(f"{s:016x}")
+    got = x - d if fn == "tai_to_utc_seconds" else x + d
+    check(same(got, outs[0][2]), f"{fn}({x!r}, {ins[1][1]}, {ins[2][1]})")
+    n += 1
+print("bridge rows checked:", len(off), "offsets,", n, "conversions")
 print("FAILURES:", fails)
 sys.exit(1 if fails else 0)

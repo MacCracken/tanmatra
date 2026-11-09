@@ -5,10 +5,10 @@
 [![CI](https://github.com/MacCracken/tanmatra/actions/workflows/ci.yml/badge.svg)](https://github.com/MacCracken/tanmatra/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
 
-tanmatra **2.0.0** is a Cyrius library: a parity port of the Rust crate **1.3.0** (the crates.io and docs.rs
+tanmatra **2.0.1** is a Cyrius library: a parity port of the Rust crate **1.3.0** (the crates.io and docs.rs
 release), which stays frozen in [`rust-old/`](rust-old/) as the reference implementation. Every function is
 checked against it value by value:
-- **184,995 golden rows**, all within their tolerance class and almost all bit-identical, on x86_64 Linux,
+- **191,583 golden rows**, all within their tolerance class and almost all bit-identical, on x86_64 Linux,
   Windows PE and aarch64 ([port parity](docs/development/port-parity.md));
 - **the Rust tests**: every one of the 498 is ported or accounted for in the
   [Rust-test ledger](docs/development/rust-test-ledger.md).
@@ -30,6 +30,7 @@ the current state.
 | `scattering` | Rutherford/Mott/Born cross-sections, form factors, Klein–Nishina, Bethe–Heitler pair production |
 | `timekeeping` | CIPM 2025 frequency standards, TAI/UTC/TT/GPS/TCG/TCB/TDB, leap seconds, relativistic clock corrections |
 | `optics` | prakash spectral power distributions and colours (the optional `optics` profile) |
+| `bridge` | The chrono bridge: ΔAT for a UTC year and month, TAI ↔ UTC seconds since 1958 (a `lib/chrono.cyr` datetime supplies them, from 1970 on). The other bridges wait on their consumers |
 | `error` | `TM_ERR_*` codes for the 6 `TanmatraError` variants |
 
 The tables (`*_data.cyr`, `constants.cyr`) are generated from the oracle by [`scripts/oracle/`](scripts/oracle/),
@@ -42,7 +43,7 @@ Declare it in your `cyrius.cyml` and vendor it with `cyrius deps`:
 ```toml
 [deps.tanmatra]
 git = "https://github.com/MacCracken/tanmatra.git"
-tag = "2.0.0"
+tag = "2.0.1"
 modules = ["dist/tanmatra.cyr"]
 ```
 
@@ -83,7 +84,7 @@ fn main(): i64 {
   - An optional value is a value-form `Option`.
 - **Collections.** Rust's `Vec` returns fill a caller array and return the count.
 
-The `optics` profile adds `src/optics.cyr` and needs prakash 2.15.1. Declare `[deps.prakash]` (tag 2.15.1) beside
+The `optics` profile adds `src/optics.cyr` and needs prakash 2.15.2. Declare `[deps.prakash]` (tag 2.15.2) beside
 tanmatra, list `"sakshi"` in `[deps] stdlib`, and use `modules = ["dist/tanmatra-optics.cyr"]`.
 
 ## Building

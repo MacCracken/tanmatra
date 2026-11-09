@@ -5,7 +5,7 @@
 > or recorded here with its reason. The golden corpus (`tests/golden/`) checks every ported function on its
 > grid besides; this ledger is about the oracle's own assertions.
 
-**498 Rust tests:** 420 ported, 1 partly ported, 25 not applicable, 52 deferred.
+**498 Rust tests:** 424 ported, 1 partly ported, 25 not applicable, 48 deferred.
 
 | Rust file | Cyrius tests | Rust tests | Ported | Partial | N/A | Deferred |
 |---|---|---:|---:|---:|---:|---:|
@@ -19,11 +19,11 @@
 | `src/reaction.rs` | `tests/reaction.tcyr` | 43 | 39 | 0 | 3 | 1 |
 | `src/scattering.rs` | `tests/scattering.tcyr` | 53 | 53 | 0 | 0 | 0 |
 | `src/optics.rs` | `tests/optics.tcyr` | 5 | 4 | 0 | 1 | 0 |
-| `src/bridge.rs` | — | 38 | 0 | 0 | 0 | 38 |
+| `src/bridge.rs` | `tests/bridge.tcyr` | 38 | 4 | 0 | 0 | 34 |
 | `src/integration/soorat.rs` | — | 7 | 0 | 0 | 0 | 7 |
 | `tests/integration.rs` | `tests/integration.tcyr` | 20 | 16 | 0 | 3 | 1 |
 | doc tests (`src/lib.rs`, `src/timekeeping.rs`) | `tests/integration.tcyr` | 2 | 2 | 0 | 0 | 0 |
-| **Total** | | **498** | **420** | **1** | **25** | **52** |
+| **Total** | | **498** | **424** | **1** | **25** | **48** |
 
 ## Doc tests
 
@@ -67,5 +67,5 @@
 | `tests/integration.rs` | `serde_roundtrip_quark` | n/a: serde round-trip. JSON is carried only for the exchange types (port plan §1, M7) |
 | `tests/integration.rs` | `serde_roundtrip_decay_mode` | n/a: serde round-trip. JSON is carried only for the exchange types (port plan §1, M7) |
 | `tests/integration.rs` | `serde_roundtrip_quantum_numbers` | n/a: serde round-trip. JSON is carried only for the exchange types (port plan §1, M7) |
-| `src/bridge.rs` | all 38 | deferred: bridge.rs waits on its consumers (bijli, kimiya) being in Cyrius (port plan §1, *Deferred until the consumers exist*) |
+| `src/bridge.rs` | the other 34 | deferred: the bridges to bijli, kimiya, hisab-mimamsa, falak, kiran/joshua and bhava, and the prakash-labelled helpers, wait on their consumers being in Cyrius (port plan §1, *Deferred until the consumers exist*). The chrono bridge is ported |
 | `src/integration/soorat.rs` | all 7 | deferred: the soorat integration waits on soorat (port plan §1) |

@@ -249,7 +249,9 @@ builtins do.
 ## Optics (M6)
 
 The 1,039 `optics.tsv` rows come from the Rust oracle linked with the Rust prakash 1.2.0; the port runs against the
-Cyrius prakash 2.15.1, replayed by tests/optics_parity.tcyr. All pass on all three targets, on the first comparison:
+Cyrius prakash 2.15.2, replayed by tests/optics_parity.tcyr. All pass on all three targets, on the first comparison
+(made against 2.15.1 in 2.0.0). 2.0.1 moved to 2.15.2, whose 21 functions that `src/optics.cyr` reaches are
+byte-identical to 2.15.1's, so the table holds:
 
 | Function | Class (K) | Rows | x86_64 ELF and PE | aarch64 |
 |---|---|---|---|---|
@@ -259,11 +261,29 @@ Cyrius prakash 2.15.1, replayed by tests/optics_parity.tcyr. All pass on all thr
 | `line_to_rgb` | B | 838 | all 0 | all 0 |
 
 - **prakash agrees with its Rust self.** `line_to_rgb` is prakash's piecewise CIE fit, so 838 bit-identical rows
-  across the 1.2.0 → 2.15.1 port boundary, every branch edge included, say the two prakash lines compute it the same
+  across the 1.2.0 → 2.15.2 port boundary, every branch edge included, say the two prakash lines compute it the same
   way.
 - **The SPDs differ only through exp**: x87 `f64_exp` on x86_64, fdlibm on aarch64 as in Rust. A sum of positive
   Gaussians is well-conditioned, so 2 ulp is the most it moves.
 - **The three D outliers are Einstein A at 49p → 1s** (above, M3), through the series' A-value intensities.
+
+## Chrono bridge (2.0.1)
+
+The 6,588 `bridge.tsv` rows are the first bridge's (port plan §6). All are **0 ulp on all three targets**, on the
+first comparison:
+
+| Function | Class | Rows | x86_64 ELF and PE | aarch64 |
+|---|---|---|---|---|
+| `utc_date_to_tai_offset` | A | 1,170 | all equal | all equal |
+| `tai_to_utc_seconds` | B | 2,709 | all 0 | all 0 |
+| `utc_to_tai_seconds` | B | 2,709 | all 0 | all 0 |
+
+- The two conversions are one IEEE add or subtract of ΔAT, so class B and 0 ulp were the expectation. The grid crosses
+  the float specials and the 2⁵³ neighbourhood, where adding ΔAT rounds, with every month where ΔAT changes and the
+  month before it.
+- `validate.py` recomputes every conversion row in Python and finds the same bits. It checks the offsets against
+  `timekeeping.tsv`'s `leap_seconds_at` rows, and against the IERS shape: 0 before 1972, 10 at 1972-01, +1 s steps,
+  37 from 2017-01.
 
 ## Rule for the class-C bounds of tanmatra's own functions
 

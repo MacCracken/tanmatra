@@ -1,0 +1,184 @@
+# bridge.tcyr — the chrono bridge (src/bridge.cyr).
+#
+# Ported one for one (each test_group is the Rust test's name): the four chrono bridge tests of
+# rust-old/src/bridge.rs. The other 34 bridge tests wait with their bridges on the consumers
+# (docs/development/rust-test-ledger.md). The golden corpus separately checks every bridge
+# function against the oracle (tests/parity.tcyr).
+#
+# Cyrius only, against the stdlib lib/chrono.cyr (port plan §6): the bridge driven from chrono
+# datetimes, the recipe src/bridge.cyr's header gives, for every month 1972–2035. Its ΔAT is
+# checked against tanmatra's own MJD calendar, `tai_minus_utc_seconds_mjd`. lib/chrono.cyr's
+# calendar starts at the Unix epoch, so these checks start at 1972, and the Unix → 1958 epoch
+# shift is checked through MJDs instead.
+
+include "tests/ulp.cyr"
+include "src/error.cyr"
+include "src/numerics.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
+include "src/decay_data.cyr"
+include "src/decay.cyr"
+include "src/timekeeping_data.cyr"
+include "src/timekeeping.cyr"
+include "src/bridge.cyr"
+
+alloc_init();
+
+# 1 if |a - b| < eps.
+#must_use
+fn near(a: f64, b: f64, eps: f64): i64 {
+    if (f64_abs(a - b) < eps) { return 1; }
+    return 0;
+}
+
+# The seconds from 1958-01-01 (this crate's TAI epoch) to 1970-01-01 (the Unix epoch).
+var _UNIX_TO_TAI_EPOCH_S = 378691200;
+# MJD of the Unix epoch, 1970-01-01.
+var _MJD_UNIX_EPOCH = 40587;
+
+var _iso[32];
+
+# "YYYY-MM-01T00:00:00Z", the first second of a UTC month, as a C string (in _iso).
+#must_use
+fn _iso_month_start(year, month) {
+    var tmpl = "0000-00-01T00:00:00Z";
+    var k = 0;
+    while (k < 20) {
+        store8(&_iso + k, load8(tmpl + k));
+        k = k + 1;
+    }
+    store8(&_iso + 20, 0);
+    store8(&_iso, 48 + (year / 1000) % 10);
+    store8(&_iso + 1, 48 + (year / 100) % 10);
+    store8(&_iso + 2, 48 + (year / 10) % 10);
+    store8(&_iso + 3, 48 + year % 10);
+    store8(&_iso + 5, 48 + month / 10);
+    store8(&_iso + 6, 48 + month % 10);
+    return &_iso;
+}
+
+# ΔAT, s, at a Unix second, through tanmatra's MJD calendar (independent of lib/chrono.cyr).
+#must_use
+fn _delta_at_mjd(unix): f64 {
+    var mjd: f64 = f64_from(_MJD_UNIX_EPOCH + unix / 86400);
+    var d: f64 = tai_minus_utc_seconds_mjd(mjd);
+    return d;
+}
+
+fn _t_utc_date_to_tai_offset_2020() {
+    test_group("utc_date_to_tai_offset_2020");
+    assert_eq(utc_date_to_tai_offset(2020, 6), 37, "2020: ΔAT = 37 s (last leap second 2017-01-01)");
+}
+
+fn _t_utc_date_to_tai_offset_before_1972() {
+    test_group("utc_date_to_tai_offset_before_1972");
+    assert_eq(utc_date_to_tai_offset(1960, 1), 0, "ΔAT is 0 before 1972");
+}
+
+fn _t_tai_utc_roundtrip() {
+    test_group("tai_utc_roundtrip");
+    var tai: f64 = 1000000.0;
+    var utc: f64 = tai_to_utc_seconds(tai, 2020, 1);
+    var back: f64 = utc_to_tai_seconds(utc, 2020, 1);
+    assert(near(back, tai, 0.0000000001), "TAI -> UTC -> TAI round trip");
+}
+
+fn _t_utc_tai_offset_matches_timekeeping() {
+    test_group("utc_tai_offset_matches_timekeeping");
+    assert_eq(utc_date_to_tai_offset(2015, 8), 36, "after the 2015-07-01 leap second");
+}
+
+# The 378,691,200 s between the two epochs, by tanmatra's MJD calendar: MJD 36204 is the first day
+# of 1958-01 and MJD 40587 that of 1970-01, and lib/chrono.cyr puts 1972-01-01 730 days after its
+# epoch.
+fn _t_chrono_unix_epoch_shift() {
+    test_group("chrono_unix_epoch_shift");
+    var y1, m1 = _tm_mjd_to_year_month(36204.0);
+    assert(y1 == 1958 && m1 == 1, "MJD 36204 is in 1958-01");
+    var y2, m2 = _tm_mjd_to_year_month(36203.0);
+    assert(y2 == 1957 && m2 == 12, "MJD 36203 is in 1957-12");
+    var y3, m3 = _tm_mjd_to_year_month(40587.0);
+    assert(y3 == 1970 && m3 == 1, "MJD 40587 is in 1970-01");
+    var y4, m4 = _tm_mjd_to_year_month(40586.0);
+    assert(y4 == 1969 && m4 == 12, "MJD 40586 is in 1969-12");
+    assert_eq((_MJD_UNIX_EPOCH - 36204) * 86400, _UNIX_TO_TAI_EPOCH_S, "4,383 days from 1958 to 1970");
+    assert_eq(iso8601_parse("1972-01-01T00:00:00Z"), 730 * 86400, "chrono's epoch is 1970-01-01");
+}
+
+# The 1972 step, from lib/chrono.cyr datetimes. The bridge's ΔAT is 0 up to 1971-12-31T23:59:59 and
+# 10 from 1972-01-01, as its contract says. The MJD calendar has 1961–1971's rubber-second
+# segment there: USNO tai-utc.dat, 4.2131700 + (MJD − 39126) × 0.002592 s, which is 9.88965 s on
+# 1971-12-31 (MJD 41316).
+fn _t_chrono_1972_step() {
+    test_group("chrono_1972_step");
+    var unix = iso8601_parse("1972-01-01T00:00:00Z");
+    var before = dt_from_epoch_secs(unix - 1);
+    assert(dt_year(before) == 1971 && dt_month(before) == 12, "the second before is in 1971-12");
+    assert_eq(utc_date_to_tai_offset(dt_year(before), dt_month(before)), 0, "the bridge: 0 before 1972");
+    var seg: f64 = _delta_at_mjd(unix - 1);
+    assert(near(seg, 9.88965, 0.000000001), "the MJD calendar: the 1971 segment, 9.88965 s");
+    var at = dt_from_epoch_secs(unix);
+    assert_eq(utc_date_to_tai_offset(dt_year(at), dt_month(at)), 10, "the bridge: 10 from 1972-01-01");
+}
+
+# Every month 1972–2035, from a lib/chrono.cyr datetime: its year and month round-trip, the
+# bridge's ΔAT equals the MJD calendar's at the month's first second and (after 1972-01, see
+# chrono_1972_step) at the second before it, and the TAI and UTC seconds differ by exactly ΔAT
+# both ways.
+fn _t_chrono_months_1972_2035() {
+    test_group("chrono_months_1972_2035");
+    var months = 0;
+    var year = 1972;
+    while (year <= 2035) {
+        var month = 1;
+        while (month <= 12) {
+            var unix = iso8601_parse(_iso_month_start(year, month));
+            var dt = dt_from_epoch_secs(unix);
+            var y = dt_year(dt);
+            var m = dt_month(dt);
+            assert(y == year && m == month, "chrono round-trips the month");
+
+            var off: f64 = f64_from(utc_date_to_tai_offset(y, m));
+            var want: f64 = _delta_at_mjd(unix);
+            assert(off == want, "the bridge's ΔAT at the month's first second is the MJD calendar's");
+
+            if (months > 0) {
+                var before = dt_from_epoch_secs(unix - 1);
+                var offb: f64 = f64_from(utc_date_to_tai_offset(dt_year(before), dt_month(before)));
+                var wantb: f64 = _delta_at_mjd(unix - 1);
+                assert(offb == wantb, "and at the second before it, in the previous month");
+            }
+
+            var utc: f64 = f64_from(unix + _UNIX_TO_TAI_EPOCH_S);
+            var tai: f64 = utc_to_tai_seconds(utc, y, m);
+            var diff: f64 = tai - utc;
+            assert(diff == off, "TAI − UTC is exactly ΔAT");
+            var back: f64 = tai_to_utc_seconds(tai, y, m);
+            assert(back == utc, "and TAI -> UTC undoes it exactly");
+            months = months + 1;
+            month = month + 1;
+        }
+        year = year + 1;
+    }
+    assert_eq(months, 768, "64 years of months");
+}
+
+# Runs every test and returns the failure count.
+fn main(): i64 {
+    _t_utc_date_to_tai_offset_2020();
+    _t_utc_date_to_tai_offset_before_1972();
+    _t_tai_utc_roundtrip();
+    _t_utc_tai_offset_matches_timekeeping();
+    _t_chrono_unix_epoch_shift();
+    _t_chrono_1972_step();
+    _t_chrono_months_1972_2035();
+    return assert_summary();
+}
+
+var exit_code = main();
+sys_exit_group(exit_code);

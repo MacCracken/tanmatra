@@ -1,14 +1,10 @@
 # optics_parity.tcyr — replays tests/golden/optics.tsv against the optics profile.
 #
-# The optics module needs prakash 2.15.1, vendored by `cyrius deps --features optics`, so it has
+# The optics module needs prakash 2.15.2, vendored by `cyrius deps --features optics`, so it has
 # its own harness: tests/parity.tcyr replays every other module. The machinery, and the row
 # outcomes, are tests/parity_core.cyr's. The golden rows come from the Rust oracle with the Rust
-# prakash 1.2.0; the port runs against the Cyrius prakash 2.15.1.
-#
-# ⚠ prakash 2.15.1's bundle carries three compile warnings of its own (lib/prakash.cyr:9213 and
-# :9214, which prakash documents as intended raw-bit compares, and the unreachable hisab
-# `num_fft`). They are the only warnings in this compile; tanmatra's code adds none. Accepted
-# until prakash fixes them; filed as prakash/docs/development/issues/2026-11-08-bundle-consumer-compile-warnings.md.
+# prakash 1.2.0; the port runs against the Cyrius prakash 2.15.2. Like every test file, this one
+# compiles warning-free: 2.15.2 fixed the three bundle warnings 2.15.1 carried.
 
 include "tests/ulp.cyr"
 include "src/error.cyr"
@@ -31,6 +27,7 @@ include "src/reaction.cyr"
 include "src/scattering.cyr"
 include "src/timekeeping_data.cyr"
 include "src/timekeeping.cyr"
+include "src/bridge.cyr"
 include "src/optics_data.cyr"
 include "src/optics.cyr"
 

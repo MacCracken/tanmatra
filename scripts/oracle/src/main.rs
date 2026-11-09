@@ -21,6 +21,7 @@
 mod cyr;
 mod grids;
 mod m_atomic;
+mod m_bridge;
 mod m_constants;
 mod m_decay;
 mod m_libm;
@@ -51,6 +52,7 @@ use std::process::ExitCode;
 fn golden_modules() -> Vec<tsv::Module> {
     vec![
         m_atomic::emit(),
+        m_bridge::emit(),
         m_constants::emit(),
         m_decay::emit(),
         m_libm::emit(),

@@ -30,20 +30,23 @@ scattering formulas are ill-conditioned enough that the port reproduces Rust lib
 every golden row is then bit-identical on all three targets.
 
 **M6 Optics profile is done (2026-11-08):** spectral lines as prakash SPDs and colours, behind the optional `optics`
-feature and the `[lib.optics]` bundle. Every optics golden row passes against the Cyrius prakash 2.15.1 on all three
+feature and the `[lib.optics]` bundle. Every optics golden row passes against the Cyrius prakash 2.15.2 on all three
 targets, and the core bundle stays prakash-free.
 
 **M7 Release 2.0.0 is done (2026-11-08):** every Rust test is ported or accounted for in the
 [Rust-test ledger](rust-test-ledger.md), surface parity is the full diff, and `VERSION` is 2.0.0. **tanmatra 2.0.0 is
 the Cyrius library.**
 
-**Next: after 2.0.0** (port plan §6): the bridges as their consumers land in Cyrius, the soorat integration, and the
-v1.x physics items below. Live status is in [`state.md`](state.md).
+**2.0.1 (2026-11-09):** the chrono bridge, the first bridge (port plan §6), every golden row 0 ulp on all three
+targets; and prakash 2.15.2 for the optics profile, so every test file compiles warning-free again.
+
+**Next: after 2.0.1** (port plan §6): the other bridges as their consumers land in Cyrius, the soorat integration, and
+the v1.x physics items below. Live status is in [`state.md`](state.md).
 
 - **Rust 1.3.0 is the final Rust feature release** and the reference implementation: every finding of the [2026-09-16 audit](../audit/2026-09-16-math-audit.md) is repaired and pinned by reference-value tests.
 - **tanmatra 2.0.0 is the Cyrius port**, initialized with `cyrius port` (Rust moves to `rust-old/` as the parity oracle).
 - **In scope:** constants, particle, relativity, nucleus, decay, atomic, reaction, scattering, timekeeping, and the `optics` profile against prakash (already in Cyrius).
-- **Deferred until the consumers are in Cyrius:** all bridges (bijli, kimiya, bhava, jyotish, chrono, hisab-mimamsa, falak, kiran/joshua) and the soorat integration. bijli, kimiya and soorat are still Rust.
+- **Deferred until the consumers are in Cyrius:** the bridges to bijli, kimiya, bhava, hisab-mimamsa, falak and kiran/joshua, and the soorat integration. bijli, kimiya and soorat are still Rust. The chrono bridge shipped in 2.0.1, and jyotish's one bridge, `tai_to_tt`, is timekeeping's.
 - **Milestones:** M0 initialize → M1 foundation → M2 nuclear → M5 timekeeping → M3 atomic → M4 reactions & scattering → M6 optics → M7 release 2.0.0.
 
 The v1.x items below continue in Cyrius after 2.0.0.
