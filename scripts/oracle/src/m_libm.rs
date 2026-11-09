@@ -7,7 +7,8 @@
 //! Classes:
 //! - **A**: correctly rounded or exact on both sides — sqrt, fabs, floor, trunc, round
 //!   (the port's half-away helper, not `f64_round`), cbrt (CORE-MATH vs ganita), ldexp, and
-//!   hypot (the port's `_tm_hypot` is Rust libm's algorithm operation for operation).
+//!   hypot (the port's `_tm_hypot` is Rust libm's algorithm operation for operation), and from
+//!   M4 sin, cos and log (`_tm_sin`, `_tm_cos`, `_tm_log`, likewise).
 //! - **C**: everything else.
 //!
 //! Inputs are the special values, the ranges tanmatra feeds each function, and wide
@@ -112,8 +113,8 @@ pub fn emit() -> Module {
     tr.extend(sweep(0x5101, 400, -2.0 * PI, 2.0 * PI));
     tr.extend(sweep(0x5102, 200, 0.0, 1e3));
     tr.extend(log_sweep(0x5103, 100, -12.0, 15.0));
-    unary(&mut m, "libm::sin", Class::C, libm::sin, &tr);
-    unary(&mut m, "libm::cos", Class::C, libm::cos, &tr);
+    unary(&mut m, "libm::sin", Class::A, libm::sin, &tr);
+    unary(&mut m, "libm::cos", Class::A, libm::cos, &tr);
     unary(&mut m, "libm::tan", Class::C, libm::tan, &tr);
 
     let mut ex = specials();
@@ -125,7 +126,7 @@ pub fn emit() -> Module {
     let mut lg = wide(0x1060, 300);
     lg.extend(sweep(0x1061, 200, 0.5, 2.0));
     lg.extend(sweep(0x1062, 100, 1.0 - 1e-9, 1.0 + 1e-9));
-    unary(&mut m, "libm::log", Class::C, libm::log, &lg);
+    unary(&mut m, "libm::log", Class::A, libm::log, &lg);
 
     let mut sh = specials();
     sh.extend(sweep(0x5a01, 300, -20.0, 20.0));

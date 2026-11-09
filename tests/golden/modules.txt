@@ -5,5 +5,7 @@ decay
 libm
 nucleus
 particle
+reaction
 relativity
+scattering
 timekeeping

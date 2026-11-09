@@ -1,0 +1,660 @@
+# scattering.tcyr — the reference-value tests of rust-old/src/scattering.rs, ported one for one,
+# in order (each test_group is the Rust test's name). serde_roundtrip_not_needed is carried
+# over as the empty test it is in Rust (it is no serde round-trip). A phase-shift slice is an
+# f64 buffer and its length; core::f64::consts::FRAC_PI_2 and FRAC_PI_4 are _TM_PI / 2.0 and
+# _TM_PI / 4.0, exact; libm::sin / cos / fabs / sqrt are _tm_sin, _tm_cos, f64_abs and
+# f64_sqrt; `powi(n)` is repeated squaring, as compiler-rt's __powidf2. The golden corpus
+# separately checks every function against the oracle on the M4 grid, in its tolerance class
+# (tests/parity.tcyr).
+
+include "tests/ulp.cyr"
+include "src/error.cyr"
+include "src/numerics.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
+include "src/decay_data.cyr"
+include "src/decay.cyr"
+include "src/atomic_data.cyr"
+include "src/atomic_config.cyr"
+include "src/atomic_hydrogenic.cyr"
+include "src/atomic_qed.cyr"
+include "src/reaction_data.cyr"
+include "src/reaction.cyr"
+include "src/scattering.cyr"
+
+alloc_init();
+
+# 1 if |a - b| < eps.
+#must_use
+fn near(a: f64, b: f64, eps: f64): i64 {
+    if (f64_abs(a - b) < eps) { return 1; }
+    return 0;
+}
+
+# 1 if |a - b| / b < eps: rust's `(a - b).abs() / b < eps`, divided by b itself, not |b|.
+#must_use
+fn _near_rel(a: f64, b: f64, eps: f64): i64 {
+    var d: f64 = f64_abs(a - b);
+    var r: f64 = d / b;
+    if (r < eps) { return 1; }
+    return 0;
+}
+
+# 1 if x > 0.0 and x is finite: rust's `x > 0.0 && x.is_finite()`.
+#must_use
+fn _pos_finite(x: f64): i64 {
+    if (x > 0.0 && _tm_is_finite(x) == 1) { return 1; }
+    return 0;
+}
+
+# The Simpson weight of interior node i: 4.0 for odd i, 2.0 for even.
+#must_use
+fn _simpson_w(i): f64 {
+    if (i % 2 == 1) { return 4.0; }
+    return 2.0;
+}
+
+# The integrand of rutherford_total_matches_integral_of_differential:
+# rutherford_differential(2, 79, 5.0, t) * 2.0 * PI * sin(t).
+#must_use
+fn _ruth_f(t: f64): f64 {
+    var ds: f64 = rutherford_differential(2, 79, 5.0, t);
+    var s: f64 = _tm_sin(t);
+    var f: f64 = ((ds * 2.0) * _TM_PI) * s;
+    return f;
+}
+
+# The integrand of klein_nishina_total_matches_integral_small_gamma:
+# klein_nishina_differential(e, t) * 2.0 * PI * sin(t).
+#must_use
+fn _kn_f(e: f64, t: f64): f64 {
+    var ds: f64 = klein_nishina_differential(e, t);
+    var s: f64 = _tm_sin(t);
+    var f: f64 = ((ds * 2.0) * _TM_PI) * s;
+    return f;
+}
+
+fn _t_rutherford_diverges_forward() {
+    test_group("rutherford_diverges_forward");
+    var ds: f64 = rutherford_differential(79, 2, 5.0, 0.001);
+    assert(ds > 10000000000.0, "Forward Rutherford should be huge");
+}
+
+fn _t_rutherford_finite_at_90_degrees() {
+    test_group("rutherford_finite_at_90_degrees");
+    var half_pi: f64 = _TM_PI / 2.0;
+    var ds: f64 = rutherford_differential(2, 79, 5.0, half_pi);
+    assert(_pos_finite(ds), "90 deg should be finite");
+}
+
+fn _t_rutherford_scales_with_z_squared() {
+    test_group("rutherford_scales_with_z_squared");
+    var ds1: f64 = rutherford_differential(2, 40, 10.0, 1.0);
+    var ds2: f64 = rutherford_differential(2, 80, 10.0, 1.0);
+    var ratio: f64 = ds2 / ds1;
+    assert(near(ratio, 4.0, 0.01), "Z^2 scaling");
+}
+
+fn _t_rutherford_decreases_with_energy() {
+    test_group("rutherford_decreases_with_energy");
+    var ds5: f64 = rutherford_differential(2, 79, 5.0, 1.0);
+    var ds10: f64 = rutherford_differential(2, 79, 10.0, 1.0);
+    var ratio: f64 = ds5 / ds10;
+    assert(near(ratio, 4.0, 0.1), "1/E^2 scaling");
+}
+
+fn _t_mott_correction_nonrelativistic() {
+    test_group("mott_correction_nonrelativistic");
+    var factor: f64 = mott_correction_factor(0.01, 1.0);
+    assert(near(factor, 1.0, 0.01), "beta ~ 0: Mott factor ~ 1");
+}
+
+fn _t_mott_correction_relativistic() {
+    test_group("mott_correction_relativistic");
+    var half_pi: f64 = _TM_PI / 2.0;
+    var factor: f64 = mott_correction_factor(0.9, half_pi);
+    var expected: f64 = 1.0 - (0.81 * 0.5);
+    assert(near(factor, expected, 0.01), "Mott = 1 - 0.81 sin^2(pi/4)");
+}
+
+fn _t_closest_approach_gold_alpha() {
+    test_group("closest_approach_gold_alpha");
+    var dist: f64 = distance_of_closest_approach(2, 79, 5.0);
+    var expected: f64 = ((2.0 * 79.0) * TM_COULOMB_MEV_FM) / 5.0;
+    assert(near(dist, expected, 0.000001), "d = Z1 Z2 e^2 / T");
+    assert(near(dist, 45.503, 0.001), "d ~ 45.503 fm");
+}
+
+fn _t_sommerfeld_large_means_classical() {
+    test_group("sommerfeld_large_means_classical");
+    var eta: f64 = sommerfeld_parameter(2, 79, 0.05);
+    assert(eta > 1.0, "eta >> 1 for classical");
+}
+
+fn _t_rutherford_total_matches_integral_of_differential() {
+    test_group("rutherford_total_matches_integral_of_differential");
+    var th_min: f64 = 0.1;
+    var total: f64 = rutherford_total_above_angle(2, 79, 5.0, th_min);
+    var n = 200000;
+    var fnn: f64 = f64_from(n);
+    var h: f64 = (_TM_PI - th_min) / fnn;
+    var f_lo: f64 = _ruth_f(th_min);
+    var f_hi: f64 = _ruth_f(_TM_PI);
+    var acc: f64 = f_lo + f_hi;
+    var i = 1;
+    while (i < n) {
+        var fi: f64 = f64_from(i);
+        var t: f64 = th_min + (fi * h);
+        var w: f64 = _simpson_w(i);
+        var ft: f64 = _ruth_f(t);
+        acc = acc + (w * ft);
+        i = i + 1;
+    }
+    var numeric: f64 = (acc * h) / 3.0;
+    assert(_near_rel(total, numeric, 0.000001), "total above angle = Simpson integral of dsigma/dOmega");
+}
+
+fn _t_serde_roundtrip_not_needed() {
+    test_group("serde_roundtrip_not_needed");
+    # This module has no custom types needing serde roundtrip
+    # (uses only f64 inputs/outputs and FourMomentum from relativity)
+}
+
+# ── Legendre polynomial tests ──
+
+fn _t_legendre_p0_is_one() {
+    test_group("legendre_p0_is_one");
+    var a: f64 = legendre_polynomial(0, 0.5);
+    assert(near(a, 1.0, 0.000000000001), "P_0(0.5) = 1");
+    var b: f64 = legendre_polynomial(0, -0.3);
+    assert(near(b, 1.0, 0.000000000001), "P_0(-0.3) = 1");
+}
+
+fn _t_legendre_p1_is_x() {
+    test_group("legendre_p1_is_x");
+    var x: f64 = 0.7;
+    var p: f64 = legendre_polynomial(1, x);
+    assert(near(p, x, 0.000000000001), "P_1(x) = x");
+}
+
+fn _t_legendre_p2_formula() {
+    test_group("legendre_p2_formula");
+    var x: f64 = 0.6;
+    var expected: f64 = (((3.0 * x) * x) - 1.0) / 2.0;
+    var p: f64 = legendre_polynomial(2, x);
+    assert(near(p, expected, 0.000000000001), "P_2(x) = (3x^2 - 1)/2");
+}
+
+fn _t_legendre_p3_formula() {
+    test_group("legendre_p3_formula");
+    var x: f64 = 0.4;
+    var expected: f64 = ((((5.0 * x) * x) * x) - (3.0 * x)) / 2.0;
+    var p: f64 = legendre_polynomial(3, x);
+    assert(near(p, expected, 0.000000000001), "P_3(x) = (5x^3 - 3x)/2");
+}
+
+fn _t_legendre_at_one() {
+    test_group("legendre_at_one");
+    var l = 0;
+    while (l < 10) {
+        var p: f64 = legendre_polynomial(l, 1.0);
+        assert(near(p, 1.0, 0.0000000001), "P_l(1) should be 1");
+        l = l + 1;
+    }
+}
+
+# ── partial-wave analysis tests ──
+
+fn _t_partial_wave_s_wave_only() {
+    test_group("partial_wave_s_wave_only");
+    var k: f64 = 0.5;
+    var quarter_pi: f64 = _TM_PI / 4.0;
+    var ph[8];
+    store64(&ph, quarter_pi);
+    var sigma: f64 = partial_wave_cross_section(k, &ph, 1);
+    var expected: f64 = (2.0 * _TM_PI) / (k * k);
+    assert(_near_rel(sigma, expected, 0.0000000001), "s-wave delta_0 = pi/4: sigma = 2 pi / k^2");
+}
+
+fn _t_partial_wave_zero_phase_shifts() {
+    test_group("partial_wave_zero_phase_shifts");
+    var ph[24];
+    store64(&ph, 0.0);
+    store64(&ph + 8, 0.0);
+    store64(&ph + 16, 0.0);
+    var sigma: f64 = partial_wave_cross_section(1.0, &ph, 3);
+    var a: f64 = f64_abs(sigma);
+    assert(a < 0.000000000000001, "all delta_l = 0: sigma = 0");
+}
+
+fn _t_partial_wave_unitarity_limit() {
+    test_group("partial_wave_unitarity_limit");
+    var k: f64 = 1.0;
+    var half_pi: f64 = _TM_PI / 2.0;
+    var ph[8];
+    store64(&ph, half_pi);
+    var sigma: f64 = partial_wave_cross_section(k, &ph, 1);
+    var max_s_wave: f64 = (4.0 * _TM_PI) / (k * k);
+    assert(_near_rel(sigma, max_s_wave, 0.0000000001), "Unitarity limit: sigma = 4 pi / k^2");
+}
+
+fn _t_partial_wave_differential_isotropic_s_wave() {
+    test_group("partial_wave_differential_isotropic_s_wave");
+    var k: f64 = 1.0;
+    var quarter_pi: f64 = _TM_PI / 4.0;
+    var half_pi: f64 = _TM_PI / 2.0;
+    var ph[8];
+    store64(&ph, quarter_pi);
+    var ds_0: f64 = partial_wave_differential(k, &ph, 1, 0.1);
+    var ds_90: f64 = partial_wave_differential(k, &ph, 1, half_pi);
+    var ds_180: f64 = partial_wave_differential(k, &ph, 1, _TM_PI);
+    # |ds_0 - ds_x| / ds_0: |a - b| is exactly |b - a|, so ds_0 goes second as the divisor.
+    assert(_near_rel(ds_90, ds_0, 0.0000000001), "s-wave not isotropic: 0.1 vs 90 deg");
+    assert(_near_rel(ds_180, ds_0, 0.0000000001), "s-wave not isotropic: 0.1 vs 180 deg");
+}
+
+fn _t_partial_wave_differential_positive() {
+    test_group("partial_wave_differential_positive");
+    var k: f64 = 0.5;
+    var ph[24];
+    store64(&ph, 0.3);
+    store64(&ph + 8, 0.1);
+    store64(&ph + 16, 0.05);
+    var ds: f64 = partial_wave_differential(k, &ph, 3, 1.0);
+    assert(_pos_finite(ds), "dsigma/dOmega > 0 and finite");
+}
+
+# ── Born screened Coulomb tests ──
+
+fn _t_born_screened_approaches_rutherford_for_large_screening() {
+    test_group("born_screened_approaches_rutherford_for_large_screening");
+    var theta: f64 = 1.0;
+    var energy: f64 = 5.0;
+    var ruth: f64 = rutherford_differential(1, 79, energy, theta);
+    var born: f64 = born_screened_coulomb(1, 79, energy, theta, 1000000.0);
+    var ratio: f64 = born / ruth;
+    assert(near(ratio, 1.0, 0.05), "Born/Ruth ratio should approach 1");
+}
+
+fn _t_born_screened_less_than_rutherford() {
+    test_group("born_screened_less_than_rutherford");
+    var theta: f64 = 0.1;
+    var energy: f64 = 5.0;
+    var ruth: f64 = rutherford_differential(1, 79, energy, theta);
+    var born: f64 = born_screened_coulomb(1, 79, energy, theta, 10000.0);
+    assert(born < ruth, "Screened should be < Rutherford at forward angles");
+}
+
+fn _t_born_screened_finite_at_zero_angle() {
+    test_group("born_screened_finite_at_zero_angle");
+    var ds: f64 = born_screened_coulomb(2, 79, 5.0, 0.0, 10000.0);
+    assert_eq(_tm_is_finite(ds), 1, "Screened should be finite at theta = 0");
+}
+
+# ── Thomas–Fermi screening tests ──
+
+fn _t_thomas_fermi_decreases_with_z() {
+    test_group("thomas_fermi_decreases_with_z");
+    var a_low: f64 = thomas_fermi_screening_fm(10);
+    var a_high: f64 = thomas_fermi_screening_fm(80);
+    assert(a_high < a_low, "a(Z=80) should be < a(Z=10)");
+}
+
+fn _t_thomas_fermi_hydrogen() {
+    test_group("thomas_fermi_hydrogen");
+    var a: f64 = thomas_fermi_screening_fm(1);
+    var expected: f64 = 0.88534 * 52917.7210544;
+    assert(_near_rel(a, expected, 0.000001), "a(Z=1) = 0.88534 a0");
+}
+
+fn _t_thomas_fermi_zero_z_returns_zero() {
+    test_group("thomas_fermi_zero_z_returns_zero");
+    var a0: f64 = thomas_fermi_screening_fm(0);
+    var a: f64 = f64_abs(a0);
+    assert(a < 0.000000000000001, "a(Z=0) = 0");
+}
+
+# ── Mott electron scattering tests ──
+
+fn _t_mott_electron_diverges_forward() {
+    test_group("mott_electron_diverges_forward");
+    var ds: f64 = mott_electron_differential(79, 200.0, 0.001);
+    assert(ds > 10000000000.0, "Forward Mott should be very large");
+}
+
+fn _t_mott_electron_finite_at_90() {
+    test_group("mott_electron_finite_at_90");
+    var half_pi: f64 = _TM_PI / 2.0;
+    var ds: f64 = mott_electron_differential(79, 200.0, half_pi);
+    assert(_pos_finite(ds), "90 deg Mott > 0 and finite");
+}
+
+fn _t_mott_electron_scales_with_z_squared() {
+    test_group("mott_electron_scales_with_z_squared");
+    var ds1: f64 = mott_electron_differential(40, 200.0, 1.0);
+    var ds2: f64 = mott_electron_differential(80, 200.0, 1.0);
+    var ratio: f64 = ds2 / ds1;
+    assert(near(ratio, 4.0, 0.01), "Z^2 scaling");
+}
+
+# ── nuclear form factor tests ──
+
+fn _t_form_factor_unity_at_zero_q() {
+    test_group("form_factor_unity_at_zero_q");
+    var ff: f64 = nuclear_form_factor_uniform(0.0, 5.0);
+    assert(near(ff, 1.0, 0.0000000001), "F(0) = 1");
+}
+
+fn _t_form_factor_less_than_one_nonzero_q() {
+    test_group("form_factor_less_than_one_nonzero_q");
+    var ff: f64 = nuclear_form_factor_uniform(0.5, 5.0);
+    var a: f64 = f64_abs(ff);
+    assert(a < 1.0, "F(q) should be < 1 for finite q");
+}
+
+fn _t_form_factor_has_zeros() {
+    test_group("form_factor_has_zeros");
+    var r: f64 = 5.0;
+    var q: f64 = 4.493 / r;
+    var ff: f64 = nuclear_form_factor_uniform(q, r);
+    var a: f64 = f64_abs(ff);
+    assert(a < 0.01, "F(q) near first zero should be ~0");
+}
+
+# ── Mott with form factor tests ──
+
+fn _t_mott_with_ff_less_than_point() {
+    test_group("mott_with_ff_less_than_point");
+    var point: f64 = mott_electron_differential(82, 200.0, 0.5);
+    var with_ff: f64 = mott_electron_with_form_factor(82, 208, 200.0, 0.5);
+    assert(with_ff <= point, "With FF should be <= point");
+}
+
+fn _t_mott_with_ff_approaches_point_at_small_angle() {
+    test_group("mott_with_ff_approaches_point_at_small_angle");
+    var point: f64 = mott_electron_differential(6, 10.0, 0.01);
+    var with_ff: f64 = mott_electron_with_form_factor(6, 12, 10.0, 0.01);
+    var ratio: f64 = with_ff / point;
+    assert(near(ratio, 1.0, 0.01), "Small angle: ratio ~ 1");
+}
+
+fn _t_mott_with_ff_positive() {
+    test_group("mott_with_ff_positive");
+    var ds: f64 = mott_electron_with_form_factor(79, 197, 500.0, 0.3);
+    assert(ds >= 0.0 && _tm_is_finite(ds) == 1, "dsigma/dOmega >= 0 and finite");
+}
+
+# ── Compton scattering tests ──
+
+fn _t_compton_ratio_unity_at_zero_angle() {
+    test_group("compton_ratio_unity_at_zero_angle");
+    var ratio: f64 = compton_energy_ratio(1.0, 0.0);
+    assert(near(ratio, 1.0, 0.000000000001), "theta = 0: omega'/omega = 1");
+}
+
+fn _t_compton_ratio_backscatter() {
+    test_group("compton_ratio_backscatter");
+    var energy: f64 = 0.511;
+    var gamma: f64 = energy / TM_ELECTRON_MASS_MEV;
+    var ratio: f64 = compton_energy_ratio(energy, _TM_PI);
+    var expected: f64 = 1.0 / (1.0 + (2.0 * gamma));
+    assert(near(ratio, expected, 0.0000000001), "theta = pi: omega'/omega = 1/(1 + 2 gamma)");
+}
+
+fn _t_compton_ratio_decreases_with_energy() {
+    test_group("compton_ratio_decreases_with_energy");
+    var r_low: f64 = compton_energy_ratio(0.1, 1.0);
+    var r_high: f64 = compton_energy_ratio(10.0, 1.0);
+    assert(r_high < r_low, "Higher energy should lose more");
+}
+
+fn _t_klein_nishina_differential_positive() {
+    test_group("klein_nishina_differential_positive");
+    var half_pi: f64 = _TM_PI / 2.0;
+    var ds: f64 = klein_nishina_differential(0.662, half_pi);
+    assert(_pos_finite(ds), "dsigma/dOmega > 0 and finite");
+}
+
+fn _t_klein_nishina_low_energy_approaches_thomson() {
+    test_group("klein_nishina_low_energy_approaches_thomson");
+    var energy: f64 = 0.0001;
+    var theta: f64 = _TM_PI / 2.0;
+    var ds: f64 = klein_nishina_differential(energy, theta);
+    var re2: f64 = TM_CLASSICAL_ELECTRON_RADIUS_FM * TM_CLASSICAL_ELECTRON_RADIUS_FM;
+    var cos_t: f64 = _tm_cos(theta);
+    var thomson: f64 = (re2 / 2.0) * (1.0 + (cos_t * cos_t));
+    assert(_near_rel(ds, thomson, 0.001), "KN -> Thomson at low energy");
+}
+
+fn _t_klein_nishina_forward_backward_symmetry_low_energy() {
+    test_group("klein_nishina_forward_backward_symmetry_low_energy");
+    var energy: f64 = 0.0001;
+    var ds_fwd: f64 = klein_nishina_differential(energy, 0.3);
+    var ds_bwd: f64 = klein_nishina_differential(energy, _TM_PI - 0.3);
+    var ratio: f64 = ds_fwd / ds_bwd;
+    assert(near(ratio, 1.0, 0.01), "Low-energy asymmetry");
+}
+
+fn _t_klein_nishina_total_thomson_limit() {
+    test_group("klein_nishina_total_thomson_limit");
+    var re2: f64 = TM_CLASSICAL_ELECTRON_RADIUS_FM * TM_CLASSICAL_ELECTRON_RADIUS_FM;
+    var thomson: f64 = ((8.0 * _TM_PI) * re2) / 3.0;
+    var sigma: f64 = klein_nishina_total(0.0001);
+    assert(_near_rel(sigma, thomson, 0.001), "sigma_KN -> sigma_T");
+}
+
+fn _t_klein_nishina_total_decreases_with_energy() {
+    test_group("klein_nishina_total_decreases_with_energy");
+    var s1: f64 = klein_nishina_total(0.1);
+    var s2: f64 = klein_nishina_total(1.0);
+    var s3: f64 = klein_nishina_total(10.0);
+    assert(s1 > s2 && s2 > s3, "sigma should decrease");
+}
+
+fn _t_klein_nishina_total_positive() {
+    test_group("klein_nishina_total_positive");
+    var sigma: f64 = klein_nishina_total(0.662);
+    assert(_pos_finite(sigma), "sigma > 0 and finite");
+}
+
+# ── pair production tests ──
+
+fn _t_pair_production_zero_below_threshold() {
+    test_group("pair_production_zero_below_threshold");
+    var s1: f64 = pair_production_cross_section(82, 0.5);
+    var a1: f64 = f64_abs(s1);
+    assert(a1 < 0.000000000000001, "0.5 MeV: no pair production");
+    var s2: f64 = pair_production_cross_section(82, 1.02);
+    var a2: f64 = f64_abs(s2);
+    assert(a2 < 0.000000000000001, "1.02 MeV: no pair production");
+}
+
+fn _t_pair_production_positive_above_threshold() {
+    test_group("pair_production_positive_above_threshold");
+    var sigma: f64 = pair_production_cross_section(82, 10.0);
+    assert(_pos_finite(sigma), "sigma > 0 and finite");
+}
+
+fn _t_pair_production_positive_and_continuous() {
+    test_group("pair_production_positive_and_continuous");
+    var m: f64 = TM_ELECTRON_MASS_MEV;
+    var k: f64 = 2.001;
+    while (k < 2000.0) {
+        var s: f64 = pair_production_cross_section(82, k * m);
+        assert(s > 0.0, "sigma > 0 above threshold (2.001 <= k < 2000)");
+        k = k * 1.01;
+    }
+    var e_below: f64 = (4.0 * m) * (1.0 - 0.000000000001);
+    var e_above: f64 = (4.0 * m) * (1.0 + 0.000000000001);
+    var below: f64 = pair_production_cross_section(82, e_below);
+    var above: f64 = pair_production_cross_section(82, e_above);
+    assert(_near_rel(below, above, 0.001), "continuous across k = 4");
+}
+
+fn _t_pair_production_reference_values() {
+    test_group("pair_production_reference_values");
+    var k: f64 = 100.0;
+    var re: f64 = TM_CLASSICAL_ELECTRON_RADIUS_FM;
+    var unit: f64 = (((82.0 * 82.0) * TM_FINE_STRUCTURE) * re) * re;
+    var sigma: f64 = pair_production_cross_section(82, k * TM_ELECTRON_MASS_MEV);
+    var s: f64 = sigma / unit;
+    assert(near(s, 8.44398, 0.0001), "Hubbell, Gimm & Overbo 1980: reduced sigma(k = 100) = 8.44398");
+}
+
+fn _t_klein_nishina_total_matches_integral_small_gamma() {
+    test_group("klein_nishina_total_matches_integral_small_gamma");
+    var es[48];
+    store64(&es, 0.00000511);
+    store64(&es + 8, 0.00001);
+    store64(&es + 16, 0.0001);
+    store64(&es + 24, 0.005);
+    store64(&es + 32, 0.01);
+    store64(&es + 40, 0.1);
+    var j = 0;
+    while (j < 6) {
+        var e: f64 = load64(&es + j * 8);
+        var n = 20000;
+        var fnn: f64 = f64_from(n);
+        var h: f64 = _TM_PI / fnn;
+        var f_lo: f64 = _kn_f(e, 0.0);
+        var f_hi: f64 = _kn_f(e, _TM_PI);
+        var acc: f64 = f_lo + f_hi;
+        var i = 1;
+        while (i < n) {
+            var fi: f64 = f64_from(i);
+            var w: f64 = _simpson_w(i);
+            var ft: f64 = _kn_f(e, fi * h);
+            acc = acc + (w * ft);
+            i = i + 1;
+        }
+        var numeric: f64 = (acc * h) / 3.0;
+        var total: f64 = klein_nishina_total(e);
+        assert(_near_rel(total, numeric, 0.00000001), "sigma_KN = Simpson integral of dsigma/dOmega");
+        j = j + 1;
+    }
+}
+
+fn _t_form_factor_small_qr_no_cancellation() {
+    test_group("form_factor_small_qr_no_cancellation");
+    var xs[40];
+    store64(&xs, 0.000001);
+    store64(&xs + 8, 0.00001);
+    store64(&xs + 16, 0.0001);
+    store64(&xs + 24, 0.001);
+    store64(&xs + 32, 0.0099);
+    var j = 0;
+    while (j < 5) {
+        var x: f64 = load64(&xs + j * 8);
+        var x2: f64 = x * x;
+        var x4: f64 = x2 * x2;
+        var series: f64 = (1.0 - (x2 / 10.0)) + (x4 / 280.0);
+        var ff: f64 = nuclear_form_factor_uniform(x, 1.0);
+        assert(near(ff, series, 0.00000000000001), "F(qR) = 1 - x^2/10 + x^4/280 for small qR");
+        j = j + 1;
+    }
+    # Continuity across the switch at qR = 0.5.
+    var switch_qr: f64 = 0.5;
+    var qa: f64 = switch_qr * (1.0 - 0.000000000001);
+    var qb: f64 = switch_qr * (1.0 + 0.000000000001);
+    var a: f64 = nuclear_form_factor_uniform(qa, 1.0);
+    var b: f64 = nuclear_form_factor_uniform(qb, 1.0);
+    assert(near(a, b, 0.0000000000001), "continuous across the switch at qR = 0.5");
+}
+
+fn _t_mott_electron_low_energy_uses_momentum() {
+    test_group("mott_electron_low_energy_uses_momentum");
+    var t: f64 = 1.0;
+    var pc: f64 = f64_sqrt(t * (t + (2.0 * TM_ELECTRON_MASS_MEV)));
+    var beta: f64 = pc / (t + TM_ELECTRON_MASS_MEV);
+    var s: f64 = _tm_sin(0.5);
+    var amp: f64 = ((79.0 * TM_FINE_STRUCTURE) * TM_HBAR_C_MEV_FM) / ((2.0 * pc) * beta);
+    var amp2: f64 = amp * amp;
+    var s2: f64 = s * s;
+    var s4: f64 = s2 * s2;
+    var expected: f64 = (amp2 * (1.0 - (((beta * beta) * s) * s))) / s4;
+    var got: f64 = mott_electron_differential(79, t, 1.0);
+    assert(_near_rel(got, expected, 0.000000000001), "point-nucleus Mott with exact pc and beta");
+}
+
+fn _t_pair_production_scales_with_z_squared() {
+    test_group("pair_production_scales_with_z_squared");
+    var s1: f64 = pair_production_cross_section(40, 100.0);
+    var s2: f64 = pair_production_cross_section(80, 100.0);
+    var ratio: f64 = s2 / s1;
+    assert(near(ratio, 4.0, 0.01), "Z^2 scaling");
+}
+
+fn _t_pair_production_increases_with_energy() {
+    test_group("pair_production_increases_with_energy");
+    var s10: f64 = pair_production_cross_section(82, 10.0);
+    var s100: f64 = pair_production_cross_section(82, 100.0);
+    var s1000: f64 = pair_production_cross_section(82, 1000.0);
+    assert(s100 > s10 && s1000 > s100, "sigma should increase with energy");
+}
+
+# Runs every test and returns the failure count.
+fn main(): i64 {
+    _t_rutherford_diverges_forward();
+    _t_rutherford_finite_at_90_degrees();
+    _t_rutherford_scales_with_z_squared();
+    _t_rutherford_decreases_with_energy();
+    _t_mott_correction_nonrelativistic();
+    _t_mott_correction_relativistic();
+    _t_closest_approach_gold_alpha();
+    _t_sommerfeld_large_means_classical();
+    _t_rutherford_total_matches_integral_of_differential();
+    _t_serde_roundtrip_not_needed();
+    _t_legendre_p0_is_one();
+    _t_legendre_p1_is_x();
+    _t_legendre_p2_formula();
+    _t_legendre_p3_formula();
+    _t_legendre_at_one();
+    _t_partial_wave_s_wave_only();
+    _t_partial_wave_zero_phase_shifts();
+    _t_partial_wave_unitarity_limit();
+    _t_partial_wave_differential_isotropic_s_wave();
+    _t_partial_wave_differential_positive();
+    _t_born_screened_approaches_rutherford_for_large_screening();
+    _t_born_screened_less_than_rutherford();
+    _t_born_screened_finite_at_zero_angle();
+    _t_thomas_fermi_decreases_with_z();
+    _t_thomas_fermi_hydrogen();
+    _t_thomas_fermi_zero_z_returns_zero();
+    _t_mott_electron_diverges_forward();
+    _t_mott_electron_finite_at_90();
+    _t_mott_electron_scales_with_z_squared();
+    _t_form_factor_unity_at_zero_q();
+    _t_form_factor_less_than_one_nonzero_q();
+    _t_form_factor_has_zeros();
+    _t_mott_with_ff_less_than_point();
+    _t_mott_with_ff_approaches_point_at_small_angle();
+    _t_mott_with_ff_positive();
+    _t_compton_ratio_unity_at_zero_angle();
+    _t_compton_ratio_backscatter();
+    _t_compton_ratio_decreases_with_energy();
+    _t_klein_nishina_differential_positive();
+    _t_klein_nishina_low_energy_approaches_thomson();
+    _t_klein_nishina_forward_backward_symmetry_low_energy();
+    _t_klein_nishina_total_thomson_limit();
+    _t_klein_nishina_total_decreases_with_energy();
+    _t_klein_nishina_total_positive();
+    _t_pair_production_zero_below_threshold();
+    _t_pair_production_positive_above_threshold();
+    _t_pair_production_positive_and_continuous();
+    _t_pair_production_reference_values();
+    _t_klein_nishina_total_matches_integral_small_gamma();
+    _t_form_factor_small_qr_no_cancellation();
+    _t_mott_electron_low_energy_uses_momentum();
+    _t_pair_production_scales_with_z_squared();
+    _t_pair_production_increases_with_energy();
+    return assert_summary();
+}
+
+var exit_code = main();
+if (exit_code > 0) { exit_code = 1; }
+sys_exit_group(exit_code);

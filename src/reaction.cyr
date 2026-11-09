@@ -1,0 +1,414 @@
+# reaction.cyr — nuclear reactions: Q-values, the Coulomb barrier, cross sections, the preset
+# reactions, nucleosynthesis pathways, neutron moderation and fission yields (port of
+# rust-old/src/reaction.rs).
+#
+# - The tables are the generated reaction_data.cyr (ENDF/B-VIII.0, AME2020), read through
+#   indexed accessors. Rust's Vec-returning functions are a count plus an accessor.
+# - `struct TmNuclearReaction` mirrors Rust's public fields. Its products and leptons are the
+#   address of a word array and a count (`r.product(k)`, `r.lepton(k)`), so a caller can build
+#   one, and the projectile is a nucleus word or 0 for Rust's None (no nucleus word is 0).
+# - Rust's operation order is kept, parenthesized. ln is `_tm_log`, Rust libm's log bit for
+#   bit (numerics.cyr), so the moderation functions are class B. Integer arguments outside
+#   Rust's u32 give NaN.
+
+# ── reactions ───────────────────────────────────────────────────────────────────────
+
+# A nuclear reaction, reactants → products + Q. Free neutrons are counts, and the exit
+# leptons a TmLepton array (a positron is TM_LEPTON_ELECTRON, with the reaction noted in the
+# name). Mirrors `NuclearReaction`.
+struct TmNuclearReaction {
+    name;            # C string
+    projectile;      # nucleus word, or 0 for none (a neutron-induced reaction)
+    target;          # nucleus word
+    products;        # address of product_count nucleus words
+    product_count;
+    neutrons_in;
+    neutrons_out;
+    leptons_out;     # address of lepton_count TmLepton values
+    lepton_count;
+    q_value_mev: f64;
+}
+
+impl TmNuclearReaction {
+    # Product nucleus k, a nucleus word; k must be below product_count.
+    #must_use
+    fn product(self, k): i64 { return load64(self.products + k * 8); }
+
+    # Exit-channel lepton k, a TmLepton; k must be below lepton_count.
+    #must_use
+    fn lepton(self, k): i64 { return load64(self.leptons_out + k * 8); }
+
+    # The net change in the nuclei's charge, products − reactants, in e: for a balanced
+    # reaction, minus the leptons' charge (−2 for 4p → ⁴He + 2e⁺ + 2ν). Mirrors
+    # `NuclearReaction::nuclear_charge_change`.
+    #must_use
+    fn nuclear_charge_change(self): i64 {
+        var reactants = nucleus_z(self.target);
+        if (self.projectile != 0) { reactants = reactants + nucleus_z(self.projectile); }
+        var products = 0;
+        var k = 0;
+        while (k < self.product_count) {
+            products = products + nucleus_z(load64(self.products + k * 8));
+            k = k + 1;
+        }
+        return products - reactants;
+    }
+
+    # The net change in baryon number, products − reactants, counting free neutrons: zero for
+    # every physical reaction. Mirrors `NuclearReaction::baryon_number_change`.
+    #must_use
+    fn baryon_number_change(self): i64 {
+        var reactants = nucleus_a(self.target);
+        if (self.projectile != 0) { reactants = reactants + nucleus_a(self.projectile); }
+        reactants = reactants + self.neutrons_in;
+        var products = 0;
+        var k = 0;
+        while (k < self.product_count) {
+            products = products + nucleus_a(load64(self.products + k * 8));
+            k = k + 1;
+        }
+        products = products + self.neutrons_out;
+        return products - reactants;
+    }
+}
+
+# Rust folds an f64 sum from −0.0 (core's `Sum for f64`), so an empty or all −0 sum is −0.0.
+#must_use
+fn _tm_sum(p, n): f64 {
+    var s: f64 = -0.0;
+    var k = 0;
+    while (k < n) {
+        var x: f64 = load64(p + k * 8);
+        s = s + x;
+        k = k + 1;
+    }
+    return s;
+}
+
+# Q = Σ reactant masses − Σ product masses, MeV, for `rn` and `pn` f64 masses (MeV/c²) at the
+# two addresses; positive Q releases energy. Mirrors `q_value`, which takes two slices.
+#must_use
+fn q_value(reactant_masses, rn, product_masses, pn): f64 {
+    var sr: f64 = _tm_sum(reactant_masses, rn);
+    var sp: f64 = _tm_sum(product_masses, pn);
+    var q: f64 = sr - sp;
+    return q;
+}
+
+# The Coulomb barrier V = k_e Z₁Z₂e²/(R₁ + R₂), MeV, with R = r₀ A^(1/3) and k_e e² = 1.44 MeV fm.
+# Err(TM_ERR_INVALID_REACTION) when the radii sum to zero. Mirrors `coulomb_barrier`.
+#must_use
+fn coulomb_barrier(n1, n2): Result {
+    var r1: f64 = nucleus_nuclear_radius(n1);
+    var r2: f64 = nucleus_nuclear_radius(n2);
+    var r_sum: f64 = r1 + r2;
+    if (r_sum <= 0.0) { return Err(TM_ERR_INVALID_REACTION); }
+    var z1: f64 = f64_from(nucleus_z(n1));
+    var z2: f64 = f64_from(nucleus_z(n2));
+    var v: f64 = ((TM_COULOMB_MEV_FM * z1) * z2) / r_sum;
+    return Ok(v);
+}
+
+# ── cross sections ──────────────────────────────────────────────────────────────────
+
+# The geometric cross section πR², barns (1 b = 100 fm²), R = r₀ A^(1/3). Mirrors
+# `geometric_cross_section_barns`.
+#must_use
+fn geometric_cross_section_barns(nucleus): f64 {
+    var r: f64 = nucleus_nuclear_radius(nucleus);
+    var s: f64 = ((_TM_PI * r) * r) / 100.0;
+    return s;
+}
+
+# The single-level Breit–Wigner cross section, barns:
+# σ(E) = π ƛ² g Γ_i Γ_f / ((E − E_r)² + (Γ/2)²), ƛ² = (ħc)²/(2μc² E), with E the centre-of-mass
+# energy, E_r the resonance, Γ the total and Γ_i, Γ_f the partial widths (MeV), g the spin factor
+# and μ the reduced mass (MeV/c²). 0.0 for E ≤ 0, μ ≤ 0 or a non-positive denominator. Mirrors
+# `breit_wigner_cross_section`.
+#must_use
+fn breit_wigner_cross_section(energy_mev: f64, resonance_energy_mev: f64, total_width_mev: f64, partial_in_mev: f64,
+    partial_out_mev: f64, g_factor: f64, reduced_mass_mev: f64): f64 {
+    if (energy_mev <= 0.0 || reduced_mass_mev <= 0.0) { return 0.0; }
+    var lambda_bar_sq: f64 = (TM_HBAR_C_MEV_FM * TM_HBAR_C_MEV_FM) / ((2.0 * reduced_mass_mev) * energy_mev);
+    var de: f64 = energy_mev - resonance_energy_mev;
+    var half_width: f64 = total_width_mev / 2.0;
+    var denominator: f64 = (de * de) + (half_width * half_width);
+    if (denominator <= 0.0) { return 0.0; }
+    var s: f64 = ((((_TM_PI * lambda_bar_sq) * g_factor) * partial_in_mev) * partial_out_mev) / denominator;
+    var b: f64 = s / 100.0;
+    return b;
+}
+
+# Thermal (0.0253 eV) neutron cross sections of a target, barns (ENDF/B-VIII.0, 0 K). Mirrors
+# `ThermalCrossSection`.
+struct TmThermalCrossSection {
+    target;                   # nucleus word
+    absorption_barns: f64;    # capture + fission + (n,α) + (n,p)
+    fission_barns: f64;
+    scattering_barns: f64;    # free-atom elastic
+}
+
+# How many thermal cross sections are tabulated (8). With thermal_neutron_cross_section(k)
+# this mirrors the Vec `thermal_neutron_cross_sections` returns.
+#must_use
+fn thermal_neutron_cross_section_count(): i64 { return TM_THERMAL_XS_COUNT; }
+
+# Tabulated thermal cross section k (U-235, U-238, Pu-239, B-10, Cd-113, H-1, C-12, Fe-56), by
+# value; all fields 0 when k is out of range.
+#must_use
+fn thermal_neutron_cross_section(k): TmThermalCrossSection {
+    var x: TmThermalCrossSection;
+    x.target = 0;
+    x.absorption_barns = 0.0;
+    x.fission_barns = 0.0;
+    x.scattering_barns = 0.0;
+    if (k >= 0 && k < TM_THERMAL_XS_COUNT) {
+        x.target = _tm_nuc(TM_THERMAL_XS_Z[k], TM_THERMAL_XS_A[k]);
+        x.absorption_barns = TM_THERMAL_XS_ABSORPTION_BARNS[k];
+        x.fission_barns = TM_THERMAL_XS_FISSION_BARNS[k];
+        x.scattering_barns = TM_THERMAL_XS_SCATTERING_BARNS[k];
+    }
+    return x;
+}
+
+# The resonance-integral row of (Z, A), or −1.
+#must_use
+fn _tm_resonance_row(z, a): i64 {
+    var k = 0;
+    while (k < _TM_RESONANCE_INTEGRAL_COUNT) {
+        if (_TM_RESONANCE_INTEGRAL_Z[k] == z && _TM_RESONANCE_INTEGRAL_A[k] == a) { return k; }
+        k = k + 1;
+    }
+    return 0 - 1;
+}
+
+# The epithermal capture resonance integral I_γ = ∫ σ_γ(E)/E dE over 0.5 eV – 20 MeV, barns
+# (ENDF/B-VIII.0): Some(f64), or None when the nuclide isn't tabulated. Mirrors
+# `resonance_integral_barns`.
+#must_use
+fn resonance_integral_barns(z, a): Option {
+    var k = _tm_resonance_row(z, a);
+    if (k < 0) { return None(); }
+    var v: f64 = _TM_RESONANCE_INTEGRAL_CAPTURE[k];
+    return Some(v);
+}
+
+# The fission resonance integral I_f, barns: Some(f64), or None. Mirrors
+# `fission_resonance_integral_barns`.
+#must_use
+fn fission_resonance_integral_barns(z, a): Option {
+    var k = _tm_resonance_row(z, a);
+    if (k < 0) { return None(); }
+    var v: f64 = _TM_RESONANCE_INTEGRAL_FISSION[k];
+    return Some(v);
+}
+
+# The (n,α) resonance integral I_α, barns: Some(f64), or None. Mirrors
+# `n_alpha_resonance_integral_barns`.
+#must_use
+fn n_alpha_resonance_integral_barns(z, a): Option {
+    var k = _tm_resonance_row(z, a);
+    if (k < 0) { return None(); }
+    var v: f64 = _TM_RESONANCE_INTEGRAL_N_ALPHA[k];
+    return Some(v);
+}
+
+# ── preset reactions (Q from AME2020 atomic masses) ─────────────────────────────────
+
+# Preset reaction k, from the generated tables.
+#must_use
+fn _tm_preset(k): TmNuclearReaction {
+    var r: TmNuclearReaction;
+    r.name = &_TM_REACTION_TEXT + _TM_PRESET_NAME_OFFSET[k];
+    r.projectile = _TM_PRESET_PROJECTILE[k];
+    r.target = _TM_PRESET_TARGET[k];
+    r.products = &_TM_REACTION_PRODUCTS + _TM_PRESET_PRODUCT_START[k] * 8;
+    r.product_count = _TM_PRESET_PRODUCT_COUNT[k];
+    r.neutrons_in = _TM_PRESET_NEUTRONS_IN[k];
+    r.neutrons_out = _TM_PRESET_NEUTRONS_OUT[k];
+    r.leptons_out = &_TM_REACTION_LEPTONS + _TM_PRESET_LEPTON_START[k] * 8;
+    r.lepton_count = _TM_PRESET_LEPTON_COUNT[k];
+    r.q_value_mev = _TM_PRESET_Q_VALUE_MEV[k];
+    return r;
+}
+
+# D + T → ⁴He + n, Q = 17.5893 MeV: the most favourable fusion reaction for energy production.
+# Mirrors `dt_fusion`.
+#must_use
+fn dt_fusion(): TmNuclearReaction { return _tm_preset(_TM_PRESET_DT_FUSION); }
+
+# D + D → ³He + n, Q = 3.2689 MeV. Mirrors `dd_fusion_he3`.
+#must_use
+fn dd_fusion_he3(): TmNuclearReaction { return _tm_preset(_TM_PRESET_DD_FUSION_HE3); }
+
+# D + D → T + p, Q = 4.0327 MeV. Mirrors `dd_fusion_t`.
+#must_use
+fn dd_fusion_t(): TmNuclearReaction { return _tm_preset(_TM_PRESET_DD_FUSION_T); }
+
+# p + p → D + e⁺ + ν_e, Q = 0.4202 MeV, shared by the positron and the neutrino (excluding the
+# later 1.022 MeV annihilation): the Sun's dominant energy source. Mirrors `pp_chain_step1`.
+#must_use
+fn pp_chain_step1(): TmNuclearReaction { return _tm_preset(_TM_PRESET_PP_CHAIN_STEP1); }
+
+# n + ²³⁵U → ¹⁴¹Ba + ⁹²Kr + 3n, Q = 173.28 MeV, the prompt Q of this one channel (the usual
+# ~200 MeV averages all channels and the fragments' β decays). Mirrors `u235_fission`.
+#must_use
+fn u235_fission(): TmNuclearReaction { return _tm_preset(_TM_PRESET_U235_FISSION); }
+
+# The CNO cycle, net 4p → ⁴He + 2e⁺ + 2ν_e, Q = 26.731 MeV including both annihilations;
+# TM_CNO_NEUTRINO_LOSS_MEV of it leaves with the neutrinos. ¹²C is the catalyst. Mirrors
+# `cno_cycle`.
+#must_use
+fn cno_cycle(): TmNuclearReaction { return _tm_preset(_TM_PRESET_CNO_CYCLE); }
+
+# 3 ⁴He → ¹²C, Q = 7.2747 MeV: how stars make carbon. Mirrors `triple_alpha`.
+#must_use
+fn triple_alpha(): TmNuclearReaction { return _tm_preset(_TM_PRESET_TRIPLE_ALPHA); }
+
+# ── nucleosynthesis pathways ────────────────────────────────────────────────────────
+
+# A step of a nucleosynthesis pathway: the nucleus made and the reaction that made it.
+# Mirrors `NucleosynthesisStep`.
+struct TmNucleosynthesisStep {
+    nucleus;     # nucleus word
+    reaction;    # C string (UTF-8)
+}
+
+# A nucleosynthesis pathway: a named sequence of reactions from a seed. Its steps are read
+# with `p.step(k)`, k below step_count, from the generated table at first_step. Mirrors
+# `NucleosynthesisPathway`.
+struct TmNucleosynthesisPathway {
+    name;        # C string
+    process;     # TmNucleosynthesisProcess
+    seed;        # nucleus word
+    step_count;
+    first_step;  # the index of step 0 in the generated step table
+}
+
+impl TmNucleosynthesisPathway {
+    # Step k, by value; k must be below step_count.
+    #must_use
+    fn step(self, k): TmNucleosynthesisStep {
+        var s: TmNucleosynthesisStep;
+        var at = self.first_step + k;
+        s.nucleus = _TM_PATHWAY_STEP_NUCLEUS[at];
+        s.reaction = &_TM_REACTION_TEXT + _TM_PATHWAY_STEP_REACTION_OFFSET[at];
+        return s;
+    }
+}
+
+# Pathway k, from the generated tables.
+#must_use
+fn _tm_pathway(k): TmNucleosynthesisPathway {
+    var p: TmNucleosynthesisPathway;
+    p.name = &_TM_REACTION_TEXT + _TM_PATHWAY_NAME_OFFSET[k];
+    p.process = _TM_PATHWAY_PROCESS[k];
+    p.seed = _TM_PATHWAY_SEED[k];
+    p.step_count = _TM_PATHWAY_STEP_COUNT[k];
+    p.first_step = _TM_PATHWAY_STEP_START[k];
+    return p;
+}
+
+# The main s-process (slow neutron capture, in AGB stars) from ⁵⁶Fe, a simplified main
+# component through the abundance peaks at ⁸⁸Sr, ¹³⁸Ba and ²⁰⁸Pb (B²FH 1957; Käppeler et al.,
+# Rev. Mod. Phys. 83, 157 (2011)). Mirrors `s_process_main`.
+#must_use
+fn s_process_main(): TmNucleosynthesisPathway { return _tm_pathway(_TM_PATHWAY_S_PROCESS_MAIN); }
+
+# The main r-process (rapid neutron capture, in neutron-star mergers and core-collapse
+# supernovae): its peaks at A ≈ 80, 130 and 195, from the N = 50, 82, 126 waiting points, and
+# the actinides (Cowan et al., Rev. Mod. Phys. 93, 015002 (2021)). Mirrors `r_process_main`.
+#must_use
+fn r_process_main(): TmNucleosynthesisPathway { return _tm_pathway(_TM_PATHWAY_R_PROCESS_MAIN); }
+
+# ── neutron moderation ──────────────────────────────────────────────────────────────
+
+# The largest fractional energy loss of a neutron in one elastic collision with mass number A:
+# 1 − α, α = ((A − 1)/(A + 1))². Mirrors `max_energy_loss_fraction`.
+#must_use
+fn max_energy_loss_fraction(target_a): f64 {
+    if (_tm_u32_ok(target_a) != 1) { return _tm_nan(); }
+    var a: f64 = f64_from(target_a);
+    var alpha: f64 = ((a - 1.0) / (a + 1.0)) * ((a - 1.0) / (a + 1.0));
+    var r: f64 = 1.0 - alpha;
+    return r;
+}
+
+# The mean lethargy gain per collision, ξ = 1 + ((A − 1)²/(2A)) ln((A − 1)/(A + 1)); exactly 1
+# for A ≤ 1 (hydrogen). Mirrors `average_lethargy_gain`.
+#must_use
+fn average_lethargy_gain(target_a): f64 {
+    if (_tm_u32_ok(target_a) != 1) { return _tm_nan(); }
+    if (target_a <= 1) { return 1.0; }
+    var a: f64 = f64_from(target_a);
+    var am1: f64 = a - 1.0;
+    var ap1: f64 = a + 1.0;
+    var lg: f64 = _tm_log(am1 / ap1);
+    var xi: f64 = 1.0 + (((am1 * am1) / (2.0 * a)) * lg);
+    return xi;
+}
+
+# The mean number of collisions to slow a neutron from e_initial_ev to e_final_ev,
+# ln(E_i/E_f)/ξ (2 MeV → 0.0253 eV is the usual span). 0.0 when ξ, E_i or E_f is not positive.
+# Mirrors `collisions_to_thermalize`.
+#must_use
+fn collisions_to_thermalize(target_a, e_initial_ev: f64, e_final_ev: f64): f64 {
+    var xi: f64 = average_lethargy_gain(target_a);
+    if (xi <= 0.0 || e_initial_ev <= 0.0 || e_final_ev <= 0.0) { return 0.0; }
+    var lg: f64 = _tm_log(e_initial_ev / e_final_ev);
+    var n: f64 = lg / xi;
+    return n;
+}
+
+# The moderating ratio ξ Σ_s / Σ_a from caller-supplied macroscopic cross sections (cm⁻¹); +∞
+# when Σ_a ≤ 0. Mirrors `moderating_ratio`.
+#must_use
+fn moderating_ratio(lethargy_gain: f64, scatter_xs: f64, absorb_xs: f64): f64 {
+    if (absorb_xs <= 0.0) { return _TM_INF; }
+    var r: f64 = (lethargy_gain * scatter_xs) / absorb_xs;
+    return r;
+}
+
+# ── fission yields ──────────────────────────────────────────────────────────────────
+
+# A chain fission yield: mass number A and the yield per fission. Mirrors `FissionYield`.
+struct TmFissionYield {
+    mass_number;
+    yield_fraction: f64;
+}
+
+# How many U-235 thermal chain yields are tabulated. With u235_fission_yield(k) this mirrors the
+# Vec `u235_fission_yields` returns (ENDF/B-VIII.0, MT = 459, 0.0253 eV).
+#must_use
+fn u235_fission_yield_count(): i64 { return TM_U235_FISSION_YIELD_COUNT; }
+
+# U-235 chain yield k, by value; both fields 0 when k is out of range.
+#must_use
+fn u235_fission_yield(k): TmFissionYield {
+    var y: TmFissionYield;
+    y.mass_number = 0;
+    y.yield_fraction = 0.0;
+    if (k >= 0 && k < TM_U235_FISSION_YIELD_COUNT) {
+        y.mass_number = TM_U235_FISSION_YIELD_MASS_NUMBER[k];
+        y.yield_fraction = TM_U235_FISSION_YIELD_FRACTION[k];
+    }
+    return y;
+}
+
+# How many Pu-239 thermal chain yields are tabulated. With pu239_fission_yield(k) this mirrors
+# the Vec `pu239_fission_yields` returns.
+#must_use
+fn pu239_fission_yield_count(): i64 { return TM_PU239_FISSION_YIELD_COUNT; }
+
+# Pu-239 chain yield k, by value; both fields 0 when k is out of range.
+#must_use
+fn pu239_fission_yield(k): TmFissionYield {
+    var y: TmFissionYield;
+    y.mass_number = 0;
+    y.yield_fraction = 0.0;
+    if (k >= 0 && k < TM_PU239_FISSION_YIELD_COUNT) {
+        y.mass_number = TM_PU239_FISSION_YIELD_MASS_NUMBER[k];
+        y.yield_fraction = TM_PU239_FISSION_YIELD_FRACTION[k];
+    }
+    return y;
+}

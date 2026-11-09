@@ -1,0 +1,549 @@
+# reaction.tcyr — the reference-value tests of rust-old/src/reaction.rs, ported one for one, in
+# order (each test_group is the Rust test's name). Not carried over (port plan §1): the four
+# serde round-trip tests serde_roundtrip_reaction, serde_roundtrip_thermal_cross_section,
+# serde_roundtrip_nucleosynthesis and serde_roundtrip_fission_yield (NuclearReaction's JSON is
+# M7's, as an exchange type; the other three types are not exchange types). Each Rust
+# `.unwrap()` is an assert on the Ok or Some tag before the payload is read, and each
+# `.iter().find(..)` a search for the index, asserted found. The golden corpus separately
+# checks every function against the oracle on the M4 grid, in its tolerance class
+# (tests/parity.tcyr).
+
+include "tests/ulp.cyr"
+include "src/error.cyr"
+include "src/numerics.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
+include "src/decay_data.cyr"
+include "src/decay.cyr"
+include "src/atomic_data.cyr"
+include "src/atomic_config.cyr"
+include "src/atomic_hydrogenic.cyr"
+include "src/atomic_qed.cyr"
+include "src/reaction_data.cyr"
+include "src/reaction.cyr"
+include "src/scattering.cyr"
+
+alloc_init();
+
+# 1 if |a - b| < eps.
+#must_use
+fn near(a: f64, b: f64, eps: f64): i64 {
+    if (f64_abs(a - b) < eps) { return 1; }
+    return 0;
+}
+
+# Nucleus::new(z, a).unwrap(), the unwrap an assert on the Ok: the nucleus word, or 0 (no
+# nucleus) after the failed assert.
+#must_use
+fn _new_nucleus(z, a): i64 {
+    var t, v = nucleus_new(z, a);
+    assert_eq(is_ok(t), 1, "Nucleus::new Ok");
+    if (is_ok(t) != 1) { return 0; }
+    return v;
+}
+
+# The index of the first thermal cross section whose target is the nucleus word `target`, or -1:
+# rust `thermal_neutron_cross_sections().iter().find(|x| x.target == target)`.
+#must_use
+fn _thermal_find(target): i64 {
+    var cnt = thermal_neutron_cross_section_count();
+    var k = 0;
+    while (k < cnt) {
+        var x: TmThermalCrossSection = thermal_neutron_cross_section(k);
+        if (x.target == target) { return k; }
+        k = k + 1;
+    }
+    return 0 - 1;
+}
+
+# The index of the first U-235 chain yield of mass number a, or -1:
+# rust `u235_fission_yields().iter().find(|y| y.mass_number == a)`.
+#must_use
+fn _u235_yield_find(a): i64 {
+    var cnt = u235_fission_yield_count();
+    var k = 0;
+    while (k < cnt) {
+        var y: TmFissionYield = u235_fission_yield(k);
+        if (y.mass_number == a) { return k; }
+        k = k + 1;
+    }
+    return 0 - 1;
+}
+
+# The index of the first Pu-239 chain yield of mass number a, or -1:
+# rust `pu239_fission_yields().iter().find(|y| y.mass_number == a)`.
+#must_use
+fn _pu239_yield_find(a): i64 {
+    var cnt = pu239_fission_yield_count();
+    var k = 0;
+    while (k < cnt) {
+        var y: TmFissionYield = pu239_fission_yield(k);
+        if (y.mass_number == a) { return k; }
+        k = k + 1;
+    }
+    return 0 - 1;
+}
+
+# The index of the first step of pathway p whose nucleus has mass number a, or -1:
+# rust `pathway.steps.iter().find(|s| s.nucleus.a() == a)`.
+#must_use
+fn _step_find_a(p: TmNucleosynthesisPathway, a): i64 {
+    var k = 0;
+    while (k < p.step_count) {
+        var st: TmNucleosynthesisStep = p.step(k);
+        if (nucleus_a(st.nucleus) == a) { return k; }
+        k = k + 1;
+    }
+    return 0 - 1;
+}
+
+fn _t_dt_fusion_q_value() {
+    test_group("dt_fusion_q_value");
+    var rxn: TmNuclearReaction = dt_fusion();
+    var q: f64 = rxn.q_value_mev;
+    assert(near(q, 17.5893, 0.000000001), "DT Q = 17.5893 MeV");
+    assert_eq(rxn.baryon_number_change(), 0, "DT baryon number conserved");
+    assert_eq(rxn.nuclear_charge_change(), 0, "DT nuclear charge conserved");
+}
+
+fn _t_dd_fusion_q_value() {
+    test_group("dd_fusion_q_value");
+    var rxn: TmNuclearReaction = dd_fusion_he3();
+    var q: f64 = rxn.q_value_mev;
+    assert(near(q, 3.2689, 0.000000001), "DD Q = 3.2689 MeV");
+    assert_eq(rxn.baryon_number_change(), 0, "DD baryon number conserved");
+}
+
+fn _t_u235_fission_q_value() {
+    test_group("u235_fission_q_value");
+    var rxn: TmNuclearReaction = u235_fission();
+    var q: f64 = rxn.q_value_mev;
+    assert(near(q, 173.28, 0.000000001), "U-235 fission Q = 173.28 MeV (AME2020)");
+    assert_eq(rxn.baryon_number_change(), 0, "U-235 fission baryon number conserved");
+    assert_eq(rxn.nuclear_charge_change(), 0, "U-235 fission nuclear charge conserved");
+}
+
+fn _t_q_value_computation() {
+    test_group("q_value_computation");
+    var reactants[16];
+    store64(&reactants, 100.0);
+    store64(&reactants + 8, 200.0);
+    var products[8];
+    store64(&products, 290.0);
+    var q: f64 = q_value(&reactants, 2, &products, 1);
+    assert(near(q, 10.0, 0.0000000001), "Q = (100 + 200) - 290 = 10");
+}
+
+fn _t_coulomb_barrier_dt() {
+    test_group("coulomb_barrier_dt");
+    var d = _new_nucleus(1, 2);
+    var t = _new_nucleus(1, 3);
+    var tv, vv = coulomb_barrier(d, t);
+    assert_eq(is_ok(tv), 1, "D-T barrier Ok");
+    var v: f64 = vv;
+    assert(v > 0.1, "D-T barrier too low");
+    assert(v < 2.0, "D-T barrier too high");
+}
+
+fn _t_coulomb_barrier_increases_with_z() {
+    test_group("coulomb_barrier_increases_with_z");
+    var d = _new_nucleus(1, 2);
+    var he4 = nucleus_helium_4();
+    var c12 = nucleus_carbon_12();
+    var t1, v1 = coulomb_barrier(d, he4);
+    assert_eq(is_ok(t1), 1, "D-He4 barrier Ok");
+    var v_d_he: f64 = v1;
+    var t2, v2 = coulomb_barrier(d, c12);
+    assert_eq(is_ok(t2), 1, "D-C12 barrier Ok");
+    var v_d_c: f64 = v2;
+    assert(v_d_c > v_d_he, "C barrier should be higher than He barrier");
+}
+
+fn _t_pp_chain_q_value() {
+    test_group("pp_chain_q_value");
+    var rxn: TmNuclearReaction = pp_chain_step1();
+    var q: f64 = rxn.q_value_mev;
+    assert(near(q, 0.4202, 0.000000001), "pp chain Q = 0.4202 MeV");
+    assert_eq(rxn.nuclear_charge_change(), 0 - 1, "pp chain nuclear charge change -1");
+}
+
+fn _t_triple_alpha_q_value() {
+    test_group("triple_alpha_q_value");
+    var rxn: TmNuclearReaction = triple_alpha();
+    var q: f64 = rxn.q_value_mev;
+    assert(near(q, 7.2747, 0.000000001), "Triple-alpha Q = 7.2747 MeV");
+}
+
+fn _t_cno_cycle_q_value() {
+    test_group("cno_cycle_q_value");
+    var rxn: TmNuclearReaction = cno_cycle();
+    var q: f64 = rxn.q_value_mev;
+    assert(near(q, 26.731, 0.000000001), "CNO Q = 26.731 MeV");
+    var net: f64 = q - TM_CNO_NEUTRINO_LOSS_MEV;
+    assert(near(net, 25.027, 0.000000001), "CNO Q less the neutrino loss = 25.027 MeV");
+}
+
+fn _t_coulomb_constant_consistency() {
+    test_group("coulomb_constant_consistency");
+    var expected: f64 = TM_FINE_STRUCTURE * TM_HBAR_C_MEV_FM;
+    var d: f64 = f64_abs(TM_COULOMB_MEV_FM - expected);
+    var rel_err: f64 = d / expected;
+    assert(rel_err < 0.000000001, "COULOMB_MEV_FM = alpha hbar c to 1e-9");
+}
+
+fn _t_geometric_cross_section_fe56() {
+    test_group("geometric_cross_section_fe56");
+    var fe56 = nucleus_iron_56();
+    var sigma: f64 = geometric_cross_section_barns(fe56);
+    assert(sigma > 0.5, "Fe-56 sigma_geo too low");
+    assert(sigma < 1.0, "Fe-56 sigma_geo too high");
+}
+
+fn _t_geometric_cross_section_scales_with_a() {
+    test_group("geometric_cross_section_scales_with_a");
+    var c12 = nucleus_carbon_12();
+    var u238 = nucleus_uranium_238();
+    var s_u: f64 = geometric_cross_section_barns(u238);
+    var s_c: f64 = geometric_cross_section_barns(c12);
+    assert(s_u > s_c, "U-238 should have larger cross-section than C-12");
+}
+
+fn _t_thermal_u235_fission_cross_section() {
+    test_group("thermal_u235_fission_cross_section");
+    var k = _thermal_find(nucleus_uranium_235());
+    assert(k >= 0, "U-235 thermal cross section found");
+    if (k >= 0) {
+        var u235: TmThermalCrossSection = thermal_neutron_cross_section(k);
+        var sf: f64 = u235.fission_barns;
+        assert(near(sf, 586.787, 0.000000001), "U-235 sigma_f = 586.787 b");
+    }
+}
+
+fn _t_s_process_ends_at_pb208() {
+    test_group("s_process_ends_at_pb208");
+    var pathway: TmNucleosynthesisPathway = s_process_main();
+    assert_eq(pathway.process, TM_NUCLEOSYNTHESIS_PROCESS_S_PROCESS, "s-process is SProcess");
+    assert(pathway.step_count > 0, "s-process has a last step");
+    if (pathway.step_count > 0) {
+        var last: TmNucleosynthesisStep = pathway.step(pathway.step_count - 1);
+        assert_eq(nucleus_z(last.nucleus), 82, "s-process should end at Pb");
+        assert_eq(nucleus_a(last.nucleus), 208, "s-process should end at Pb-208");
+    }
+}
+
+fn _t_r_process_produces_actinides() {
+    test_group("r_process_produces_actinides");
+    var pathway: TmNucleosynthesisPathway = r_process_main();
+    assert_eq(pathway.process, TM_NUCLEOSYNTHESIS_PROCESS_R_PROCESS, "r-process is RProcess");
+    assert(pathway.step_count > 0, "r-process has a last step");
+    if (pathway.step_count > 0) {
+        var last: TmNucleosynthesisStep = pathway.step(pathway.step_count - 1);
+        assert_eq(nucleus_z(last.nucleus), 92, "r-process should reach U");
+    }
+}
+
+fn _t_s_process_peaks_at_magic_neutrons() {
+    test_group("s_process_peaks_at_magic_neutrons");
+    var pathway: TmNucleosynthesisPathway = s_process_main();
+    var ksr = _step_find_a(pathway, 88);
+    assert(ksr >= 0, "Sr-88 step found");
+    if (ksr >= 0) {
+        var sr: TmNucleosynthesisStep = pathway.step(ksr);
+        assert_eq(nucleus_n(sr.nucleus), 50, "Sr-88 should have N=50");
+    }
+    var kba = _step_find_a(pathway, 138);
+    assert(kba >= 0, "Ba-138 step found");
+    if (kba >= 0) {
+        var ba: TmNucleosynthesisStep = pathway.step(kba);
+        assert_eq(nucleus_n(ba.nucleus), 82, "Ba-138 should have N=82");
+    }
+}
+
+fn _t_hydrogen_max_energy_loss() {
+    test_group("hydrogen_max_energy_loss");
+    var frac: f64 = max_energy_loss_fraction(1);
+    assert(near(frac, 1.0, 0.0000000001), "H max energy loss = 100%");
+}
+
+fn _t_heavy_nucleus_small_energy_loss() {
+    test_group("heavy_nucleus_small_energy_loss");
+    var frac: f64 = max_energy_loss_fraction(238);
+    assert(frac < 0.02, "U-238 max loss < 2%");
+    assert(frac > 0.01, "U-238 max loss > 1%");
+}
+
+fn _t_hydrogen_lethargy_gain() {
+    test_group("hydrogen_lethargy_gain");
+    var xi: f64 = average_lethargy_gain(1);
+    assert(near(xi, 1.0, 0.0000000001), "H xi = 1");
+}
+
+fn _t_collisions_hydrogen_thermalize() {
+    test_group("collisions_hydrogen_thermalize");
+    var nc: f64 = collisions_to_thermalize(1, 2000000.0, 0.0253);
+    assert(nc > 15.0 && nc < 25.0, "H collisions 2 MeV -> 0.0253 eV in (15, 25)");
+}
+
+fn _t_collisions_graphite_more_than_hydrogen() {
+    test_group("collisions_graphite_more_than_hydrogen");
+    var nc_h: f64 = collisions_to_thermalize(1, 2000000.0, 0.0253);
+    var nc_c: f64 = collisions_to_thermalize(12, 2000000.0, 0.0253);
+    assert(nc_c > nc_h, "C-12 needs more collisions than H");
+}
+
+fn _t_u235_fission_yield_double_hump() {
+    test_group("u235_fission_yield_double_hump");
+    var kl = _u235_yield_find(95);
+    var kv = _u235_yield_find(115);
+    var kh = _u235_yield_find(137);
+    assert(kl >= 0, "A = 95 yield found");
+    assert(kv >= 0, "A = 115 yield found");
+    assert(kh >= 0, "A = 137 yield found");
+    if (kl >= 0 && kv >= 0 && kh >= 0) {
+        var light_peak: TmFissionYield = u235_fission_yield(kl);
+        var valley: TmFissionYield = u235_fission_yield(kv);
+        var heavy_peak: TmFissionYield = u235_fission_yield(kh);
+        var yl: f64 = light_peak.yield_fraction;
+        var yv: f64 = valley.yield_fraction;
+        var yh: f64 = heavy_peak.yield_fraction;
+        assert(yl > yv, "light peak above the valley");
+        assert(yh > yv, "heavy peak above the valley");
+    }
+}
+
+fn _t_pu239_fission_yields_exist() {
+    test_group("pu239_fission_yields_exist");
+    assert(pu239_fission_yield_count() >= 10, "at least 10 Pu-239 yields");
+}
+
+fn _t_breit_wigner_at_resonance() {
+    test_group("breit_wigner_at_resonance");
+    var sigma_on: f64 = breit_wigner_cross_section(1.0, 1.0, 0.1, 0.05, 0.05, 1.0, 500.0);
+    var sigma_off: f64 = breit_wigner_cross_section(2.0, 1.0, 0.1, 0.05, 0.05, 1.0, 500.0);
+    assert(sigma_on > sigma_off, "On-resonance should be larger");
+}
+
+fn _t_breit_wigner_zero_energy() {
+    test_group("breit_wigner_zero_energy");
+    var sigma: f64 = breit_wigner_cross_section(0.0, 1.0, 0.1, 0.05, 0.05, 1.0, 500.0);
+    var a: f64 = f64_abs(sigma);
+    assert(a < 0.000000000000000000000000000001, "BW at E = 0 is 0");
+}
+
+fn _t_coulomb_barrier_invalid_radii() {
+    test_group("coulomb_barrier_invalid_radii");
+    var h = nucleus_hydrogen_1();
+    var t, vv = coulomb_barrier(h, h);
+    assert_eq(is_ok(t), 1, "p-p barrier Ok");
+    var v: f64 = vv;
+    assert(v > 0.0, "p-p barrier positive");
+}
+
+fn _t_moderating_ratio_zero_absorb() {
+    test_group("moderating_ratio_zero_absorb");
+    var mr: f64 = moderating_ratio(1.0, 10.0, 0.0);
+    assert_eq(_tm_is_inf(mr), 1, "Sigma_a = 0: infinite moderating ratio");
+}
+
+fn _t_collisions_zero_energy() {
+    test_group("collisions_zero_energy");
+    var nc: f64 = collisions_to_thermalize(1, 0.0, 0.025);
+    var a: f64 = f64_abs(nc);
+    assert(a < 0.0000000001, "E_i = 0: no collisions");
+}
+
+fn _t_all_preset_reactions_have_positive_q() {
+    test_group("all_preset_reactions_have_positive_q");
+    var r1: TmNuclearReaction = dt_fusion();
+    var q1: f64 = r1.q_value_mev;
+    assert(q1 > 0.0, "dt_fusion Q > 0");
+    var r2: TmNuclearReaction = dd_fusion_he3();
+    var q2: f64 = r2.q_value_mev;
+    assert(q2 > 0.0, "dd_fusion_he3 Q > 0");
+    var r3: TmNuclearReaction = dd_fusion_t();
+    var q3: f64 = r3.q_value_mev;
+    assert(q3 > 0.0, "dd_fusion_t Q > 0");
+    var r4: TmNuclearReaction = pp_chain_step1();
+    var q4: f64 = r4.q_value_mev;
+    assert(q4 > 0.0, "pp_chain_step1 Q > 0");
+    var r5: TmNuclearReaction = cno_cycle();
+    var q5: f64 = r5.q_value_mev;
+    assert(q5 > 0.0, "cno_cycle Q > 0");
+    var r6: TmNuclearReaction = triple_alpha();
+    var q6: f64 = r6.q_value_mev;
+    assert(q6 > 0.0, "triple_alpha Q > 0");
+    var r7: TmNuclearReaction = u235_fission();
+    var q7: f64 = r7.q_value_mev;
+    assert(q7 > 0.0, "u235_fission Q > 0");
+}
+
+fn _t_hydrogen_thermal_scattering_is_free_atom() {
+    test_group("hydrogen_thermal_scattering_is_free_atom");
+    var k = _thermal_find(nucleus_hydrogen_1());
+    assert(k >= 0, "H-1 thermal cross section found");
+    if (k >= 0) {
+        var h: TmThermalCrossSection = thermal_neutron_cross_section(k);
+        var ss: f64 = h.scattering_barns;
+        assert(near(ss, 20.4361, 0.000000001), "H-1 free-atom elastic 20.4361 b (ENDF/B-VIII.0)");
+    }
+}
+
+fn _t_fission_yields_match_endf_chain_yields() {
+    test_group("fission_yields_match_endf_chain_yields");
+    var ku = _u235_yield_find(137);
+    assert(ku >= 0, "U-235 A = 137 yield found");
+    if (ku >= 0) {
+        var y137: TmFissionYield = u235_fission_yield(ku);
+        var yu: f64 = y137.yield_fraction;
+        assert(near(yu, 0.0618851, 0.000000000001), "U-235 A = 137 chain yield 0.0618851");
+    }
+    var kp = _pu239_yield_find(110);
+    assert(kp >= 0, "Pu-239 A = 110 yield found");
+    if (kp >= 0) {
+        var y110: TmFissionYield = pu239_fission_yield(kp);
+        var yp: f64 = y110.yield_fraction;
+        assert(near(yp, 0.00645124, 0.000000000001), "Pu-239 A = 110 chain yield 0.00645124");
+    }
+}
+
+fn _t_r_process_third_peak_is_stable_pt195() {
+    test_group("r_process_third_peak_is_stable_pt195");
+    var pathway: TmNucleosynthesisPathway = r_process_main();
+    var any = 0;
+    var k = 0;
+    while (k < pathway.step_count) {
+        var st: TmNucleosynthesisStep = pathway.step(k);
+        if (nucleus_z(st.nucleus) == 78 && nucleus_a(st.nucleus) == 195) { any = 1; }
+        k = k + 1;
+    }
+    assert(any, "r-process passes through Pt-195");
+}
+
+fn _t_thermal_cross_sections_all_positive() {
+    test_group("thermal_cross_sections_all_positive");
+    var cnt = thermal_neutron_cross_section_count();
+    var k = 0;
+    while (k < cnt) {
+        var xs: TmThermalCrossSection = thermal_neutron_cross_section(k);
+        var sa: f64 = xs.absorption_barns;
+        var sf: f64 = xs.fission_barns;
+        var ss: f64 = xs.scattering_barns;
+        assert(sa >= 0.0, "absorption >= 0");
+        assert(sf >= 0.0, "fission >= 0");
+        assert(ss >= 0.0, "scattering >= 0");
+        k = k + 1;
+    }
+}
+
+fn _t_resonance_integral_u235() {
+    test_group("resonance_integral_u235");
+    var t1, v1 = resonance_integral_barns(92, 235);
+    assert_eq(is_some(t1), 1, "U-235 capture resonance integral tabulated");
+    var ri: f64 = v1;
+    assert(near(ri, 143.0, 0.000000001), "U-235 capture resonance integral 143.0 b");
+    var t2, v2 = fission_resonance_integral_barns(92, 235);
+    assert_eq(is_some(t2), 1, "U-235 fission resonance integral tabulated");
+    var rif: f64 = v2;
+    assert(near(rif, 280.2, 0.000000001), "U-235 fission resonance integral 280.2 b");
+}
+
+fn _t_resonance_integral_b10_large() {
+    test_group("resonance_integral_b10_large");
+    var t1, v1 = n_alpha_resonance_integral_barns(5, 10);
+    assert_eq(is_some(t1), 1, "B-10 (n,a) resonance integral tabulated");
+    var ri: f64 = v1;
+    assert(near(ri, 1725.6, 0.000000001), "B-10 (n,a) resonance integral 1725.6 b");
+    var t2, v2 = resonance_integral_barns(5, 10);
+    assert_eq(is_some(t2), 1, "B-10 capture resonance integral tabulated");
+    var rc: f64 = v2;
+    assert(rc < 1.0, "B-10 capture resonance integral < 1 b");
+}
+
+fn _t_resonance_integral_h1_small() {
+    test_group("resonance_integral_h1_small");
+    var t, v = resonance_integral_barns(1, 1);
+    assert_eq(is_some(t), 1, "H-1 resonance integral tabulated");
+    var ri: f64 = v;
+    assert(ri < 1.0, "H-1 resonance integral should be small");
+}
+
+fn _t_resonance_integral_unknown_returns_none() {
+    test_group("resonance_integral_unknown_returns_none");
+    assert_eq(is_none(resonance_integral_barns(118, 294)), 1, "Og-294 not tabulated");
+}
+
+# Rust iterates the private RESONANCE_INTEGRALS table; here its generated (Z, A) columns.
+fn _t_resonance_integral_all_positive() {
+    test_group("resonance_integral_all_positive");
+    var k = 0;
+    while (k < _TM_RESONANCE_INTEGRAL_COUNT) {
+        var z = _TM_RESONANCE_INTEGRAL_Z[k];
+        var a = _TM_RESONANCE_INTEGRAL_A[k];
+        var t, v = resonance_integral_barns(z, a);
+        assert_eq(is_some(t), 1, "tabulated row has a resonance integral");
+        var ri: f64 = v;
+        assert(ri >= 0.0, "Resonance integral should be non-negative");
+        k = k + 1;
+    }
+}
+
+fn _t_resonance_integral_cs133_large() {
+    test_group("resonance_integral_cs133_large");
+    var t, v = resonance_integral_barns(55, 133);
+    assert_eq(is_some(t), 1, "Cs-133 resonance integral tabulated");
+    var ri: f64 = v;
+    assert(near(ri, 405.4, 0.000000001), "Cs-133 resonance integral 405.4 b");
+}
+
+# Runs every test and returns the failure count.
+fn main(): i64 {
+    _t_dt_fusion_q_value();
+    _t_dd_fusion_q_value();
+    _t_u235_fission_q_value();
+    _t_q_value_computation();
+    _t_coulomb_barrier_dt();
+    _t_coulomb_barrier_increases_with_z();
+    _t_pp_chain_q_value();
+    _t_triple_alpha_q_value();
+    _t_cno_cycle_q_value();
+    _t_coulomb_constant_consistency();
+    _t_geometric_cross_section_fe56();
+    _t_geometric_cross_section_scales_with_a();
+    _t_thermal_u235_fission_cross_section();
+    _t_s_process_ends_at_pb208();
+    _t_r_process_produces_actinides();
+    _t_s_process_peaks_at_magic_neutrons();
+    _t_hydrogen_max_energy_loss();
+    _t_heavy_nucleus_small_energy_loss();
+    _t_hydrogen_lethargy_gain();
+    _t_collisions_hydrogen_thermalize();
+    _t_collisions_graphite_more_than_hydrogen();
+    _t_u235_fission_yield_double_hump();
+    _t_pu239_fission_yields_exist();
+    _t_breit_wigner_at_resonance();
+    _t_breit_wigner_zero_energy();
+    _t_coulomb_barrier_invalid_radii();
+    _t_moderating_ratio_zero_absorb();
+    _t_collisions_zero_energy();
+    _t_all_preset_reactions_have_positive_q();
+    _t_hydrogen_thermal_scattering_is_free_atom();
+    _t_fission_yields_match_endf_chain_yields();
+    _t_r_process_third_peak_is_stable_pt195();
+    _t_thermal_cross_sections_all_positive();
+    _t_resonance_integral_u235();
+    _t_resonance_integral_b10_large();
+    _t_resonance_integral_h1_small();
+    _t_resonance_integral_unknown_returns_none();
+    _t_resonance_integral_all_positive();
+    _t_resonance_integral_cs133_large();
+    return assert_summary();
+}
+
+var exit_code = main();
+if (exit_code > 0) { exit_code = 1; }
+sys_exit_group(exit_code);

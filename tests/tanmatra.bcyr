@@ -20,6 +20,9 @@ include "src/atomic_data.cyr"
 include "src/atomic_config.cyr"
 include "src/atomic_hydrogenic.cyr"
 include "src/atomic_qed.cyr"
+include "src/reaction_data.cyr"
+include "src/reaction.cyr"
+include "src/scattering.cyr"
 include "src/timekeeping_data.cyr"
 include "src/timekeeping.cyr"
 
@@ -309,6 +312,28 @@ fn bench_lamb_shift_nlj_all_n4() {
     }
 }
 
+# scattering/rutherford_1000: 5 MeV α on Au at θ = iπ/1001, i = 1..1000 (the Rust bench's body).
+fn bench_rutherford_1000() {
+    var i = 1;
+    while (i <= 1000) {
+        var theta: f64 = (f64_from(i) * _TM_PI) / 1001.0;
+        var s: f64 = rutherford_differential(2, 79, 5.0, theta);
+        _bench_sink = s;
+        i = i + 1;
+    }
+}
+
+# scattering/pair_production_1000: Pb at E_γ = 1.1 + i MeV, i = 0..999 (both Maximon branches).
+fn bench_pair_production_1000() {
+    var i = 0;
+    while (i < 1000) {
+        var e: f64 = 1.1 + f64_from(i);
+        var s: f64 = pair_production_cross_section(82, e);
+        _bench_sink = s;
+        i = i + 1;
+    }
+}
+
 # timekeeping/atomic_instant_add_seconds_1000: 1000 chained add_seconds(1.000000001) from
 # (2.1e9 s, 123 456 789 ns), the Rust bench's body.
 fn bench_atomic_instant_add_seconds_1000() {
@@ -358,6 +383,8 @@ fn main(): i64 {
     run("atomic/einstein_a_to_n2_upto_n10", &bench_einstein_a_n10, 20, 20);
     run("atomic/radial_wavefunction_n10_100", &bench_radial_wavefunction_n10_100, 50, 20);
     run("atomic/lamb_shift_nlj_all_n4", &bench_lamb_shift_nlj_all_n4, 1000, 20);
+    run("scattering/rutherford_1000", &bench_rutherford_1000, 20, 20);
+    run("scattering/pair_production_1000", &bench_pair_production_1000, 20, 20);
     run("timekeeping/atomic_instant_add_seconds_1000", &bench_atomic_instant_add_seconds_1000, 50, 20);
     return 0;
 }

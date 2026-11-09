@@ -111,3 +111,20 @@ ionization-energy lookup is the same story at 6 ns a call.
   as one running product, so the calls and multiplications are the same and so are the bits. A Rust-shaped
   version timed 36.1 µs (4.4×) for `einstein_a_to_n2_upto_n10`; the hoisted one is 25.4 µs. All 2,886 Einstein
   golden rows stay 0 ulp.
+
+## M4 Reactions & scattering (2026-11-08)
+
+| Bench | Body | Rust | Cyrius | Cyrius / Rust |
+|---|---|---|---|---|
+| `scattering/rutherford_1000` | 5 MeV α on Au at θ = iπ/1001, i = 1..1000 | 6.55 µs | 62.2 µs | 9.5× |
+| `scattering/pair_production_1000` | Pb at E_γ = 1.1 + i MeV, i = 0..999 (both Maximon branches) | 16.6 µs | 101.5 µs | 6.1× |
+
+**Reading the gap.** Each Rutherford call is one sin plus a few operations, and sin dominates: Cyrius's `_tm_sin` takes
+48 ns, while Rust's whole call, sin included, takes 6.5 ns. Pair production is mostly one log. The port uses its own
+`_tm_sin` / `_tm_cos` / `_tm_log` because the port-parity rule requires bit-identical primitives for these formulas
+(port-parity.md, M4). Measured on 1000 calls each, that exactness costs about 30%:
+
+| Primitive | Cyrius builtin | The port's exact transcription |
+|---|---|---|
+| sin | `f64_sin`: 37.0 ns | `_tm_sin`: 48.1 ns |
+| ln | `f64_ln` (x87): 37.8 ns; `_f64_ln_polyfill`: 56.4 ns | `_tm_log`: 53.8 ns |

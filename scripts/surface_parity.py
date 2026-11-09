@@ -31,6 +31,8 @@ MODULES = {
     "decay": {"values": set(), "structs": set()},
     "timekeeping": {"values": {"FrequencyStandard"}, "structs": {"AtomicInstant"}},
     "atomic": {"values": {"OrbitalType"}, "structs": {"QuantumNumbers"}},
+    "reaction": {"values": set(), "structs": {"NuclearReaction"}},
+    "scattering": {"values": set(), "structs": set()},
 }
 
 # Rust item -> why it has no direct Cyrius name.
@@ -43,6 +45,9 @@ EXCEPTIONS = {
     "all_frequency_standards": "a slice: all_frequency_standard_count + all_frequency_standard(k)",
     "FrequencyStandard::quality_factor": "deprecated in 1.3.0, not carried over (port plan §1)",
     "const LEAP_SECOND_TABLE_VALID_UNTIL": "a (year, month, day) tuple: TM_LEAP_SECOND_TABLE_VALID_UNTIL_YEAR / _MONTH / _DAY",
+    "thermal_neutron_cross_sections": "a Vec: thermal_neutron_cross_section_count + thermal_neutron_cross_section(k)",
+    "u235_fission_yields": "a Vec: u235_fission_yield_count + u235_fission_yield(k)",
+    "pu239_fission_yields": "a Vec: pu239_fission_yield_count + pu239_fission_yield(k)",
 }
 
 

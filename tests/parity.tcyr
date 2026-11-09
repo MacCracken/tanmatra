@@ -32,6 +32,9 @@ include "src/atomic_data.cyr"
 include "src/atomic_config.cyr"
 include "src/atomic_hydrogenic.cyr"
 include "src/atomic_qed.cyr"
+include "src/reaction_data.cyr"
+include "src/reaction.cyr"
+include "src/scattering.cyr"
 include "src/timekeeping_data.cyr"
 include "src/timekeeping.cyr"
 
@@ -294,11 +297,12 @@ fn _par_libm(fp, fl): i64 {
     if (_par_eq(fp, fl, "libm::trunc") == 1) { var r: f64 = f64_trunc(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::round") == 1) { var r: f64 = _tm_round_half_away(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::cbrt") == 1) { var r: f64 = ganita_f64_cbrt(x); _par_got_f(r); return 1; }
-    if (_par_eq(fp, fl, "libm::sin") == 1) { var r: f64 = f64_sin(x); _par_got_f(r); return 1; }
-    if (_par_eq(fp, fl, "libm::cos") == 1) { var r: f64 = f64_cos(x); _par_got_f(r); return 1; }
+    # From M4 the sin, cos and log rows go to the port's bit-exact transcriptions (class A).
+    if (_par_eq(fp, fl, "libm::sin") == 1) { var r: f64 = _tm_sin(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::cos") == 1) { var r: f64 = _tm_cos(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::tan") == 1) { var r: f64 = ganita_f64_tan(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::exp") == 1) { var r: f64 = f64_exp(x); _par_got_f(r); return 1; }
-    if (_par_eq(fp, fl, "libm::log") == 1) { var r: f64 = f64_ln(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::log") == 1) { var r: f64 = _tm_log(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::sinh") == 1) { var r: f64 = ganita_f64_sinh(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::ldexp") == 1) { var r: f64 = _tm_ldexp(x, _par_in(1)); _par_got_f(r); return 1; }
     var y: f64 = _par_in(1);
@@ -1108,6 +1112,274 @@ fn _par_atomic(fp, fl): i64 {
     return 0;
 }
 
+# A TmLepton value's golden name, the inverse of _par_enum for leptons.
+#must_use
+fn _par_lepton_name(l): i64 {
+    if (l == TM_LEPTON_ELECTRON) { return "Lepton.Electron"; }
+    if (l == TM_LEPTON_ELECTRON_NEUTRINO) { return "Lepton.ElectronNeutrino"; }
+    if (l == TM_LEPTON_MUON) { return "Lepton.Muon"; }
+    if (l == TM_LEPTON_MUON_NEUTRINO) { return "Lepton.MuonNeutrino"; }
+    if (l == TM_LEPTON_TAU) { return "Lepton.Tau"; }
+    if (l == TM_LEPTON_TAU_NEUTRINO) { return "Lepton.TauNeutrino"; }
+    return "Lepton.?";
+}
+
+# A TmNucleosynthesisProcess value's golden name.
+#must_use
+fn _par_process_name(p): i64 {
+    if (p == TM_NUCLEOSYNTHESIS_PROCESS_S_PROCESS) { return "NucleosynthesisProcess.SProcess"; }
+    if (p == TM_NUCLEOSYNTHESIS_PROCESS_R_PROCESS) { return "NucleosynthesisProcess.RProcess"; }
+    if (p == TM_NUCLEOSYNTHESIS_PROCESS_RP_PROCESS) { return "NucleosynthesisProcess.RpProcess"; }
+    return "NucleosynthesisProcess.?";
+}
+
+# Appends a reaction's fields: name, projectile (`n:` for none), target, products, neutron
+# counts, leptons, Q.
+fn _par_got_reaction(r: TmNuclearReaction) {
+    _par_got_text(r.name, strlen(r.name));
+    if (r.projectile == 0) { _par_got_none(); } else { _par_got_nuc(r.projectile); }
+    _par_got_nuc(r.target);
+    _par_got_seq(r.product_count);
+    var k = 0;
+    while (k < r.product_count) {
+        _par_got_nuc(r.product(k));
+        k = k + 1;
+    }
+    _par_got_i(r.neutrons_in);
+    _par_got_i(r.neutrons_out);
+    _par_got_seq(r.lepton_count);
+    k = 0;
+    while (k < r.lepton_count) {
+        _par_got_e(_par_lepton_name(r.lepton(k)));
+        k = k + 1;
+    }
+    _par_got_f(r.q_value_mev);
+}
+
+# Appends a pathway: name, process, seed, then each step's nucleus and reaction text.
+fn _par_got_pathway(p: TmNucleosynthesisPathway) {
+    _par_got_text(p.name, strlen(p.name));
+    _par_got_e(_par_process_name(p.process));
+    _par_got_nuc(p.seed);
+    _par_got_seq(p.step_count);
+    var k = 0;
+    while (k < p.step_count) {
+        var st = p.step(k);
+        _par_got_nuc(st.nucleus);
+        _par_got_text(st.reaction, strlen(st.reaction));
+        k = k + 1;
+    }
+}
+
+# Reads `v:n` then n f64 tokens at token k into buf; returns n.
+fn _par_in_f64s(k, buf): i64 {
+    var n = _par_in(k);
+    var j = 0;
+    while (j < n) {
+        store64(buf + j * 8, _par_in(k + 1 + j));
+        j = j + 1;
+    }
+    return n;
+}
+
+# `reaction` rows: src/reaction.cyr.
+fn _par_reaction(fp, fl): i64 {
+    if (_par_eq(fp, fl, "dt_fusion") == 1) { _par_got_reaction(dt_fusion()); return 1; }
+    if (_par_eq(fp, fl, "dd_fusion_he3") == 1) { _par_got_reaction(dd_fusion_he3()); return 1; }
+    if (_par_eq(fp, fl, "dd_fusion_t") == 1) { _par_got_reaction(dd_fusion_t()); return 1; }
+    if (_par_eq(fp, fl, "pp_chain_step1") == 1) { _par_got_reaction(pp_chain_step1()); return 1; }
+    if (_par_eq(fp, fl, "u235_fission") == 1) { _par_got_reaction(u235_fission()); return 1; }
+    if (_par_eq(fp, fl, "cno_cycle") == 1) { _par_got_reaction(cno_cycle()); return 1; }
+    if (_par_eq(fp, fl, "triple_alpha") == 1) { _par_got_reaction(triple_alpha()); return 1; }
+    if (_par_eq(fp, fl, "s_process_main") == 1) { _par_got_pathway(s_process_main()); return 1; }
+    if (_par_eq(fp, fl, "r_process_main") == 1) { _par_got_pathway(r_process_main()); return 1; }
+    if (_par_eq(fp, fl, "thermal_neutron_cross_sections") == 1) {
+        _par_got_seq(thermal_neutron_cross_section_count());
+        return 1;
+    }
+    if (_par_eq(fp, fl, "u235_fission_yields") == 1) { _par_got_seq(u235_fission_yield_count()); return 1; }
+    if (_par_eq(fp, fl, "pu239_fission_yields") == 1) { _par_got_seq(pu239_fission_yield_count()); return 1; }
+    if (_par_eq(fp, fl, "const") == 1) {
+        if (_par_eq(load64(_par_in_v), load64(_par_in_l), "CNO_NEUTRINO_LOSS_MEV") != 1) { return 0 - 1; }
+        var cno: f64 = TM_CNO_NEUTRINO_LOSS_MEV;
+        _par_got_f(cno);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "NuclearReaction::nuclear_charge_change") == 1
+        || _par_eq(fp, fl, "NuclearReaction::baryon_number_change") == 1) {
+        var r: TmNuclearReaction;
+        var at = 0;
+        r.projectile = 0;
+        if (load64(_par_in_k) == 110) { at = 1; } else { r.projectile = _tm_nuc(_par_in(0), _par_in(1)); at = 2; }
+        r.target = _tm_nuc(_par_in(at), _par_in(at + 1));
+        var n = _par_in(at + 2);
+        var prods = alloc(n * 8 + 8);
+        var j = 0;
+        while (j < n) {
+            store64(prods + j * 8, _tm_nuc(_par_in(at + 3 + j * 2), _par_in(at + 4 + j * 2)));
+            j = j + 1;
+        }
+        r.products = prods;
+        r.product_count = n;
+        r.neutrons_in = _par_in(at + 3 + n * 2);
+        r.neutrons_out = _par_in(at + 4 + n * 2);
+        r.leptons_out = 0;
+        r.lepton_count = 0;
+        if (_par_eq(fp, fl, "NuclearReaction::nuclear_charge_change") == 1) {
+            _par_got_i(r.nuclear_charge_change());
+        } else {
+            _par_got_i(r.baryon_number_change());
+        }
+        return 1;
+    }
+    if (_par_eq(fp, fl, "q_value") == 1) {
+        var rs = alloc(256);
+        var ps = alloc(256);
+        var rn = _par_in_f64s(0, rs);
+        var pn = _par_in_f64s(1 + rn, ps);
+        _par_got_f(q_value(rs, rn, ps, pn));
+        return 1;
+    }
+    var a = _par_in(0);
+    var b = _par_in(1);
+    var c = _par_in(2);
+    var d = _par_in(3);
+    if (_par_eq(fp, fl, "thermal_neutron_cross_sections[]") == 1) {
+        var x = thermal_neutron_cross_section(a);
+        _par_got_nuc(x.target);
+        _par_got_f(x.absorption_barns);
+        _par_got_f(x.fission_barns);
+        _par_got_f(x.scattering_barns);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "u235_fission_yields[]") == 1) {
+        var y = u235_fission_yield(a);
+        _par_got_i(y.mass_number);
+        _par_got_f(y.yield_fraction);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "pu239_fission_yields[]") == 1) {
+        var y2 = pu239_fission_yield(a);
+        _par_got_i(y2.mass_number);
+        _par_got_f(y2.yield_fraction);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "geometric_cross_section_barns") == 1) {
+        _par_got_f(geometric_cross_section_barns(_tm_nuc(a, b)));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "coulomb_barrier") == 1) {
+        var t, v = coulomb_barrier(_tm_nuc(a, b), _tm_nuc(c, d));
+        _par_got_res_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "resonance_integral_barns") == 1) {
+        var t, v = resonance_integral_barns(a, b);
+        _par_got_opt_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "fission_resonance_integral_barns") == 1) {
+        var t, v = fission_resonance_integral_barns(a, b);
+        _par_got_opt_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "n_alpha_resonance_integral_barns") == 1) {
+        var t, v = n_alpha_resonance_integral_barns(a, b);
+        _par_got_opt_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "max_energy_loss_fraction") == 1) { _par_got_f(max_energy_loss_fraction(a)); return 1; }
+    if (_par_eq(fp, fl, "average_lethargy_gain") == 1) { _par_got_f(average_lethargy_gain(a)); return 1; }
+    var af: f64 = a;
+    var bf: f64 = b;
+    var cf: f64 = c;
+    if (_par_eq(fp, fl, "collisions_to_thermalize") == 1) { _par_got_f(collisions_to_thermalize(a, bf, cf)); return 1; }
+    if (_par_eq(fp, fl, "moderating_ratio") == 1) { _par_got_f(moderating_ratio(af, bf, cf)); return 1; }
+    if (_par_eq(fp, fl, "breit_wigner_cross_section") == 1) {
+        var df: f64 = d;
+        var ef: f64 = _par_in(4);
+        var gf: f64 = _par_in(5);
+        var mf: f64 = _par_in(6);
+        _par_got_f(breit_wigner_cross_section(af, bf, cf, df, ef, gf, mf));
+        return 1;
+    }
+    return 0;
+}
+
+# `scattering` rows: src/scattering.cyr.
+fn _par_scattering(fp, fl): i64 {
+    if (_par_eq(fp, fl, "partial_wave_cross_section") == 1 || _par_eq(fp, fl, "partial_wave_differential") == 1) {
+        var kf: f64 = _par_in(0);
+        var ds = alloc(256);
+        var n = _par_in_f64s(1, ds);
+        if (_par_eq(fp, fl, "partial_wave_cross_section") == 1) {
+            _par_got_f(partial_wave_cross_section(kf, ds, n));
+        } else {
+            var th: f64 = _par_in(2 + n);
+            _par_got_f(partial_wave_differential(kf, ds, n, th));
+        }
+        return 1;
+    }
+    var a = _par_in(0);
+    var b = _par_in(1);
+    var c = _par_in(2);
+    var d = _par_in(3);
+    var af: f64 = a;
+    var bf: f64 = b;
+    var cf: f64 = c;
+    var df: f64 = d;
+    var ef: f64 = _par_in(4);
+    if (_par_eq(fp, fl, "rutherford_differential") == 1) {
+        _par_got_f(rutherford_differential(a, b, cf, df));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "rutherford_total_above_angle") == 1) {
+        _par_got_f(rutherford_total_above_angle(a, b, cf, df));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "distance_of_closest_approach") == 1) {
+        _par_got_f(distance_of_closest_approach(a, b, cf));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "sommerfeld_parameter") == 1) { _par_got_f(sommerfeld_parameter(a, b, cf)); return 1; }
+    if (_par_eq(fp, fl, "mott_correction_factor") == 1) { _par_got_f(mott_correction_factor(af, bf)); return 1; }
+    if (_par_eq(fp, fl, "legendre_polynomial") == 1) { _par_got_f(legendre_polynomial(a, bf)); return 1; }
+    if (_par_eq(fp, fl, "thomas_fermi_screening_fm") == 1) { _par_got_f(thomas_fermi_screening_fm(a)); return 1; }
+    if (_par_eq(fp, fl, "born_screened_coulomb") == 1) {
+        _par_got_f(born_screened_coulomb(a, b, cf, df, ef));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "born_screened_coulomb_with_masses") == 1) {
+        var ff: f64 = _par_in(5);
+        var gf: f64 = _par_in(6);
+        _par_got_f(born_screened_coulomb_with_masses(a, b, cf, df, ef, ff, gf));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "mott_electron_differential") == 1) {
+        _par_got_f(mott_electron_differential(a, bf, cf));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "mott_electron_with_form_factor") == 1) {
+        _par_got_f(mott_electron_with_form_factor(a, b, cf, df));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "nuclear_form_factor_uniform") == 1) {
+        _par_got_f(nuclear_form_factor_uniform(af, bf));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "compton_energy_ratio") == 1) { _par_got_f(compton_energy_ratio(af, bf)); return 1; }
+    if (_par_eq(fp, fl, "klein_nishina_differential") == 1) {
+        _par_got_f(klein_nishina_differential(af, bf));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "klein_nishina_total") == 1) { _par_got_f(klein_nishina_total(af)); return 1; }
+    if (_par_eq(fp, fl, "pair_production_cross_section") == 1) {
+        _par_got_f(pair_production_cross_section(a, bf));
+        return 1;
+    }
+    return 0;
+}
+
 fn _par_dispatch(mp, ml, fp, fl): i64 {
     _par_got_n = 0;
     if (_par_eq(mp, ml, "constants") == 1) { return _par_constants(fp, fl); }
@@ -1118,6 +1390,8 @@ fn _par_dispatch(mp, ml, fp, fl): i64 {
     if (_par_eq(mp, ml, "decay") == 1) { return _par_decay(fp, fl); }
     if (_par_eq(mp, ml, "timekeeping") == 1) { return _par_timekeeping(fp, fl); }
     if (_par_eq(mp, ml, "atomic") == 1) { return _par_atomic(fp, fl); }
+    if (_par_eq(mp, ml, "reaction") == 1) { return _par_reaction(fp, fl); }
+    if (_par_eq(mp, ml, "scattering") == 1) { return _par_scattering(fp, fl); }
     return 0;
 }
 
@@ -1131,11 +1405,8 @@ fn _par_dispatch(mp, ml, fp, fl): i64 {
 # its rows go to the port's bit-exact _tm_hypot and are class A.
 #must_use
 fn _par_c_bound(fp, fl): i64 {
-    if (_par_eq(fp, fl, "libm::sin") == 1) { return 2; }
-    if (_par_eq(fp, fl, "libm::cos") == 1) { return 2; }
     if (_par_eq(fp, fl, "libm::tan") == 1) { return 2; }
     if (_par_eq(fp, fl, "libm::exp") == 1) { return 2; }
-    if (_par_eq(fp, fl, "libm::log") == 1) { return 2; }
     if (_par_eq(fp, fl, "libm::sinh") == 1) { return 2; }
     if (_par_eq(fp, fl, "libm::pow") == 1) { return 2; }
     # M2, by the port-parity rule: S = 0 (pow results nudged ±1 ulp on all 2,053 golden rows), 2 calls.
@@ -1151,6 +1422,9 @@ fn _par_c_bound(fp, fl): i64 {
     # M3: exp nudged ±1 ulp on every golden row: R = (N·P)·e gives S = 2, R²r² gives S = 8.
     if (_par_eq(fp, fl, "radial_wavefunction") == 1) { return 6; }
     if (_par_eq(fp, fl, "radial_probability_density") == 1) { return 18; }
+    # M4: ganita's tan nudged ±1 ulp on every golden row: S = 4, 1 call: K = 2·4·1 + 2. The other
+    # M4 functions use the port's bit-exact sin, cos and log, so they are class B.
+    if (_par_eq(fp, fl, "rutherford_total_above_angle") == 1) { return 10; }
     return 0 - 1;
 }
 

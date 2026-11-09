@@ -15,7 +15,8 @@
 //!
 //! Modules are added at the start of their milestone, with the golden grid from the port
 //! plan §3: constants, particle and relativity (M1), nucleus and decay (M2), timekeeping (M5),
-//! atomic (M3); plus `libm`, the math-function reference for the M0 step 8 baselines.
+//! atomic (M3), reaction and scattering (M4); plus `libm`, the math-function reference for the
+//! M0 step 8 baselines.
 
 mod cyr;
 mod grids;
@@ -25,7 +26,9 @@ mod m_decay;
 mod m_libm;
 mod m_nucleus;
 mod m_particle;
+mod m_reaction;
 mod m_relativity;
+mod m_scattering;
 mod m_timekeeping;
 mod rust_src;
 mod t_atomic;
@@ -33,6 +36,7 @@ mod t_constants;
 mod t_decay;
 mod t_nucleus;
 mod t_particle;
+mod t_reaction;
 mod t_timekeeping;
 mod tsv;
 
@@ -50,7 +54,9 @@ fn golden_modules() -> Vec<tsv::Module> {
         m_libm::emit(),
         m_nucleus::emit(),
         m_particle::emit(),
+        m_reaction::emit(),
         m_relativity::emit(),
+        m_scattering::emit(),
         m_timekeeping::emit(),
     ]
 }
@@ -99,6 +105,10 @@ fn cyrius_outputs(root: &Path, prov: &str) -> Result<Vec<Output>, String> {
     push(
         "src/atomic_data.cyr",
         t_atomic::emit(&rust("atomic")?, prov)?,
+    );
+    push(
+        "src/reaction_data.cyr",
+        t_reaction::emit(&rust("reaction")?, &rust("scattering")?, prov)?,
     );
     Ok(out)
 }

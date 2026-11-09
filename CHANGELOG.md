@@ -173,6 +173,27 @@ The Rust library and its behavior are unchanged, and `VERSION` stays 1.3.0 until
 - **Generator.** `rust_src.rs` reads `(integer, Enum::Variant)` tables, a pure lookup function's match arms, and per-entry citation comments; a const now ends at its first `;` outside a comment.
 - **`src/error.cyr`**'s header no longer promises an `err_out` detail pointer (decided against in M2).
 
+### Port — M4 Reactions & scattering (2026-11-08)
+- **Exact sin, cos and log** (`src/numerics.cyr`): `_tm_sin`, `_tm_cos` and `_tm_log` transcribe Rust libm 0.2.16's sin, cos, k_sin, k_cos, rem_pio2 and log operation for operation; arguments past 2²⁰·π/2 use the stdlib's Payne–Hanek reduction. The port-parity rule required this. By perturbation, 12 of the 16 transcendental M4 functions came out past K = 64: the Mott factor at β → 1, the form factor near its zeros, Klein–Nishina's closed form above γ = 1e-2, ξ = 1 + (≈ −1) at large A. `f64_ln` is x87 on x86_64 and a different fdlibm form on aarch64, and `f64_sin` skips Rust's |x| ≤ 9π/4 reductions. A 680,010-input sweep matches Rust libm on every input on x86_64 ELF, x86_64 PE and aarch64; the cost is about 30% over the builtins. `libm.tsv`'s sin, cos and log rows move to the new primitives at class A, and are exact on every target.
+- **`src/reaction_data.cyr`** (generated):
+  - the seven preset reactions, the eight ENDF/B-VIII.0 thermal cross sections, the U-235 and Pu-239 chain yields, the two nucleosynthesis pathways, `enum TmNucleosynthesisProcess` and `TM_CNO_NEUTRINO_LOSS_MEV`, through the public API; names and step reactions as UTF-8 in one byte table;
+  - the private resonance-integral table and scattering's ζ(3), extracted and proven.
+- **`src/reaction.cyr`:**
+  - `struct TmNuclearReaction`, with products and leptons as word arrays (`r.product(k)`, `r.lepton(k)`), the projectile 0 for Rust's None, and `nuclear_charge_change` / `baryon_number_change`;
+  - the seven presets;
+  - `q_value` over two buffers, its sums folded from −0.0 as Rust's `Sum for f64` does;
+  - the Coulomb barrier, geometric cross section, Breit–Wigner and the resonance integrals;
+  - the thermal cross sections and yields as a count and an accessor returning a struct by value;
+  - the pathways, with `p.step(k)`;
+  - neutron moderation.
+- **`src/scattering.cyr`:** Rutherford and Mott, partial waves (phase shifts as a buffer and a count), Born for a screened Coulomb potential, the Thomas–Fermi length, Mott with the uniform form factor (series below |qR| = 0.5), Compton and Klein–Nishina (series below γ = 1e-2), and Maximon's pair production (both branches).
+- **Golden.** `reaction.tsv` (7,965 rows) and `scattering.tsv` (10,704) cover every preset, every branch point on both sides (with the adjacent doubles), and θ from 0 to 2π plus ±∞ and NaN. **All 18,669 rows are 0 ulp on x86_64 ELF, x86_64 PE and aarch64.** Every function except `rutherford_total_above_angle` is class B; that one uses ganita's tan, class C with K = 10 (S = 4), and is also 0 ulp. The whole corpus: 183,956 ok, 0 failed, 0 pending, 1 accepted.
+- **Tests.** `tests/reaction.tcyr` ports 39 of the 43 Rust reaction tests (133 assertions; the 4 serde round-trips are not carried over), and `tests/scattering.tcyr` all 53 scattering tests (770 assertions), among them the Hubbell–Gimm–Øverbø pair-production value and the Simpson-rule checks of the Rutherford and Klein–Nishina totals.
+- **Benches.** `rutherford_1000` 62.2 µs vs Rust's 6.55 µs; `pair_production_1000` 101.5 µs vs 16.6 µs. A sin call is most of the gap.
+- **Surface parity** 26/26 for reaction and 18/18 for scattering.
+- **Generator.** `cyr.rs` writes i64 tables (nucleus words, enum names).
+- **Bundle.** `[lib]` adds reaction_data, reaction and scattering. `dist/tanmatra.deps` now lists `math`: `_tm_rem_pio2` calls the stdlib's Payne–Hanek reduction for huge arguments.
+
 ### Port — `ShellLevel` as a struct (2026-11-08)
 - **`src/shell_model.cyr`**: `ShellLevel` is `struct TmShellLevel { n_shell; l; two_j; }` with `impl` `new`, `degeneracy`, `j` and `label`, in place of M2's 21-bit packed word and its `shell_level_*` functions. Rust's fields are public u32s, so a hand-built level past 2²¹ is valid there, and the word silently gave it the wrong label, j and degeneracy (11 of the new golden rows failed against it). `shell_model_level(k)` returns the struct by value, and `shell_occupation` fills a caller `TmShellLevel[32]`.
 - **Golden.** `nucleus.tsv` gains 5 hand-built probes (15 rows) with fields at 2²¹, 2³⁰ and u32::MAX: 74,312 rows. Everything passes on x86_64 ELF, x86_64 PE and aarch64: 165,287 ok, 0 failed, 1 accepted.

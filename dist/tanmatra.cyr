@@ -4,6 +4,7 @@
 # Do not edit -- rebuild with: cyrius distlib
 
 # Requires (compile-verified; the leaves of dist/tanmatra.deps):
+include "lib/math.cyr"
 include "lib/result.cyr"
 include "lib/ganita.cyr"
 include "lib/tagged.cyr"
@@ -193,6 +194,259 @@ fn _tm_f64_to_i64_sat(x: f64): i64 {
     if (x >= 9223372036854775808.0) { return 0x7FFFFFFFFFFFFFFF; }
     if (x < -9223372036854775808.0) { return 0x8000000000000000; }
     return f64_to(x);
+}
+
+# ── log, sin and cos as Rust libm 0.2.16 computes them (M4) ───────────────────────────
+#
+# Transcribed operation for operation from libm-0.2.16/src/math/{log,sin,cos,k_sin,k_cos,
+# rem_pio2}.rs, so the results are bit-identical on every target, which the port-parity rule
+# requires for the ill-conditioned scattering and moderation formulas (port-parity.md, M4).
+# f64_ln is x87 on x86_64 and fdlibm's branchy e_log.c on aarch64, while Rust's log is musl's
+# single-expression form. f64_sin and f64_cos share Rust's kernels, but their argument reduction
+# skips Rust's |x| ≤ 9π/4 fast paths. The coefficients are the Rust source's hex comments.
+
+# ln(x): x = 2^k (1 + f) with √2/2 ≤ 1 + f < √2, then log(1 + f) from s = f/(2 + f) and a
+# degree-14 Remez polynomial in s (fdlibm e_log.c, musl's form).
+#must_use
+fn _tm_log(xa: f64): f64 {
+    var x: f64 = xa;
+    var ui = _tm_bits(x);
+    var hx = (ui >> 32) & 0xFFFFFFFF;
+    var k = 0;
+    if (hx < 0x00100000 || (hx >> 31) != 0) {
+        if ((ui << 1) == 0) {
+            var m1: f64 = -1.0;
+            var ninf: f64 = m1 / (x * x);   # log(±0) = −∞
+            return ninf;
+        }
+        if ((hx >> 31) != 0) {
+            var nan: f64 = (x - x) / 0.0;   # log(negative) = NaN
+            return nan;
+        }
+        k = 0 - 54;                         # subnormal: scale by 2^54
+        var p54: f64 = 0x4350000000000000;
+        x = x * p54;
+        ui = _tm_bits(x);
+        hx = (ui >> 32) & 0xFFFFFFFF;
+    } elif (hx >= 0x7FF00000) {
+        return x;
+    } elif (hx == 0x3FF00000 && (ui << 32) == 0) {
+        return 0.0;
+    }
+    hx = hx + (0x3FF00000 - 0x3FE6A09E);
+    k = k + ((hx >> 20) - 0x3FF);
+    hx = (hx & 0x000FFFFF) + 0x3FE6A09E;
+    var mb = (hx << 32) | (ui & 0xFFFFFFFF);
+    var m: f64 = mb;
+    var ln2_hi: f64 = 0x3FE62E42FEE00000;
+    var ln2_lo: f64 = 0x3DEA39EF35793C76;
+    var lg1: f64 = 0x3FE5555555555593;
+    var lg2: f64 = 0x3FD999999997FA04;
+    var lg3: f64 = 0x3FD2492494229359;
+    var lg4: f64 = 0x3FCC71C51D8E78AF;
+    var lg5: f64 = 0x3FC7466496CB03DE;
+    var lg6: f64 = 0x3FC39A09D078C69F;
+    var lg7: f64 = 0x3FC2F112DF3E5244;
+    var f: f64 = m - 1.0;
+    var hfsq: f64 = (0.5 * f) * f;
+    var s: f64 = f / (2.0 + f);
+    var z: f64 = s * s;
+    var w: f64 = z * z;
+    var t1: f64 = w * (lg2 + (w * (lg4 + (w * lg6))));
+    var t2: f64 = z * (lg1 + (w * (lg3 + (w * (lg5 + (w * lg7))))));
+    var r: f64 = t2 + t1;
+    var dk: f64 = f64_from(k);
+    var out: f64 = ((((s * (hfsq + r)) + (dk * ln2_lo)) - hfsq) + f) + (dk * ln2_hi);
+    return out;
+}
+
+# sin(x + y) for |x| ≤ ~π/4, y the tail of x; iy = 0 when there is no tail (k_sin.rs).
+#must_use
+fn _tm_k_sin(x: f64, y: f64, iy): f64 {
+    var s1: f64 = 0xBFC5555555555549;
+    var s2: f64 = 0x3F8111111110F8A6;
+    var s3: f64 = 0xBF2A01A019C161D5;
+    var s4: f64 = 0x3EC71DE357B1FE7D;
+    var s5: f64 = 0xBE5AE5E68A2B9CEB;
+    var s6: f64 = 0x3DE5D93A5ACFD57C;
+    var z: f64 = x * x;
+    var w: f64 = z * z;
+    var r: f64 = (s2 + (z * (s3 + (z * s4)))) + ((z * w) * (s5 + (z * s6)));
+    var v: f64 = z * x;
+    if (iy == 0) {
+        var a: f64 = x + (v * (s1 + (z * r)));
+        return a;
+    }
+    var b: f64 = x - (((z * ((0.5 * y) - (v * r))) - y) - (v * s1));
+    return b;
+}
+
+# cos(x + y) for |x| ≤ ~π/4, y the tail of x (k_cos.rs).
+#must_use
+fn _tm_k_cos(x: f64, y: f64): f64 {
+    var c1: f64 = 0x3FA555555555554C;
+    var c2: f64 = 0xBF56C16C16C15177;
+    var c3: f64 = 0x3EFA01A019CB1590;
+    var c4: f64 = 0xBE927E4F809C52AD;
+    var c5: f64 = 0x3E21EE9EBDB4B1C4;
+    var c6: f64 = 0xBDA8FAE9BE8838D4;
+    var z: f64 = x * x;
+    var w: f64 = z * z;
+    var r: f64 = (z * (c1 + (z * (c2 + (z * c3))))) + ((w * w) * (c4 + (z * (c5 + (z * c6)))));
+    var hz: f64 = 0.5 * z;
+    var w2: f64 = 1.0 - hz;
+    var c: f64 = w2 + (((1.0 - w2) - hz) + ((z * r) - (x * y)));
+    return c;
+}
+
+# rem_pio2.rs `medium`: x = n·π/2 + (y0 + y1) by Cody–Waite with π/2 in three 33-bit words,
+# the later words used only when the first cancels more than 16 (then 49) bits.
+#must_use
+fn _tm_rem_pio2_medium(x: f64, ix, yp): i64 {
+    var inv_pio2: f64 = 0x3FE45F306DC9C883;
+    var to_int: f64 = 0x4338000000000000;
+    var pio2_1: f64 = 0x3FF921FB54400000;
+    var pio2_1t: f64 = 0x3DD0B4611A626331;
+    var pio2_2: f64 = 0x3DD0B4611A600000;
+    var pio2_2t: f64 = 0x3BA3198A2E037073;
+    var pio2_3: f64 = 0x3BA3198A2E000000;
+    var pio2_3t: f64 = 0x397B839A252049C1;
+    var tmp: f64 = (x * inv_pio2) + to_int;
+    var f_n: f64 = tmp - to_int;
+    var n = f64_to(f_n);
+    var r: f64 = x - (f_n * pio2_1);
+    var w: f64 = f_n * pio2_1t;
+    var y0: f64 = r - w;
+    var ex = ix >> 20;
+    var ey = (_tm_bits(y0) >> 52) & 0x7FF;
+    if (ex - ey > 16) {
+        var t: f64 = r;
+        w = f_n * pio2_2;
+        r = t - w;
+        w = (f_n * pio2_2t) - ((t - r) - w);
+        y0 = r - w;
+        ey = (_tm_bits(y0) >> 52) & 0x7FF;
+        if (ex - ey > 49) {
+            var t3: f64 = r;
+            w = f_n * pio2_3;
+            r = t3 - w;
+            w = (f_n * pio2_3t) - ((t3 - r) - w);
+            y0 = r - w;
+        }
+    }
+    var y1: f64 = (r - y0) - w;
+    store64(yp, y0);
+    store64(yp + 8, y1);
+    return n;
+}
+
+# One of rem_pio2.rs's direct reductions for |x| ≤ 9π/4: z = x ∓ k·PIO2_1, then the tail.
+#must_use
+fn _tm_rem_pio2_fast(x: f64, k, yp): i64 {
+    var pio2_1: f64 = 0x3FF921FB54400000;
+    var pio2_1t: f64 = 0x3DD0B4611A626331;
+    var kf: f64 = f64_from(k);
+    var h: f64 = kf * pio2_1;
+    var t: f64 = kf * pio2_1t;
+    if (_tm_bits(x) >= 0) {
+        var z: f64 = x - h;
+        var y0: f64 = z - t;
+        var y1: f64 = (z - y0) - t;
+        store64(yp, y0);
+        store64(yp + 8, y1);
+        return k;
+    }
+    var zn: f64 = x + h;
+    var y0n: f64 = zn + t;
+    var y1n: f64 = (zn - y0n) + t;
+    store64(yp, y0n);
+    store64(yp + 8, y1n);
+    return 0 - k;
+}
+
+# x = n·π/2 + (y0 + y1) with |y0 + y1| ≤ ~π/4, y0 and y1 written to yp[0], yp[1]; returns n.
+# rem_pio2.rs transcribed. Arguments at or past 2^20·π/2 go to the stdlib's Payne–Hanek
+# reduction, `_f64_rem_pio2` (lib/math.cyr, FreeBSD k_rem_pio2.c, as Rust's rem_pio2_large is),
+# which the libm.tsv rows above 2^20·π/2 pin bit for bit.
+#must_use
+fn _tm_rem_pio2(x: f64, yp): i64 {
+    var ix = (_tm_bits(x) >> 32) & 0x7FFFFFFF;
+    if (ix <= 0x400F6A7A) {                          # |x| ~≤ 5π/4
+        if ((ix & 0xFFFFF) == 0x921FB) { return _tm_rem_pio2_medium(x, ix, yp); }
+        if (ix <= 0x4002D97C) { return _tm_rem_pio2_fast(x, 1, yp); }
+        return _tm_rem_pio2_fast(x, 2, yp);
+    }
+    if (ix <= 0x401C463B) {                          # |x| ~≤ 9π/4
+        if (ix <= 0x4015FDBC) {
+            if (ix == 0x4012D97C) { return _tm_rem_pio2_medium(x, ix, yp); }
+            return _tm_rem_pio2_fast(x, 3, yp);
+        }
+        if (ix == 0x401921FB) { return _tm_rem_pio2_medium(x, ix, yp); }
+        return _tm_rem_pio2_fast(x, 4, yp);
+    }
+    if (ix < 0x413921FB) { return _tm_rem_pio2_medium(x, ix, yp); }
+    return _f64_rem_pio2(x, yp);
+}
+
+# sin(x) as Rust libm 0.2.16 computes it, bit for bit (sin.rs).
+#must_use
+fn _tm_sin(x: f64): f64 {
+    var ix = (_tm_bits(x) >> 32) & 0x7FFFFFFF;
+    if (ix <= 0x3FE921FB) {
+        if (ix < 0x3E500000) { return x; }           # |x| < 2^-26
+        var k0: f64 = _tm_k_sin(x, 0.0, 0);
+        return k0;
+    }
+    if (ix >= 0x7FF00000) {
+        var nan: f64 = x - x;
+        return nan;
+    }
+    var y: i64[2];
+    var n = _tm_rem_pio2(x, &y) & 3;
+    var y0: f64 = load64(&y);
+    var y1: f64 = load64(&y + 8);
+    var r: f64 = 0.0;
+    if (n == 0) { r = _tm_k_sin(y0, y1, 1); }
+    elif (n == 1) { r = _tm_k_cos(y0, y1); }
+    elif (n == 2) {
+        var a: f64 = _tm_k_sin(y0, y1, 1);
+        r = -a;
+    } else {
+        var b: f64 = _tm_k_cos(y0, y1);
+        r = -b;
+    }
+    return r;
+}
+
+# cos(x) as Rust libm 0.2.16 computes it, bit for bit (cos.rs).
+#must_use
+fn _tm_cos(x: f64): f64 {
+    var ix = (_tm_bits(x) >> 32) & 0x7FFFFFFF;
+    if (ix <= 0x3FE921FB) {
+        if (ix < 0x3E46A09E) { return 1.0; }         # |x| < 2^-27·√2
+        var k0: f64 = _tm_k_cos(x, 0.0);
+        return k0;
+    }
+    if (ix >= 0x7FF00000) {
+        var nan: f64 = x - x;
+        return nan;
+    }
+    var y: i64[2];
+    var n = _tm_rem_pio2(x, &y) & 3;
+    var y0: f64 = load64(&y);
+    var y1: f64 = load64(&y + 8);
+    var r: f64 = 0.0;
+    if (n == 0) { r = _tm_k_cos(y0, y1); }
+    elif (n == 1) {
+        var a: f64 = _tm_k_sin(y0, y1, 1);
+        r = -a;
+    } elif (n == 2) {
+        var b: f64 = _tm_k_cos(y0, y1);
+        r = -b;
+    } else {
+        r = _tm_k_sin(y0, y1, 1);
+    }
+    return r;
 }
 
 # --- constants.cyr ---
@@ -5316,6 +5570,1334 @@ fn breit_interaction_ev(z): f64 {
     var hartree: f64 = 2.0 * TM_RYDBERG_EV;
     var e: f64 = (((((TM_FINE_STRUCTURE * TM_FINE_STRUCTURE) * zf) * zf) * zf) / 4.0) * hartree;
     return e;
+}
+
+# --- reaction_data.cyr ---
+
+# tanmatra — reaction and scattering data: presets, thermal cross sections, resonance integrals, yields, pathways
+#
+# GENERATED by scripts/oracle from tanmatra 1.3.0 (rust-old/), libm 0.2.16. Do not edit.
+# Regenerate: cargo run --release --locked --manifest-path scripts/oracle/Cargo.toml
+#
+# From the oracle's public API, except two private values, extracted from rust-old/src and proven
+# against the oracle before this file is written: the resonance-integral table and scattering's
+# ζ(3) (scripts/oracle/src/t_reaction.rs). tests/golden/reaction.tsv and scattering.tsv pin every use.
+
+# A nucleosynthesis process type.
+enum TmNucleosynthesisProcess {
+    TM_NUCLEOSYNTHESIS_PROCESS_S_PROCESS = 0;
+    TM_NUCLEOSYNTHESIS_PROCESS_R_PROCESS = 1;
+    TM_NUCLEOSYNTHESIS_PROCESS_RP_PROCESS = 2;
+}
+const TM_NUCLEOSYNTHESIS_PROCESS_COUNT = 3;
+
+# Mean energy carried away by neutrinos per CNO cycle, in MeV
+# (Bahcall, Neutrino Astrophysics (1989): ¹³N 0.707 MeV + ¹⁵O 0.997 MeV).
+const TM_CNO_NEUTRINO_LOSS_MEV = 1.704;
+
+# The seven preset reactions (Q from AME2020 atomic masses), indexed by _TM_PRESET_*.
+const _TM_PRESET_COUNT = 7;
+const _TM_PRESET_DT_FUSION = 0;
+const _TM_PRESET_DD_FUSION_HE3 = 1;
+const _TM_PRESET_DD_FUSION_T = 2;
+const _TM_PRESET_PP_CHAIN_STEP1 = 3;
+const _TM_PRESET_U235_FISSION = 4;
+const _TM_PRESET_CNO_CYCLE = 5;
+const _TM_PRESET_TRIPLE_ALPHA = 6;
+
+# Column: offset of the name in _TM_REACTION_TEXT.
+var _TM_PRESET_NAME_OFFSET: u16[7] = {
+    0,  # dt_fusion
+    11,  # dd_fusion_he3
+    36,  # dd_fusion_t
+    64,  # pp_chain_step1
+    107,  # u235_fission
+    155,  # cno_cycle
+    197,  # triple_alpha
+};
+
+# Column: the projectile's nucleus word, 0 for none (a neutron-induced reaction).
+var _TM_PRESET_PROJECTILE: i64[7] = {
+    8589934593,  # dt_fusion
+    8589934593,  # dd_fusion_he3
+    8589934593,  # dd_fusion_t
+    4294967297,  # pp_chain_step1
+    0,  # u235_fission
+    4294967297,  # cno_cycle
+    17179869186,  # triple_alpha
+};
+
+# Column: the target's nucleus word.
+var _TM_PRESET_TARGET: i64[7] = {
+    12884901889,  # dt_fusion
+    8589934593,  # dd_fusion_he3
+    8589934593,  # dd_fusion_t
+    4294967297,  # pp_chain_step1
+    1009317314652,  # u235_fission
+    51539607558,  # cno_cycle
+    17179869186,  # triple_alpha
+};
+
+# Column: the first product in _TM_REACTION_PRODUCTS.
+var _TM_PRESET_PRODUCT_START: u8[7] = {
+    0,  # dt_fusion
+    1,  # dd_fusion_he3
+    2,  # dd_fusion_t
+    4,  # pp_chain_step1
+    5,  # u235_fission
+    7,  # cno_cycle
+    9,  # triple_alpha
+};
+
+# Column: the number of product nuclei.
+var _TM_PRESET_PRODUCT_COUNT: u8[7] = {
+    1,  # dt_fusion
+    1,  # dd_fusion_he3
+    2,  # dd_fusion_t
+    1,  # pp_chain_step1
+    2,  # u235_fission
+    2,  # cno_cycle
+    1,  # triple_alpha
+};
+
+# Column: free neutrons in the entrance channel.
+var _TM_PRESET_NEUTRONS_IN: u8[7] = {
+    0,  # dt_fusion
+    0,  # dd_fusion_he3
+    0,  # dd_fusion_t
+    0,  # pp_chain_step1
+    1,  # u235_fission
+    0,  # cno_cycle
+    0,  # triple_alpha
+};
+
+# Column: free neutrons in the exit channel.
+var _TM_PRESET_NEUTRONS_OUT: u8[7] = {
+    1,  # dt_fusion
+    1,  # dd_fusion_he3
+    0,  # dd_fusion_t
+    0,  # pp_chain_step1
+    3,  # u235_fission
+    0,  # cno_cycle
+    0,  # triple_alpha
+};
+
+# Column: the first lepton in _TM_REACTION_LEPTONS.
+var _TM_PRESET_LEPTON_START: u8[7] = {
+    0,  # dt_fusion
+    0,  # dd_fusion_he3
+    0,  # dd_fusion_t
+    0,  # pp_chain_step1
+    2,  # u235_fission
+    2,  # cno_cycle
+    6,  # triple_alpha
+};
+
+# Column: the number of leptons out.
+var _TM_PRESET_LEPTON_COUNT: u8[7] = {
+    0,  # dt_fusion
+    0,  # dd_fusion_he3
+    0,  # dd_fusion_t
+    2,  # pp_chain_step1
+    0,  # u235_fission
+    4,  # cno_cycle
+    0,  # triple_alpha
+};
+
+# Column: Q, MeV.
+var _TM_PRESET_Q_VALUE_MEV: f64[7] = {
+    17.5893,  # dt_fusion
+    3.2689,  # dd_fusion_he3
+    4.0327,  # dd_fusion_t
+    0.4202,  # pp_chain_step1
+    173.28,  # u235_fission
+    26.731,  # cno_cycle
+    7.2747,  # triple_alpha
+};
+
+# Every preset's product nuclei, as nucleus words, in preset order.
+var _TM_REACTION_PRODUCTS: i64[10] = {
+    17179869186,  # dt_fusion: Z=2 A=4
+    12884901890,  # dd_fusion_he3: Z=2 A=3
+    12884901889,  # dd_fusion_t: Z=1 A=3
+    4294967297,  # dd_fusion_t: Z=1 A=1
+    8589934593,  # pp_chain_step1: Z=1 A=2
+    605590388792,  # u235_fission: Z=56 A=141
+    395136991268,  # u235_fission: Z=36 A=92
+    17179869186,  # cno_cycle: Z=2 A=4
+    51539607558,  # cno_cycle: Z=6 A=12
+    51539607558,  # triple_alpha: Z=6 A=12
+};
+
+# Every preset's exit-channel leptons (TmLepton; a positron is TM_LEPTON_ELECTRON, as in Rust).
+var _TM_REACTION_LEPTONS: i64[6] = {
+    TM_LEPTON_ELECTRON,  # pp_chain_step1
+    TM_LEPTON_ELECTRON_NEUTRINO,  # pp_chain_step1
+    TM_LEPTON_ELECTRON,  # cno_cycle
+    TM_LEPTON_ELECTRON,  # cno_cycle
+    TM_LEPTON_ELECTRON_NEUTRINO,  # cno_cycle
+    TM_LEPTON_ELECTRON_NEUTRINO,  # cno_cycle
+};
+
+# Returns thermal neutron cross-sections for key isotopes.
+#
+# Source: ENDF/B-VIII.0, 0 K, E = 0.0253 eV.
+const TM_THERMAL_XS_COUNT = 8;
+
+# Column: target Z.
+var TM_THERMAL_XS_Z: u8[8] = {
+    92,  # Z=92 A=235
+    92,  # Z=92 A=238
+    94,  # Z=94 A=239
+    5,  # Z=5 A=10
+    48,  # Z=48 A=113
+    1,  # Z=1 A=1
+    6,  # Z=6 A=12
+    26,  # Z=26 A=56
+};
+
+# Column: target A.
+var TM_THERMAL_XS_A: u8[8] = {
+    235,  # Z=92 A=235
+    238,  # Z=92 A=238
+    239,  # Z=94 A=239
+    10,  # Z=5 A=10
+    113,  # Z=48 A=113
+    1,  # Z=1 A=1
+    12,  # Z=6 A=12
+    56,  # Z=26 A=56
+};
+
+# Column: absorption, b (capture + fission + (n,α) + (n,p)).
+var TM_THERMAL_XS_ABSORPTION_BARNS: f64[8] = {
+    686.178,  # Z=92 A=235
+    2.68252,  # Z=92 A=238
+    1016.7,  # Z=94 A=239
+    3844.55,  # Z=5 A=10
+    19859.9,  # Z=48 A=113
+    0.332584,  # Z=1 A=1
+    0.0038604,  # Z=6 A=12
+    2.60431,  # Z=26 A=56
+};
+
+# Column: fission, b.
+var TM_THERMAL_XS_FISSION_BARNS: f64[8] = {
+    586.787,  # Z=92 A=235
+    0.0000185086,  # Z=92 A=238
+    746.947,  # Z=94 A=239
+    0.0,  # Z=5 A=10
+    0.0,  # Z=48 A=113
+    0.0,  # Z=1 A=1
+    0.0,  # Z=6 A=12
+    0.0,  # Z=26 A=56
+};
+
+# Column: free-atom elastic scattering, b.
+var TM_THERMAL_XS_SCATTERING_BARNS: f64[8] = {
+    14.0795,  # Z=92 A=235
+    9.22021,  # Z=92 A=238
+    8.05577,  # Z=94 A=239
+    2.08864,  # Z=5 A=10
+    24.3186,  # Z=48 A=113
+    20.4361,  # Z=1 A=1
+    4.74817,  # Z=6 A=12
+    12.0811,  # Z=26 A=56
+};
+
+# Epithermal neutron resonance integrals in barns:
+# (Z, A, capture I_γ, fission I_f, (n,α) I_α).
+#
+# I_x = ∫ σ_x(E)/E dE from 0.5 eV (cadmium cut-off) to 20 MeV, integrated from
+# ENDF/B-VIII.0 0 K point-wise cross sections.
+const _TM_RESONANCE_INTEGRAL_COUNT = 12;
+
+# Column: Z.
+var _TM_RESONANCE_INTEGRAL_Z: u8[12] = {
+    1,  # Z=1 A=1
+    5,  # Z=5 A=10
+    6,  # Z=6 A=12
+    26,  # Z=26 A=56
+    40,  # Z=40 A=90
+    42,  # Z=42 A=98
+    50,  # Z=50 A=120
+    53,  # Z=53 A=127
+    55,  # Z=55 A=133
+    92,  # Z=92 A=235
+    92,  # Z=92 A=238
+    94,  # Z=94 A=239
+};
+
+# Column: A.
+var _TM_RESONANCE_INTEGRAL_A: u8[12] = {
+    1,  # Z=1 A=1
+    10,  # Z=5 A=10
+    12,  # Z=6 A=12
+    56,  # Z=26 A=56
+    90,  # Z=40 A=90
+    98,  # Z=42 A=98
+    120,  # Z=50 A=120
+    127,  # Z=53 A=127
+    133,  # Z=55 A=133
+    235,  # Z=92 A=235
+    238,  # Z=92 A=238
+    239,  # Z=94 A=239
+};
+
+# Column: capture I_γ, b.
+var _TM_RESONANCE_INTEGRAL_CAPTURE: f64[12] = {
+    0.1493,  # Z=1 A=1
+    0.178,  # Z=5 A=10
+    0.00205,  # Z=6 A=12
+    1.378,  # Z=26 A=56
+    0.1637,  # Z=40 A=90
+    6.562,  # Z=42 A=98
+    1.104,  # Z=50 A=120
+    159.7,  # Z=53 A=127
+    405.4,  # Z=55 A=133
+    143.0,  # Z=92 A=235
+    275.2,  # Z=92 A=238
+    180.1,  # Z=94 A=239
+};
+
+# Column: fission I_f, b.
+var _TM_RESONANCE_INTEGRAL_FISSION: f64[12] = {
+    0.0,  # Z=1 A=1
+    0.0,  # Z=5 A=10
+    0.0,  # Z=6 A=12
+    0.0,  # Z=26 A=56
+    0.0,  # Z=40 A=90
+    0.0,  # Z=42 A=98
+    0.0,  # Z=50 A=120
+    0.0,  # Z=53 A=127
+    0.0,  # Z=55 A=133
+    280.2,  # Z=92 A=235
+    2.07,  # Z=92 A=238
+    308.3,  # Z=94 A=239
+};
+
+# Column: (n,α) I_α, b.
+var _TM_RESONANCE_INTEGRAL_N_ALPHA: f64[12] = {
+    0.0,  # Z=1 A=1
+    1725.6,  # Z=5 A=10
+    0.0869,  # Z=6 A=12
+    0.0,  # Z=26 A=56
+    0.0,  # Z=40 A=90
+    0.0034,  # Z=42 A=98
+    0.0009,  # Z=50 A=120
+    0.0009,  # Z=53 A=127
+    0.0011,  # Z=55 A=133
+    0.0,  # Z=92 A=235
+    0.0,  # Z=92 A=238
+    0.0,  # Z=94 A=239
+};
+
+# Returns thermal neutron fission yield distribution for U-235.
+#
+# Chain yields (the largest cumulative yield in each mass chain) at key mass
+# numbers, showing the characteristic double-humped distribution.
+#
+# Source: ENDF/B-VIII.0 neutron fission product yields (MT = 459), E = 0.0253 eV.
+const TM_U235_FISSION_YIELD_COUNT = 18;
+
+# Column: mass number A.
+var TM_U235_FISSION_YIELD_MASS_NUMBER: u8[18] = {
+    85,  # A=85
+    90,  # A=90
+    95,  # A=95
+    99,  # A=99
+    101,  # A=101
+    105,  # A=105
+    110,  # A=110
+    115,  # A=115
+    120,  # A=120
+    131,  # A=131
+    133,  # A=133
+    135,  # A=135
+    137,  # A=137
+    140,  # A=140
+    144,  # A=144
+    147,  # A=147
+    151,  # A=151
+    155,  # A=155
+};
+
+# Column: chain yield, per fission.
+var TM_U235_FISSION_YIELD_FRACTION: f64[18] = {
+    0.0131862,  # A=85
+    0.0578194,  # A=90
+    0.0650287,  # A=95
+    0.0610873,  # A=99
+    0.0517255,  # A=101
+    0.0096416,  # A=105
+    0.000254432,  # A=110
+    0.000125831,  # A=115
+    0.000126081,  # A=120
+    0.0289069,  # A=131
+    0.0669909,  # A=133
+    0.0653899,  # A=135
+    0.0618851,  # A=137
+    0.0621969,  # A=140
+    0.0549957,  # A=144
+    0.0224673,  # A=147
+    0.00418767,  # A=151
+    0.000321357,  # A=155
+};
+
+# Returns thermal neutron fission yield distribution for Pu-239.
+#
+# Chain yields (the largest cumulative yield in each mass chain).
+#
+# Source: ENDF/B-VIII.0 neutron fission product yields (MT = 459), E = 0.0253 eV.
+const TM_PU239_FISSION_YIELD_COUNT = 13;
+
+# Column: mass number A.
+var TM_PU239_FISSION_YIELD_MASS_NUMBER: u8[13] = {
+    85,  # A=85
+    90,  # A=90
+    95,  # A=95
+    99,  # A=99
+    103,  # A=103
+    106,  # A=106
+    110,  # A=110
+    131,  # A=131
+    134,  # A=134
+    137,  # A=137
+    140,  # A=140
+    144,  # A=144
+    147,  # A=147
+};
+
+# Column: chain yield, per fission.
+var TM_PU239_FISSION_YIELD_FRACTION: f64[13] = {
+    0.00574061,  # A=85
+    0.0210427,  # A=90
+    0.0481845,  # A=95
+    0.0621172,  # A=99
+    0.0699481,  # A=103
+    0.0435016,  # A=106
+    0.00645124,  # A=110
+    0.0385639,  # A=131
+    0.0767612,  # A=134
+    0.0661376,  # A=137
+    0.0536472,  # A=140
+    0.0373974,  # A=144
+    0.0200296,  # A=147
+};
+
+# The two nucleosynthesis pathways, indexed by _TM_PATHWAY_*.
+const _TM_PATHWAY_S_PROCESS_MAIN = 0;
+const _TM_PATHWAY_R_PROCESS_MAIN = 1;
+
+# Column: offset of the name in _TM_REACTION_TEXT.
+var _TM_PATHWAY_NAME_OFFSET: u16[2] = {
+    218,  # s_process_main
+    243,  # r_process_main
+};
+
+# Column: the process (TmNucleosynthesisProcess).
+var _TM_PATHWAY_PROCESS: u8[2] = {
+    TM_NUCLEOSYNTHESIS_PROCESS_S_PROCESS,  # s_process_main
+    TM_NUCLEOSYNTHESIS_PROCESS_R_PROCESS,  # r_process_main
+};
+
+# Column: the seed's nucleus word.
+var _TM_PATHWAY_SEED: i64[2] = {
+    240518168602,  # s_process_main
+    240518168602,  # r_process_main
+};
+
+# Column: the first step in _TM_PATHWAY_STEP_*.
+var _TM_PATHWAY_STEP_START: u8[2] = {
+    0,  # s_process_main
+    7,  # r_process_main
+};
+
+# Column: the number of steps.
+var _TM_PATHWAY_STEP_COUNT: u8[2] = {
+    7,  # s_process_main
+    4,  # r_process_main
+};
+
+# Every step's nucleus word, in pathway order.
+var _TM_PATHWAY_STEP_NUCLEUS: i64[11] = {
+    244813135898,  # s_process_main: Fe-56(n,γ)Fe-57
+    249108103194,  # s_process_main: Fe-57(n,γ)Fe-58
+    253403070490,  # s_process_main: Fe-58(n,γ)Fe-59
+    253403070491,  # s_process_main: Fe-59→Co-59 (β⁻)
+    377957122086,  # s_process_main: ...→Sr-88 (1st peak, N=50)
+    592705486904,  # s_process_main: ...→Ba-138 (2nd peak, N=82)
+    893353197650,  # s_process_main: ...→Pb-208 (3rd peak, N=126)
+    343597383714,  # r_process_main: 1st peak: Se-80 (A≈80, from N=50 waiting point)
+    558345748532,  # r_process_main: 2nd peak: Te-130 (A≈130, from N=82 waiting point)
+    837518622798,  # r_process_main: 3rd peak: Pt-195 (A≈195, from N=126 waiting point)
+    1022202216540,  # r_process_main: Actinide production: U-238
+};
+
+# Every step's reaction text: its offset in _TM_REACTION_TEXT.
+var _TM_PATHWAY_STEP_REACTION_OFFSET: u16[11] = {
+    268,  # s_process_main: Fe-56(n,γ)Fe-57
+    285,  # s_process_main: Fe-57(n,γ)Fe-58
+    302,  # s_process_main: Fe-58(n,γ)Fe-59
+    319,  # s_process_main: Fe-59→Co-59 (β⁻)
+    341,  # s_process_main: ...→Sr-88 (1st peak, N=50)
+    370,  # s_process_main: ...→Ba-138 (2nd peak, N=82)
+    400,  # s_process_main: ...→Pb-208 (3rd peak, N=126)
+    431,  # r_process_main: 1st peak: Se-80 (A≈80, from N=50 waiting point)
+    481,  # r_process_main: 2nd peak: Te-130 (A≈130, from N=82 waiting point)
+    533,  # r_process_main: 3rd peak: Pt-195 (A≈195, from N=126 waiting point)
+    586,  # r_process_main: Actinide production: U-238
+};
+
+# Every name and step reaction above, NUL-terminated UTF-8, in the order of their offsets.
+var _TM_REACTION_TEXT: u8[613] = {
+    68, 45, 84, 32, 102, 117, 115, 105, 111, 110, 0,  # D-T fusion
+    68, 45, 68, 32, 102, 117, 115, 105, 111, 110, 32, 40,  # D-D fusion (He-3 branch)
+    72, 101, 45, 51, 32, 98, 114, 97, 110, 99, 104, 41,
+    0,
+    68, 45, 68, 32, 102, 117, 115, 105, 111, 110, 32, 40,  # D-D fusion (tritium branch)
+    116, 114, 105, 116, 105, 117, 109, 32, 98, 114, 97, 110,
+    99, 104, 41, 0,
+    112, 45, 112, 32, 99, 104, 97, 105, 110, 32, 40, 115,  # p-p chain (step 1): p + p -> D + e+ + nu_e
+    116, 101, 112, 32, 49, 41, 58, 32, 112, 32, 43, 32,
+    112, 32, 45, 62, 32, 68, 32, 43, 32, 101, 43, 32,
+    43, 32, 110, 117, 95, 101, 0,
+    85, 45, 50, 51, 53, 32, 102, 105, 115, 115, 105, 111,  # U-235 fission: n + U-235 -> Ba-141 + Kr-92 + 3n
+    110, 58, 32, 110, 32, 43, 32, 85, 45, 50, 51, 53,
+    32, 45, 62, 32, 66, 97, 45, 49, 52, 49, 32, 43,
+    32, 75, 114, 45, 57, 50, 32, 43, 32, 51, 110, 0,
+    67, 78, 79, 32, 99, 121, 99, 108, 101, 32, 40, 110,  # CNO cycle (net): 4p -> He-4 + 2e+ + 2nu_e
+    101, 116, 41, 58, 32, 52, 112, 32, 45, 62, 32, 72,
+    101, 45, 52, 32, 43, 32, 50, 101, 43, 32, 43, 32,
+    50, 110, 117, 95, 101, 0,
+    84, 114, 105, 112, 108, 101, 45, 97, 108, 112, 104, 97,  # Triple-alpha process
+    32, 112, 114, 111, 99, 101, 115, 115, 0,
+    115, 45, 112, 114, 111, 99, 101, 115, 115, 32, 109, 97,  # s-process main component
+    105, 110, 32, 99, 111, 109, 112, 111, 110, 101, 110, 116,
+    0,
+    114, 45, 112, 114, 111, 99, 101, 115, 115, 32, 109, 97,  # r-process main component
+    105, 110, 32, 99, 111, 109, 112, 111, 110, 101, 110, 116,
+    0,
+    70, 101, 45, 53, 54, 40, 110, 44, 206, 179, 41, 70,  # Fe-56(n,γ)Fe-57
+    101, 45, 53, 55, 0,
+    70, 101, 45, 53, 55, 40, 110, 44, 206, 179, 41, 70,  # Fe-57(n,γ)Fe-58
+    101, 45, 53, 56, 0,
+    70, 101, 45, 53, 56, 40, 110, 44, 206, 179, 41, 70,  # Fe-58(n,γ)Fe-59
+    101, 45, 53, 57, 0,
+    70, 101, 45, 53, 57, 226, 134, 146, 67, 111, 45, 53,  # Fe-59→Co-59 (β⁻)
+    57, 32, 40, 206, 178, 226, 129, 187, 41, 0,
+    46, 46, 46, 226, 134, 146, 83, 114, 45, 56, 56, 32,  # ...→Sr-88 (1st peak, N=50)
+    40, 49, 115, 116, 32, 112, 101, 97, 107, 44, 32, 78,
+    61, 53, 48, 41, 0,
+    46, 46, 46, 226, 134, 146, 66, 97, 45, 49, 51, 56,  # ...→Ba-138 (2nd peak, N=82)
+    32, 40, 50, 110, 100, 32, 112, 101, 97, 107, 44, 32,
+    78, 61, 56, 50, 41, 0,
+    46, 46, 46, 226, 134, 146, 80, 98, 45, 50, 48, 56,  # ...→Pb-208 (3rd peak, N=126)
+    32, 40, 51, 114, 100, 32, 112, 101, 97, 107, 44, 32,
+    78, 61, 49, 50, 54, 41, 0,
+    49, 115, 116, 32, 112, 101, 97, 107, 58, 32, 83, 101,  # 1st peak: Se-80 (A≈80, from N=50 waiting point)
+    45, 56, 48, 32, 40, 65, 226, 137, 136, 56, 48, 44,
+    32, 102, 114, 111, 109, 32, 78, 61, 53, 48, 32, 119,
+    97, 105, 116, 105, 110, 103, 32, 112, 111, 105, 110, 116,
+    41, 0,
+    50, 110, 100, 32, 112, 101, 97, 107, 58, 32, 84, 101,  # 2nd peak: Te-130 (A≈130, from N=82 waiting point)
+    45, 49, 51, 48, 32, 40, 65, 226, 137, 136, 49, 51,
+    48, 44, 32, 102, 114, 111, 109, 32, 78, 61, 56, 50,
+    32, 119, 97, 105, 116, 105, 110, 103, 32, 112, 111, 105,
+    110, 116, 41, 0,
+    51, 114, 100, 32, 112, 101, 97, 107, 58, 32, 80, 116,  # 3rd peak: Pt-195 (A≈195, from N=126 waiting point)
+    45, 49, 57, 53, 32, 40, 65, 226, 137, 136, 49, 57,
+    53, 44, 32, 102, 114, 111, 109, 32, 78, 61, 49, 50,
+    54, 32, 119, 97, 105, 116, 105, 110, 103, 32, 112, 111,
+    105, 110, 116, 41, 0,
+    65, 99, 116, 105, 110, 105, 100, 101, 32, 112, 114, 111,  # Actinide production: U-238
+    100, 117, 99, 116, 105, 111, 110, 58, 32, 85, 45, 50,
+    51, 56, 0,
+};
+
+# Apéry's constant ζ(3).
+const _TM_ZETA3 = 1.2020569031595942;
+
+# --- reaction.cyr ---
+
+# reaction.cyr — nuclear reactions: Q-values, the Coulomb barrier, cross sections, the preset
+# reactions, nucleosynthesis pathways, neutron moderation and fission yields (port of
+# rust-old/src/reaction.rs).
+#
+# - The tables are the generated reaction_data.cyr (ENDF/B-VIII.0, AME2020), read through
+#   indexed accessors. Rust's Vec-returning functions are a count plus an accessor.
+# - `struct TmNuclearReaction` mirrors Rust's public fields. Its products and leptons are the
+#   address of a word array and a count (`r.product(k)`, `r.lepton(k)`), so a caller can build
+#   one, and the projectile is a nucleus word or 0 for Rust's None (no nucleus word is 0).
+# - Rust's operation order is kept, parenthesized. ln is `_tm_log`, Rust libm's log bit for
+#   bit (numerics.cyr), so the moderation functions are class B. Integer arguments outside
+#   Rust's u32 give NaN.
+
+# ── reactions ───────────────────────────────────────────────────────────────────────
+
+# A nuclear reaction, reactants → products + Q. Free neutrons are counts, and the exit
+# leptons a TmLepton array (a positron is TM_LEPTON_ELECTRON, with the reaction noted in the
+# name). Mirrors `NuclearReaction`.
+struct TmNuclearReaction {
+    name;            # C string
+    projectile;      # nucleus word, or 0 for none (a neutron-induced reaction)
+    target;          # nucleus word
+    products;        # address of product_count nucleus words
+    product_count;
+    neutrons_in;
+    neutrons_out;
+    leptons_out;     # address of lepton_count TmLepton values
+    lepton_count;
+    q_value_mev: f64;
+}
+
+impl TmNuclearReaction {
+    # Product nucleus k, a nucleus word; k must be below product_count.
+    #must_use
+    fn product(self, k): i64 { return load64(self.products + k * 8); }
+
+    # Exit-channel lepton k, a TmLepton; k must be below lepton_count.
+    #must_use
+    fn lepton(self, k): i64 { return load64(self.leptons_out + k * 8); }
+
+    # The net change in the nuclei's charge, products − reactants, in e: for a balanced
+    # reaction, minus the leptons' charge (−2 for 4p → ⁴He + 2e⁺ + 2ν). Mirrors
+    # `NuclearReaction::nuclear_charge_change`.
+    #must_use
+    fn nuclear_charge_change(self): i64 {
+        var reactants = nucleus_z(self.target);
+        if (self.projectile != 0) { reactants = reactants + nucleus_z(self.projectile); }
+        var products = 0;
+        var k = 0;
+        while (k < self.product_count) {
+            products = products + nucleus_z(load64(self.products + k * 8));
+            k = k + 1;
+        }
+        return products - reactants;
+    }
+
+    # The net change in baryon number, products − reactants, counting free neutrons: zero for
+    # every physical reaction. Mirrors `NuclearReaction::baryon_number_change`.
+    #must_use
+    fn baryon_number_change(self): i64 {
+        var reactants = nucleus_a(self.target);
+        if (self.projectile != 0) { reactants = reactants + nucleus_a(self.projectile); }
+        reactants = reactants + self.neutrons_in;
+        var products = 0;
+        var k = 0;
+        while (k < self.product_count) {
+            products = products + nucleus_a(load64(self.products + k * 8));
+            k = k + 1;
+        }
+        products = products + self.neutrons_out;
+        return products - reactants;
+    }
+}
+
+# Rust folds an f64 sum from −0.0 (core's `Sum for f64`), so an empty or all −0 sum is −0.0.
+#must_use
+fn _tm_sum(p, n): f64 {
+    var s: f64 = -0.0;
+    var k = 0;
+    while (k < n) {
+        var x: f64 = load64(p + k * 8);
+        s = s + x;
+        k = k + 1;
+    }
+    return s;
+}
+
+# Q = Σ reactant masses − Σ product masses, MeV, for `rn` and `pn` f64 masses (MeV/c²) at the
+# two addresses; positive Q releases energy. Mirrors `q_value`, which takes two slices.
+#must_use
+fn q_value(reactant_masses, rn, product_masses, pn): f64 {
+    var sr: f64 = _tm_sum(reactant_masses, rn);
+    var sp: f64 = _tm_sum(product_masses, pn);
+    var q: f64 = sr - sp;
+    return q;
+}
+
+# The Coulomb barrier V = k_e Z₁Z₂e²/(R₁ + R₂), MeV, with R = r₀ A^(1/3) and k_e e² = 1.44 MeV fm.
+# Err(TM_ERR_INVALID_REACTION) when the radii sum to zero. Mirrors `coulomb_barrier`.
+#must_use
+fn coulomb_barrier(n1, n2): Result {
+    var r1: f64 = nucleus_nuclear_radius(n1);
+    var r2: f64 = nucleus_nuclear_radius(n2);
+    var r_sum: f64 = r1 + r2;
+    if (r_sum <= 0.0) { return Err(TM_ERR_INVALID_REACTION); }
+    var z1: f64 = f64_from(nucleus_z(n1));
+    var z2: f64 = f64_from(nucleus_z(n2));
+    var v: f64 = ((TM_COULOMB_MEV_FM * z1) * z2) / r_sum;
+    return Ok(v);
+}
+
+# ── cross sections ──────────────────────────────────────────────────────────────────
+
+# The geometric cross section πR², barns (1 b = 100 fm²), R = r₀ A^(1/3). Mirrors
+# `geometric_cross_section_barns`.
+#must_use
+fn geometric_cross_section_barns(nucleus): f64 {
+    var r: f64 = nucleus_nuclear_radius(nucleus);
+    var s: f64 = ((_TM_PI * r) * r) / 100.0;
+    return s;
+}
+
+# The single-level Breit–Wigner cross section, barns:
+# σ(E) = π ƛ² g Γ_i Γ_f / ((E − E_r)² + (Γ/2)²), ƛ² = (ħc)²/(2μc² E), with E the centre-of-mass
+# energy, E_r the resonance, Γ the total and Γ_i, Γ_f the partial widths (MeV), g the spin factor
+# and μ the reduced mass (MeV/c²). 0.0 for E ≤ 0, μ ≤ 0 or a non-positive denominator. Mirrors
+# `breit_wigner_cross_section`.
+#must_use
+fn breit_wigner_cross_section(energy_mev: f64, resonance_energy_mev: f64, total_width_mev: f64, partial_in_mev: f64,
+    partial_out_mev: f64, g_factor: f64, reduced_mass_mev: f64): f64 {
+    if (energy_mev <= 0.0 || reduced_mass_mev <= 0.0) { return 0.0; }
+    var lambda_bar_sq: f64 = (TM_HBAR_C_MEV_FM * TM_HBAR_C_MEV_FM) / ((2.0 * reduced_mass_mev) * energy_mev);
+    var de: f64 = energy_mev - resonance_energy_mev;
+    var half_width: f64 = total_width_mev / 2.0;
+    var denominator: f64 = (de * de) + (half_width * half_width);
+    if (denominator <= 0.0) { return 0.0; }
+    var s: f64 = ((((_TM_PI * lambda_bar_sq) * g_factor) * partial_in_mev) * partial_out_mev) / denominator;
+    var b: f64 = s / 100.0;
+    return b;
+}
+
+# Thermal (0.0253 eV) neutron cross sections of a target, barns (ENDF/B-VIII.0, 0 K). Mirrors
+# `ThermalCrossSection`.
+struct TmThermalCrossSection {
+    target;                   # nucleus word
+    absorption_barns: f64;    # capture + fission + (n,α) + (n,p)
+    fission_barns: f64;
+    scattering_barns: f64;    # free-atom elastic
+}
+
+# How many thermal cross sections are tabulated (8). With thermal_neutron_cross_section(k)
+# this mirrors the Vec `thermal_neutron_cross_sections` returns.
+#must_use
+fn thermal_neutron_cross_section_count(): i64 { return TM_THERMAL_XS_COUNT; }
+
+# Tabulated thermal cross section k (U-235, U-238, Pu-239, B-10, Cd-113, H-1, C-12, Fe-56), by
+# value; all fields 0 when k is out of range.
+#must_use
+fn thermal_neutron_cross_section(k): TmThermalCrossSection {
+    var x: TmThermalCrossSection;
+    x.target = 0;
+    x.absorption_barns = 0.0;
+    x.fission_barns = 0.0;
+    x.scattering_barns = 0.0;
+    if (k >= 0 && k < TM_THERMAL_XS_COUNT) {
+        x.target = _tm_nuc(TM_THERMAL_XS_Z[k], TM_THERMAL_XS_A[k]);
+        x.absorption_barns = TM_THERMAL_XS_ABSORPTION_BARNS[k];
+        x.fission_barns = TM_THERMAL_XS_FISSION_BARNS[k];
+        x.scattering_barns = TM_THERMAL_XS_SCATTERING_BARNS[k];
+    }
+    return x;
+}
+
+# The resonance-integral row of (Z, A), or −1.
+#must_use
+fn _tm_resonance_row(z, a): i64 {
+    var k = 0;
+    while (k < _TM_RESONANCE_INTEGRAL_COUNT) {
+        if (_TM_RESONANCE_INTEGRAL_Z[k] == z && _TM_RESONANCE_INTEGRAL_A[k] == a) { return k; }
+        k = k + 1;
+    }
+    return 0 - 1;
+}
+
+# The epithermal capture resonance integral I_γ = ∫ σ_γ(E)/E dE over 0.5 eV – 20 MeV, barns
+# (ENDF/B-VIII.0): Some(f64), or None when the nuclide isn't tabulated. Mirrors
+# `resonance_integral_barns`.
+#must_use
+fn resonance_integral_barns(z, a): Option {
+    var k = _tm_resonance_row(z, a);
+    if (k < 0) { return None(); }
+    var v: f64 = _TM_RESONANCE_INTEGRAL_CAPTURE[k];
+    return Some(v);
+}
+
+# The fission resonance integral I_f, barns: Some(f64), or None. Mirrors
+# `fission_resonance_integral_barns`.
+#must_use
+fn fission_resonance_integral_barns(z, a): Option {
+    var k = _tm_resonance_row(z, a);
+    if (k < 0) { return None(); }
+    var v: f64 = _TM_RESONANCE_INTEGRAL_FISSION[k];
+    return Some(v);
+}
+
+# The (n,α) resonance integral I_α, barns: Some(f64), or None. Mirrors
+# `n_alpha_resonance_integral_barns`.
+#must_use
+fn n_alpha_resonance_integral_barns(z, a): Option {
+    var k = _tm_resonance_row(z, a);
+    if (k < 0) { return None(); }
+    var v: f64 = _TM_RESONANCE_INTEGRAL_N_ALPHA[k];
+    return Some(v);
+}
+
+# ── preset reactions (Q from AME2020 atomic masses) ─────────────────────────────────
+
+# Preset reaction k, from the generated tables.
+#must_use
+fn _tm_preset(k): TmNuclearReaction {
+    var r: TmNuclearReaction;
+    r.name = &_TM_REACTION_TEXT + _TM_PRESET_NAME_OFFSET[k];
+    r.projectile = _TM_PRESET_PROJECTILE[k];
+    r.target = _TM_PRESET_TARGET[k];
+    r.products = &_TM_REACTION_PRODUCTS + _TM_PRESET_PRODUCT_START[k] * 8;
+    r.product_count = _TM_PRESET_PRODUCT_COUNT[k];
+    r.neutrons_in = _TM_PRESET_NEUTRONS_IN[k];
+    r.neutrons_out = _TM_PRESET_NEUTRONS_OUT[k];
+    r.leptons_out = &_TM_REACTION_LEPTONS + _TM_PRESET_LEPTON_START[k] * 8;
+    r.lepton_count = _TM_PRESET_LEPTON_COUNT[k];
+    r.q_value_mev = _TM_PRESET_Q_VALUE_MEV[k];
+    return r;
+}
+
+# D + T → ⁴He + n, Q = 17.5893 MeV: the most favourable fusion reaction for energy production.
+# Mirrors `dt_fusion`.
+#must_use
+fn dt_fusion(): TmNuclearReaction { return _tm_preset(_TM_PRESET_DT_FUSION); }
+
+# D + D → ³He + n, Q = 3.2689 MeV. Mirrors `dd_fusion_he3`.
+#must_use
+fn dd_fusion_he3(): TmNuclearReaction { return _tm_preset(_TM_PRESET_DD_FUSION_HE3); }
+
+# D + D → T + p, Q = 4.0327 MeV. Mirrors `dd_fusion_t`.
+#must_use
+fn dd_fusion_t(): TmNuclearReaction { return _tm_preset(_TM_PRESET_DD_FUSION_T); }
+
+# p + p → D + e⁺ + ν_e, Q = 0.4202 MeV, shared by the positron and the neutrino (excluding the
+# later 1.022 MeV annihilation): the Sun's dominant energy source. Mirrors `pp_chain_step1`.
+#must_use
+fn pp_chain_step1(): TmNuclearReaction { return _tm_preset(_TM_PRESET_PP_CHAIN_STEP1); }
+
+# n + ²³⁵U → ¹⁴¹Ba + ⁹²Kr + 3n, Q = 173.28 MeV, the prompt Q of this one channel (the usual
+# ~200 MeV averages all channels and the fragments' β decays). Mirrors `u235_fission`.
+#must_use
+fn u235_fission(): TmNuclearReaction { return _tm_preset(_TM_PRESET_U235_FISSION); }
+
+# The CNO cycle, net 4p → ⁴He + 2e⁺ + 2ν_e, Q = 26.731 MeV including both annihilations;
+# TM_CNO_NEUTRINO_LOSS_MEV of it leaves with the neutrinos. ¹²C is the catalyst. Mirrors
+# `cno_cycle`.
+#must_use
+fn cno_cycle(): TmNuclearReaction { return _tm_preset(_TM_PRESET_CNO_CYCLE); }
+
+# 3 ⁴He → ¹²C, Q = 7.2747 MeV: how stars make carbon. Mirrors `triple_alpha`.
+#must_use
+fn triple_alpha(): TmNuclearReaction { return _tm_preset(_TM_PRESET_TRIPLE_ALPHA); }
+
+# ── nucleosynthesis pathways ────────────────────────────────────────────────────────
+
+# A step of a nucleosynthesis pathway: the nucleus made and the reaction that made it.
+# Mirrors `NucleosynthesisStep`.
+struct TmNucleosynthesisStep {
+    nucleus;     # nucleus word
+    reaction;    # C string (UTF-8)
+}
+
+# A nucleosynthesis pathway: a named sequence of reactions from a seed. Its steps are read
+# with `p.step(k)`, k below step_count, from the generated table at first_step. Mirrors
+# `NucleosynthesisPathway`.
+struct TmNucleosynthesisPathway {
+    name;        # C string
+    process;     # TmNucleosynthesisProcess
+    seed;        # nucleus word
+    step_count;
+    first_step;  # the index of step 0 in the generated step table
+}
+
+impl TmNucleosynthesisPathway {
+    # Step k, by value; k must be below step_count.
+    #must_use
+    fn step(self, k): TmNucleosynthesisStep {
+        var s: TmNucleosynthesisStep;
+        var at = self.first_step + k;
+        s.nucleus = _TM_PATHWAY_STEP_NUCLEUS[at];
+        s.reaction = &_TM_REACTION_TEXT + _TM_PATHWAY_STEP_REACTION_OFFSET[at];
+        return s;
+    }
+}
+
+# Pathway k, from the generated tables.
+#must_use
+fn _tm_pathway(k): TmNucleosynthesisPathway {
+    var p: TmNucleosynthesisPathway;
+    p.name = &_TM_REACTION_TEXT + _TM_PATHWAY_NAME_OFFSET[k];
+    p.process = _TM_PATHWAY_PROCESS[k];
+    p.seed = _TM_PATHWAY_SEED[k];
+    p.step_count = _TM_PATHWAY_STEP_COUNT[k];
+    p.first_step = _TM_PATHWAY_STEP_START[k];
+    return p;
+}
+
+# The main s-process (slow neutron capture, in AGB stars) from ⁵⁶Fe, a simplified main
+# component through the abundance peaks at ⁸⁸Sr, ¹³⁸Ba and ²⁰⁸Pb (B²FH 1957; Käppeler et al.,
+# Rev. Mod. Phys. 83, 157 (2011)). Mirrors `s_process_main`.
+#must_use
+fn s_process_main(): TmNucleosynthesisPathway { return _tm_pathway(_TM_PATHWAY_S_PROCESS_MAIN); }
+
+# The main r-process (rapid neutron capture, in neutron-star mergers and core-collapse
+# supernovae): its peaks at A ≈ 80, 130 and 195, from the N = 50, 82, 126 waiting points, and
+# the actinides (Cowan et al., Rev. Mod. Phys. 93, 015002 (2021)). Mirrors `r_process_main`.
+#must_use
+fn r_process_main(): TmNucleosynthesisPathway { return _tm_pathway(_TM_PATHWAY_R_PROCESS_MAIN); }
+
+# ── neutron moderation ──────────────────────────────────────────────────────────────
+
+# The largest fractional energy loss of a neutron in one elastic collision with mass number A:
+# 1 − α, α = ((A − 1)/(A + 1))². Mirrors `max_energy_loss_fraction`.
+#must_use
+fn max_energy_loss_fraction(target_a): f64 {
+    if (_tm_u32_ok(target_a) != 1) { return _tm_nan(); }
+    var a: f64 = f64_from(target_a);
+    var alpha: f64 = ((a - 1.0) / (a + 1.0)) * ((a - 1.0) / (a + 1.0));
+    var r: f64 = 1.0 - alpha;
+    return r;
+}
+
+# The mean lethargy gain per collision, ξ = 1 + ((A − 1)²/(2A)) ln((A − 1)/(A + 1)); exactly 1
+# for A ≤ 1 (hydrogen). Mirrors `average_lethargy_gain`.
+#must_use
+fn average_lethargy_gain(target_a): f64 {
+    if (_tm_u32_ok(target_a) != 1) { return _tm_nan(); }
+    if (target_a <= 1) { return 1.0; }
+    var a: f64 = f64_from(target_a);
+    var am1: f64 = a - 1.0;
+    var ap1: f64 = a + 1.0;
+    var lg: f64 = _tm_log(am1 / ap1);
+    var xi: f64 = 1.0 + (((am1 * am1) / (2.0 * a)) * lg);
+    return xi;
+}
+
+# The mean number of collisions to slow a neutron from e_initial_ev to e_final_ev,
+# ln(E_i/E_f)/ξ (2 MeV → 0.0253 eV is the usual span). 0.0 when ξ, E_i or E_f is not positive.
+# Mirrors `collisions_to_thermalize`.
+#must_use
+fn collisions_to_thermalize(target_a, e_initial_ev: f64, e_final_ev: f64): f64 {
+    var xi: f64 = average_lethargy_gain(target_a);
+    if (xi <= 0.0 || e_initial_ev <= 0.0 || e_final_ev <= 0.0) { return 0.0; }
+    var lg: f64 = _tm_log(e_initial_ev / e_final_ev);
+    var n: f64 = lg / xi;
+    return n;
+}
+
+# The moderating ratio ξ Σ_s / Σ_a from caller-supplied macroscopic cross sections (cm⁻¹); +∞
+# when Σ_a ≤ 0. Mirrors `moderating_ratio`.
+#must_use
+fn moderating_ratio(lethargy_gain: f64, scatter_xs: f64, absorb_xs: f64): f64 {
+    if (absorb_xs <= 0.0) { return _TM_INF; }
+    var r: f64 = (lethargy_gain * scatter_xs) / absorb_xs;
+    return r;
+}
+
+# ── fission yields ──────────────────────────────────────────────────────────────────
+
+# A chain fission yield: mass number A and the yield per fission. Mirrors `FissionYield`.
+struct TmFissionYield {
+    mass_number;
+    yield_fraction: f64;
+}
+
+# How many U-235 thermal chain yields are tabulated. With u235_fission_yield(k) this mirrors the
+# Vec `u235_fission_yields` returns (ENDF/B-VIII.0, MT = 459, 0.0253 eV).
+#must_use
+fn u235_fission_yield_count(): i64 { return TM_U235_FISSION_YIELD_COUNT; }
+
+# U-235 chain yield k, by value; both fields 0 when k is out of range.
+#must_use
+fn u235_fission_yield(k): TmFissionYield {
+    var y: TmFissionYield;
+    y.mass_number = 0;
+    y.yield_fraction = 0.0;
+    if (k >= 0 && k < TM_U235_FISSION_YIELD_COUNT) {
+        y.mass_number = TM_U235_FISSION_YIELD_MASS_NUMBER[k];
+        y.yield_fraction = TM_U235_FISSION_YIELD_FRACTION[k];
+    }
+    return y;
+}
+
+# How many Pu-239 thermal chain yields are tabulated. With pu239_fission_yield(k) this mirrors
+# the Vec `pu239_fission_yields` returns.
+#must_use
+fn pu239_fission_yield_count(): i64 { return TM_PU239_FISSION_YIELD_COUNT; }
+
+# Pu-239 chain yield k, by value; both fields 0 when k is out of range.
+#must_use
+fn pu239_fission_yield(k): TmFissionYield {
+    var y: TmFissionYield;
+    y.mass_number = 0;
+    y.yield_fraction = 0.0;
+    if (k >= 0 && k < TM_PU239_FISSION_YIELD_COUNT) {
+        y.mass_number = TM_PU239_FISSION_YIELD_MASS_NUMBER[k];
+        y.yield_fraction = TM_PU239_FISSION_YIELD_FRACTION[k];
+    }
+    return y;
+}
+
+# --- scattering.cyr ---
+
+# scattering.cyr — scattering theory: Rutherford and Mott, partial waves, Born for a screened
+# Coulomb potential, electron scattering with a nuclear form factor, Compton (Klein–Nishina)
+# and Bethe–Heitler pair production (port of rust-old/src/scattering.rs).
+#
+# Rust's operation order is kept, parenthesized. sin, cos and ln are `_tm_sin`, `_tm_cos` and
+# `_tm_log`, Rust libm's own algorithms bit for bit (numerics.cyr). The port-parity rule needs
+# that here: the Mott factor at β → 1, the form factor near its zeros and Klein–Nishina's closed
+# form just above γ = 1e-2 turn a 1-ulp primitive difference into thousands of ulp. So every
+# function but rutherford_total_above_angle (ganita's tan, class C) is class B. Phase-shift
+# slices are an address and a count. Integer arguments outside Rust's u32 give NaN.
+
+# ── Coulomb scattering ──────────────────────────────────────────────────────────────
+
+# Z₁Z₂αħc as Rust computes it: ((Z₁·Z₂)·α)·ħc.
+#must_use
+fn _tm_z1z2_alpha_hbarc(z_proj, z_target): f64 {
+    var a: f64 = ((f64_from(z_proj) * f64_from(z_target)) * TM_FINE_STRUCTURE) * TM_HBAR_C_MEV_FM;
+    return a;
+}
+
+# The Rutherford cross section dσ/dΩ = (Z₁Z₂αħc/(4T))² / sin⁴(θ/2), fm²/sr, for a point charge
+# on a point nucleus at centre-of-mass kinetic energy T (MeV). 0.0 for T ≤ 0; +∞ when
+# sin⁴(θ/2) < 1e-30 (the forward divergence). Mirrors `rutherford_differential`.
+#must_use
+fn rutherford_differential(z_proj, z_target, energy_cm_mev: f64, theta_rad: f64): f64 {
+    if (_tm_u32_ok(z_proj) != 1 || _tm_u32_ok(z_target) != 1) { return _tm_nan(); }
+    if (energy_cm_mev <= 0.0) { return 0.0; }
+    var sin_half: f64 = _tm_sin(theta_rad / 2.0);
+    var sin4: f64 = ((sin_half * sin_half) * sin_half) * sin_half;
+    if (sin4 < 0.000000000000000000000000000001) { return _TM_INF; }
+    var k: f64 = _tm_z1z2_alpha_hbarc(z_proj, z_target);
+    var a: f64 = k / (4.0 * energy_cm_mev);
+    var s: f64 = (a * a) / sin4;
+    return s;
+}
+
+# The Mott spin factor 1 − β² sin²(θ/2) for a relativistic spin-½ projectile on a spinless,
+# infinitely heavy point charge (the projectile's magnetic moment, not identical-particle
+# exchange): multiply the Rutherford result by it. Mirrors `mott_correction_factor`.
+#must_use
+fn mott_correction_factor(beta: f64, theta_rad: f64): f64 {
+    var sin_half: f64 = _tm_sin(theta_rad / 2.0);
+    var f: f64 = 1.0 - (((beta * beta) * sin_half) * sin_half);
+    return f;
+}
+
+# The Rutherford cross section beyond θ_min, π b² = π (Z₁Z₂e²/(2T))² cot²(θ_min/2), fm². +∞ for
+# T ≤ 0, θ_min ≤ 0 or tan²(θ_min/2) < 1e-30. Mirrors `rutherford_total_above_angle`.
+#must_use
+fn rutherford_total_above_angle(z_proj, z_target, energy_cm_mev: f64, theta_min_rad: f64): f64 {
+    if (_tm_u32_ok(z_proj) != 1 || _tm_u32_ok(z_target) != 1) { return _tm_nan(); }
+    if (energy_cm_mev <= 0.0 || theta_min_rad <= 0.0) { return _TM_INF; }
+    var k: f64 = _tm_z1z2_alpha_hbarc(z_proj, z_target);
+    var a: f64 = k / (4.0 * energy_cm_mev);
+    var tan_half: f64 = ganita_f64_tan(theta_min_rad / 2.0);
+    var tan2: f64 = tan_half * tan_half;
+    if (tan2 < 0.000000000000000000000000000001) { return _TM_INF; }
+    var s: f64 = (((4.0 * _TM_PI) * a) * a) / tan2;
+    return s;
+}
+
+# The head-on (θ = π) distance of closest approach d = Z₁Z₂αħc/T, fm: 5 MeV α on Au is ≈ 45.5 fm.
+# +∞ for T ≤ 0. Mirrors `distance_of_closest_approach`.
+#must_use
+fn distance_of_closest_approach(z_proj, z_target, energy_cm_mev: f64): f64 {
+    if (_tm_u32_ok(z_proj) != 1 || _tm_u32_ok(z_target) != 1) { return _tm_nan(); }
+    if (energy_cm_mev <= 0.0) { return _TM_INF; }
+    var k: f64 = _tm_z1z2_alpha_hbarc(z_proj, z_target);
+    var d: f64 = k / energy_cm_mev;
+    return d;
+}
+
+# The Sommerfeld parameter η = Z₁Z₂α/β; η ≫ 1 is the classical (Rutherford) regime. +∞ for
+# β ≤ 0. Mirrors `sommerfeld_parameter`.
+#must_use
+fn sommerfeld_parameter(z_proj, z_target, beta: f64): f64 {
+    if (_tm_u32_ok(z_proj) != 1 || _tm_u32_ok(z_target) != 1) { return _tm_nan(); }
+    if (beta <= 0.0) { return _TM_INF; }
+    var eta: f64 = ((f64_from(z_proj) * f64_from(z_target)) * TM_FINE_STRUCTURE) / beta;
+    return eta;
+}
+
+# ── partial waves ───────────────────────────────────────────────────────────────────
+
+# The Legendre polynomial P_l(x) by the recurrence (l + 1) P_{l+1} = (2l + 1) x P_l − l P_{l−1};
+# x should be in [−1, 1]. Mirrors `legendre_polynomial`.
+#must_use
+fn legendre_polynomial(l, x: f64): f64 {
+    if (_tm_u32_ok(l) != 1) { return _tm_nan(); }
+    if (l == 0) { return 1.0; }
+    if (l == 1) { return x; }
+    var p_prev: f64 = 1.0;
+    var p_curr: f64 = x;
+    var n = 1;
+    while (n < l) {
+        var nf: f64 = f64_from(n);
+        var p_next: f64 = (((((2.0 * nf) + 1.0) * x) * p_curr) - (nf * p_prev)) / (nf + 1.0);
+        p_prev = p_curr;
+        p_curr = p_next;
+        n = n + 1;
+    }
+    return p_curr;
+}
+
+# The total cross section from phase shifts, σ = (4π/k²) Σ_l (2l + 1) sin² δ_l, fm², for the
+# `count` shifts δ_l (rad) at `phase_shifts`; k in fm⁻¹. 0.0 for k ≤ 0. Mirrors
+# `partial_wave_cross_section`, which takes a slice.
+#must_use
+fn partial_wave_cross_section(k_inv_fm: f64, phase_shifts, count): f64 {
+    if (k_inv_fm <= 0.0) { return 0.0; }
+    var k2: f64 = k_inv_fm * k_inv_fm;
+    var sum: f64 = 0.0;
+    var l = 0;
+    while (l < count) {
+        var delta: f64 = load64(phase_shifts + l * 8);
+        var sin_d: f64 = _tm_sin(delta);
+        sum = sum + ((((2.0 * f64_from(l)) + 1.0) * sin_d) * sin_d);
+        l = l + 1;
+    }
+    var s: f64 = ((4.0 * _TM_PI) * sum) / k2;
+    return s;
+}
+
+# The differential cross section |f(θ)|², fm²/sr, with f(θ) = (1/k) Σ_l (2l + 1) e^{iδ_l} sin δ_l
+# P_l(cos θ), for the `count` shifts at `phase_shifts`. 0.0 for k ≤ 0. Mirrors
+# `partial_wave_differential`, which takes a slice.
+#must_use
+fn partial_wave_differential(k_inv_fm: f64, phase_shifts, count, theta_rad: f64): f64 {
+    if (k_inv_fm <= 0.0) { return 0.0; }
+    var cos_theta: f64 = _tm_cos(theta_rad);
+    var re_f: f64 = 0.0;
+    var im_f: f64 = 0.0;
+    var l = 0;
+    while (l < count) {
+        var delta: f64 = load64(phase_shifts + l * 8);
+        var sin_d: f64 = _tm_sin(delta);
+        var cos_d: f64 = _tm_cos(delta);
+        var pl: f64 = legendre_polynomial(l, cos_theta);
+        var weight: f64 = ((2.0 * f64_from(l)) + 1.0) * pl;
+        re_f = re_f + ((weight * sin_d) * cos_d);
+        im_f = im_f + ((weight * sin_d) * sin_d);
+        l = l + 1;
+    }
+    var s: f64 = ((re_f * re_f) + (im_f * im_f)) / (k_inv_fm * k_inv_fm);
+    return s;
+}
+
+# ── Born approximation for a screened Coulomb potential ─────────────────────────────
+
+# The Thomas–Fermi screening length a_TF = 0.88534 a₀ / Z^(1/3), fm (Ziegler, Biersack &
+# Littmark 1985); 0.0 for Z = 0. Mirrors `thomas_fermi_screening_fm`.
+#must_use
+fn thomas_fermi_screening_fm(z): f64 {
+    if (_tm_u32_ok(z) != 1) { return _tm_nan(); }
+    if (z == 0) { return 0.0; }
+    var a0_fm: f64 = TM_BOHR_RADIUS * 1000000000000000.0;
+    var c: f64 = ganita_f64_cbrt(f64_from(z));
+    var a: f64 = (0.88534 * a0_fm) / c;
+    return a;
+}
+
+# The first-Born cross section for a screened Coulomb (Yukawa) potential V = (Z₁Z₂αħc/r) e^{−r/a},
+# fm²/sr, non-relativistic: dσ/dΩ = [2μ Z₁Z₂α/(ħc (q² + 1/a²))]², ħ²k² = 2μT, q = 2k sin(θ/2); the
+# rest masses (MeV/c²) give μ. 0.0 for T, a or a mass ≤ 0; +∞ when q² + 1/a² < 1e-30. Mirrors
+# `born_screened_coulomb_with_masses`.
+#must_use
+fn born_screened_coulomb_with_masses(z_proj, z_target, mass_proj_mev: f64, mass_target_mev: f64, energy_cm_mev: f64,
+    theta_rad: f64, screening_fm: f64): f64 {
+    if (_tm_u32_ok(z_proj) != 1 || _tm_u32_ok(z_target) != 1) { return _tm_nan(); }
+    if (energy_cm_mev <= 0.0 || screening_fm <= 0.0 || mass_proj_mev <= 0.0 || mass_target_mev <= 0.0) { return 0.0; }
+    var mu: f64 = (mass_proj_mev * mass_target_mev) / (mass_proj_mev + mass_target_mev);
+    var sin_half: f64 = _tm_sin(theta_rad / 2.0);
+    var k2: f64 = ((2.0 * mu) * energy_cm_mev) / (TM_HBAR_C_MEV_FM * TM_HBAR_C_MEV_FM);
+    var q2: f64 = ((4.0 * k2) * sin_half) * sin_half;
+    var denom: f64 = q2 + (1.0 / (screening_fm * screening_fm));
+    if (denom < 0.000000000000000000000000000001) { return _TM_INF; }
+    var numer: f64 = ((((2.0 * mu) * f64_from(z_proj)) * f64_from(z_target)) * TM_FINE_STRUCTURE) / TM_HBAR_C_MEV_FM;
+    var s: f64 = (numer * numer) / (denom * denom);
+    return s;
+}
+
+# A rest mass estimated from Z: m_p for Z ≤ 1, else 2Z u (rough for heavy nuclei).
+#must_use
+fn _tm_mass_from_z(z): f64 {
+    if (z <= 1) { return TM_PROTON_MASS_MEV; }
+    var m: f64 = (f64_from(z) * 2.0) * TM_AMU_MEV;
+    return m;
+}
+
+# born_screened_coulomb_with_masses with the masses estimated from Z (m_p for Z = 1, 2Z u
+# otherwise; Au is then A ≈ 158, not 197). Mirrors `born_screened_coulomb`.
+#must_use
+fn born_screened_coulomb(z_proj, z_target, energy_cm_mev: f64, theta_rad: f64, screening_fm: f64): f64 {
+    if (_tm_u32_ok(z_proj) != 1 || _tm_u32_ok(z_target) != 1) { return _tm_nan(); }
+    var m1: f64 = _tm_mass_from_z(z_proj);
+    var m2: f64 = _tm_mass_from_z(z_target);
+    var s: f64 = born_screened_coulomb_with_masses(z_proj, z_target, m1, m2, energy_cm_mev, theta_rad, screening_fm);
+    return s;
+}
+
+# ── electron scattering ─────────────────────────────────────────────────────────────
+
+# The Mott cross section for electrons of kinetic energy T (MeV) on a spinless, infinitely
+# heavy point nucleus, fm²/sr: (Zαħc/(2pcβ))² (1 − β² sin²(θ/2)) / sin⁴(θ/2), with pc and β
+# exact from T (first Born, Zα ≪ 1, no recoil). 0.0 for T ≤ 0; +∞ when sin⁴(θ/2) < 1e-30.
+# Mirrors `mott_electron_differential`.
+#must_use
+fn mott_electron_differential(z_target, electron_energy_mev: f64, theta_rad: f64): f64 {
+    if (_tm_u32_ok(z_target) != 1) { return _tm_nan(); }
+    if (electron_energy_mev <= 0.0) { return 0.0; }
+    var sin_half: f64 = _tm_sin(theta_rad / 2.0);
+    var sin2: f64 = sin_half * sin_half;
+    var sin4: f64 = sin2 * sin2;
+    if (sin4 < 0.000000000000000000000000000001) { return _TM_INF; }
+    var t: f64 = electron_energy_mev;
+    var total: f64 = t + TM_ELECTRON_MASS_MEV;
+    var pc: f64 = f64_sqrt(t * (t + (2.0 * TM_ELECTRON_MASS_MEV)));
+    var beta: f64 = pc / total;
+    var a: f64 = ((f64_from(z_target) * TM_FINE_STRUCTURE) * TM_HBAR_C_MEV_FM) / ((2.0 * pc) * beta);
+    var s: f64 = ((a * a) * (1.0 - ((beta * beta) * sin2))) / sin4;
+    return s;
+}
+
+# The form factor of a uniformly charged sphere of radius R (fm) at momentum transfer q (fm⁻¹),
+# F = 3 (sin qR − qR cos qR)/(qR)³; below |qR| = 0.5 the Taylor series Σ (−1)ⁿ 3(2n+2) x²ⁿ/(2n+3)!,
+# where the closed form cancels. Mirrors `nuclear_form_factor_uniform`.
+#must_use
+fn nuclear_form_factor_uniform(q_inv_fm: f64, radius_fm: f64): f64 {
+    var qr: f64 = q_inv_fm * radius_fm;
+    if (f64_abs(qr) < 0.5) {
+        var x2: f64 = qr * qr;
+        var term: f64 = 1.0;
+        var sum: f64 = 1.0;
+        var n = 1;
+        while (n <= 10) {
+            var nf: f64 = f64_from(n);
+            var mx2: f64 = -x2;
+            term = term * (mx2 / ((2.0 * nf) * ((2.0 * nf) + 3.0)));
+            sum = sum + term;
+            n = n + 1;
+        }
+        return sum;
+    }
+    var sin_qr: f64 = _tm_sin(qr);
+    var cos_qr: f64 = _tm_cos(qr);
+    var qr3: f64 = (qr * qr) * qr;
+    var f: f64 = (3.0 * (sin_qr - (qr * cos_qr))) / qr3;
+    return f;
+}
+
+# The Mott cross section times |F(q)|², fm²/sr, with the uniform-sphere radius R = 1.2 A^(1/3) fm
+# and q = 2p sin(θ/2)/(ħc), p from the kinetic energy. Mirrors `mott_electron_with_form_factor`.
+#must_use
+fn mott_electron_with_form_factor(z_target, a_target, electron_energy_mev: f64, theta_rad: f64): f64 {
+    if (_tm_u32_ok(a_target) != 1) { return _tm_nan(); }
+    var mott: f64 = mott_electron_differential(z_target, electron_energy_mev, theta_rad);
+    var sin_half: f64 = _tm_sin(theta_rad / 2.0);
+    var t: f64 = electron_energy_mev;
+    var pc: f64 = f64_sqrt(t * (t + (2.0 * TM_ELECTRON_MASS_MEV)));
+    var q: f64 = ((2.0 * pc) * sin_half) / TM_HBAR_C_MEV_FM;
+    var c: f64 = ganita_f64_cbrt(f64_from(a_target));
+    var radius: f64 = 1.2 * c;
+    var ff: f64 = nuclear_form_factor_uniform(q, radius);
+    var s: f64 = (mott * ff) * ff;
+    return s;
+}
+
+# ── Compton scattering ──────────────────────────────────────────────────────────────
+
+# The Compton energy ratio ω'/ω = 1/[1 + (E_γ/m_e c²)(1 − cos θ)]. Mirrors
+# `compton_energy_ratio`.
+#must_use
+fn compton_energy_ratio(photon_energy_mev: f64, theta_rad: f64): f64 {
+    var gamma: f64 = photon_energy_mev / TM_ELECTRON_MASS_MEV;
+    var cos_theta: f64 = _tm_cos(theta_rad);
+    var r: f64 = 1.0 / (1.0 + (gamma * (1.0 - cos_theta)));
+    return r;
+}
+
+# The Klein–Nishina cross section dσ/dΩ = (r_e²/2)(ω'/ω)²[ω/ω' + ω'/ω − sin²θ], fm²/sr. 0.0 for
+# E_γ ≤ 0. Mirrors `klein_nishina_differential`.
+#must_use
+fn klein_nishina_differential(photon_energy_mev: f64, theta_rad: f64): f64 {
+    if (photon_energy_mev <= 0.0) { return 0.0; }
+    var ratio: f64 = compton_energy_ratio(photon_energy_mev, theta_rad);
+    var inv_ratio: f64 = 1.0 / ratio;
+    var sin_theta: f64 = _tm_sin(theta_rad);
+    var re2_half: f64 = (TM_CLASSICAL_ELECTRON_RADIUS_FM * TM_CLASSICAL_ELECTRON_RADIUS_FM) / 2.0;
+    var s: f64 = ((re2_half * ratio) * ratio) * ((inv_ratio + ratio) - (sin_theta * sin_theta));
+    return s;
+}
+
+# The total Klein–Nishina cross section, fm²: σ = 2π r_e² {[(1+γ)/γ³][2γ(1+γ)/(1+2γ) − ln(1+2γ)]
+# + ln(1+2γ)/(2γ) − (1+3γ)/(1+2γ)²}, γ = E_γ/m_e c². Below γ = 1e-2, where that cancels, the
+# series σ_T (1 − 2γ + 26γ²/5 − 133γ³/10 + 1144γ⁴/35); σ_T = (8/3)π r_e² at γ → 0. 0.0 for E_γ ≤ 0.
+# Mirrors `klein_nishina_total`.
+#must_use
+fn klein_nishina_total(photon_energy_mev: f64): f64 {
+    if (photon_energy_mev <= 0.0) { return 0.0; }
+    var re2: f64 = TM_CLASSICAL_ELECTRON_RADIUS_FM * TM_CLASSICAL_ELECTRON_RADIUS_FM;
+    var g: f64 = photon_energy_mev / TM_ELECTRON_MASS_MEV;
+    if (g < 0.01) {
+        var thomson: f64 = ((8.0 * _TM_PI) * re2) / 3.0;
+        var p: f64 = (1.0 - (2.0 * g)) + (((26.0 / 5.0) * g) * g);
+        p = p - ((((133.0 / 10.0) * g) * g) * g);
+        p = p + (((((1144.0 / 35.0) * g) * g) * g) * g);
+        var s: f64 = thomson * p;
+        return s;
+    }
+    var g2: f64 = g * g;
+    var g3: f64 = g2 * g;
+    var one_plus_2g: f64 = 1.0 + (2.0 * g);
+    var ln_term: f64 = _tm_log(one_plus_2g);
+    var term1: f64 = ((1.0 + g) / g3) * ((((2.0 * g) * (1.0 + g)) / one_plus_2g) - ln_term);
+    var term2: f64 = ln_term / (2.0 * g);
+    var term3: f64 = (1.0 + (3.0 * g)) / (one_plus_2g * one_plus_2g);
+    var t: f64 = ((2.0 * _TM_PI) * re2) * ((term1 + term2) - term3);
+    return t;
+}
+
+# ── pair production ─────────────────────────────────────────────────────────────────
+
+# The Bethe–Heitler pair-production cross section in the field of a point nucleus, fm² per atom
+# (first Born, unscreened), in Maximon's analytic forms (J. Res. NBS 72B, 79 (1968), as tabulated
+# by Hubbell, Gimm & Øverbø 1980), k = E_γ/m_e c²:
+# - 2 < k < 4: (2π/3) Z²α r_e² ((k−2)/k)³ [1 + ε/2 + 23ε²/40 + 11ε³/60 + 29ε⁴/960],
+#   ε = (2k − 4)/(2 + k + 2√(2k));
+# - k ≥ 4: Z²α r_e² {(28/9) ln 2k − 218/27 + (2/k)²[6 ln 2k − 7/2 + (2/3) ln³ 2k − ln² 2k
+#   − (π²/3) ln 2k + 2ζ(3) + π²/6] − (2/k)⁴[(3/16) ln 2k + 1/8] − (2/k)⁶[(29/2304) ln 2k − 77/13824]}.
+# The branches join at k = 4 and σ > 0 above threshold. No screening, Coulomb correction or
+# triplet production. 0.0 at or below threshold (and for NaN). Mirrors
+# `pair_production_cross_section`.
+#must_use
+fn pair_production_cross_section(z_target, photon_energy_mev: f64): f64 {
+    if (_tm_u32_ok(z_target) != 1) { return _tm_nan(); }
+    var k: f64 = photon_energy_mev / TM_ELECTRON_MASS_MEV;
+    if (k != k || k <= 2.0) { return 0.0; }
+    var zf: f64 = f64_from(z_target);
+    var z2: f64 = zf * zf;
+    var re: f64 = TM_CLASSICAL_ELECTRON_RADIUS_FM;
+    var prefactor: f64 = ((z2 * TM_FINE_STRUCTURE) * re) * re;
+    if (k < 4.0) {
+        var root: f64 = f64_sqrt(2.0 * k);
+        var eps: f64 = ((2.0 * k) - 4.0) / ((2.0 + k) + (2.0 * root));
+        var ratio: f64 = (k - 2.0) / k;
+        var series: f64 = (1.0 + (eps / 2.0)) + (((23.0 * eps) * eps) / 40.0);
+        series = series + ((((11.0 * eps) * eps) * eps) / 60.0);
+        series = series + (((((29.0 * eps) * eps) * eps) * eps) / 960.0);
+        var lo: f64 = ((((prefactor * ((2.0 * _TM_PI) / 3.0)) * ratio) * ratio) * ratio) * series;
+        return lo;
+    }
+    var l: f64 = _tm_log(2.0 * k);
+    var r2: f64 = (2.0 / k) * (2.0 / k);
+    var pi2: f64 = _TM_PI * _TM_PI;
+    var inner: f64 = ((6.0 * l) - 3.5) + ((((2.0 / 3.0) * l) * l) * l);
+    inner = (inner - (l * l)) - ((pi2 / 3.0) * l);
+    inner = (inner + (2.0 * _TM_ZETA3)) + (pi2 / 6.0);
+    var bracket: f64 = (((28.0 / 9.0) * l) - (218.0 / 27.0)) + (r2 * inner);
+    bracket = bracket - ((r2 * r2) * (((3.0 / 16.0) * l) + 0.125));
+    bracket = bracket - (((r2 * r2) * r2) * (((29.0 / 2304.0) * l) - (77.0 / 13824.0)));
+    var hi: f64 = prefactor * bracket;
+    return hi;
 }
 
 # --- timekeeping_data.cyr ---

@@ -41,6 +41,9 @@ Per Cyrius counterpart: rows, then the ulp histogram of each output against Rust
 | `pow` | `ganita_f64_pow` | C | 1,220 | 1,206 × 0, 13 × 1, 1 accepted | same |
 | `hypot` | `ganita_f64_hypot` (measured in M0) | C | 600 | 503 × 0, 96 × 1, 1 × 2 | same |
 | `hypot` | **`_tm_hypot`** (from M1) | **A** | 600 | **all 0** | **all 0** (x86_64 PE too) |
+| `sin` | **`_tm_sin`** (from M4): Rust libm's sin, k_sin, k_cos and rem_pio2 transcribed | **A** | 710 | **all 0** | **all 0** (x86_64 PE too) |
+| `cos` | **`_tm_cos`** (from M4) | **A** | 710 | **all 0** | **all 0** (x86_64 PE too) |
+| `log` | **`_tm_log`** (from M4): Rust libm's log (musl's form) transcribed | **A** | 874 | **all 0** | **all 0** (x86_64 PE too) |
 
 Readings:
 
@@ -197,6 +200,49 @@ vacuum polarization, Dirac, hyperfine, the g-factors and Breit. The class-C and 
 - **Dirac is class B, not C.** `dirac_energy_mev` and its two callers use only sqrt and arithmetic, so their
   2,856 rows are B and bit-identical. That tightens the plan's class.
 
+## Reactions and scattering (M4): exact sin, cos and log
+
+The port-parity rule measured S by perturbation (each sin, cos, tan and ln result nudged ±1 ulp, one call at a time,
+over every golden row) before the first comparison. Twelve of the sixteen class-C candidates came out past K = 64:
+
+| Function | S (worst row) | Where |
+|---|---|---|
+| `average_lethargy_gain` | 4.3 × 10⁹ | ξ = 1 + ((A−1)²/2A) ln((A−1)/(A+1)) is 1 + (≈ −1) at large A |
+| `collisions_to_thermalize` | 211 | through ξ |
+| `mott_correction_factor` | 4.4 × 10¹⁸ | 1 − β² sin²(θ/2) at β = 1, θ = π |
+| `mott_electron_differential`, `mott_electron_with_form_factor` | 1.5 × 10⁹ | the same factor at 10 GeV, θ = π |
+| `nuclear_form_factor_uniform` | 17,337 | near its first zero, qR = 4.4934 |
+| `compton_energy_ratio` | 4.6 × 10¹⁸ | the ∞ · 0 edge (E_γ = ∞, θ = 0); finite rows near θ = 0 are past 64 too, through 1 − cos θ |
+| `klein_nishina_differential` | 77,700 | 10 GeV at θ = 0, through 1 − cos θ |
+| `klein_nishina_total` | 12,303 | the closed form just above γ = 1e-2 |
+| `partial_wave_differential` | 187 | eleven phase shifts at θ = π |
+| `pair_production_cross_section` | 73 | just above threshold, Z = 82 |
+| `partial_wave_cross_section` | 3, but 11 sin calls: K = 68 | |
+
+Step 3 of the rule applies, as for hypot: **the port reproduces the primitives bit for bit.** `_tm_sin`, `_tm_cos` and
+`_tm_log` (src/numerics.cyr) transcribe libm 0.2.16's sin.rs, cos.rs, k_sin.rs, k_cos.rs, rem_pio2.rs and log.rs
+operation for operation. Two differences from the stdlib made that necessary:
+- **`f64_ln`** is x87 `fyl2x` on x86_64, and on aarch64 a port of fdlibm's branchy e_log.c. Rust's log is musl's
+  single-expression form. A sweep found 16,248 of 680,010 inputs differing on x86_64 and 2,712 on aarch64.
+- **`f64_sin` and `f64_cos`** share Rust's kernels and constants, but their argument reduction always takes the
+  "medium" path, where Rust has direct reductions for |x| ≤ 9π/4. The two differ only when |x − kπ/2| is in about
+  [2⁻²⁰, 2⁻¹⁶)·|x| and the result sits within a hair of a rounding tie. The sweep found none, so this is closed by
+  construction rather than by sample.
+
+Arguments at or past 2²⁰·π/2 go to the stdlib's Payne–Hanek reduction (`_f64_rem_pio2`, FreeBSD k_rem_pio2.c, as Rust's
+rem_pio2_large is). The sweep covers 40,000 of them, and libm.tsv has 29.
+
+**The sweep.** 680,010 inputs aimed at the risky regions: random bit patterns, (π/4, 9π/4), the doubles near kπ/2 for
+k ≤ 12 at relative offsets 2⁻¹⁰ … 2⁻⁵², medium and huge magnitudes, log near 1 and across the subnormals. `_tm_sin`,
+`_tm_cos` and `_tm_log` match Rust libm on **every input on x86_64 ELF, x86_64 PE and aarch64**. The cost: `_tm_sin`
+takes 48 ns against `f64_sin`'s 37 ns, and `_tm_log` 54 ns against x87's 38 ns.
+
+**Results.** With the exact primitives, every reaction and scattering function except one is class B, and all 18,669
+rows are **0 ulp on all three targets**. `rutherford_total_above_angle` keeps ganita's tan, with S = 4 and K = 10 (below),
+and is also 0 ulp. The `libm::sin`, `cos` and `log` rows move to the new primitives at class A, a tightening, and are
+exact on every target (table above). The M0 rows for `f64_sin`, `f64_cos` and `f64_ln` keep their record of what the
+builtins do.
+
 ## Rule for the class-C bounds of tanmatra's own functions
 
 Class C stays for formulas built on exp, ln, pow, sin, cos, tan or sinh, such as the shell term, Dirac, the
@@ -227,6 +273,7 @@ Never raise K_F after seeing the port's results. A row that fails K_F is a defec
 | `lamb_shift_ev` | M3 | **4**: an s state is `lamb_shift_nlj_ev(z, n, 0, 1)` itself; l > 0 averages two ln-free values | 1 | **10** |
 | `radial_wavefunction` | M3 | **2**: exp(−ρ/2) nudged ±1 ulp on every golden row; R = (N·P)·e, so a 1-ulp change of e moves R by at most 2 ulp across a binade. 26 edge rows whose exp result is 0 or ∞ (r ≥ 1e300, ±∞, NaN) are exact on both sides and excluded | 1 | **6** |
 | `radial_probability_density` | M3 | **8**: as `radial_wavefunction`, through R² r² | 1 | **18** |
+| `rutherford_total_above_angle` | M4 | **4**: ganita's tan(θ_min/2) nudged ±1 ulp on all 990 golden rows; the output goes as 1/tan² | 1 | **10** |
 
 The Myers–Swiatecki shell term turned out to be class B, not C. It uses only cbrt (correctly rounded on both
 sides) and arithmetic, and its 14,160 rows are bit-identical.

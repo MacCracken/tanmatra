@@ -46,7 +46,8 @@ python3 -I scripts/oracle/probe_tables.py .                                     
 | `decay` | M2 | 8,511 | `src/m_decay.rs` | `src/decay_data.cyr` (`src/t_decay.rs`) |
 | `timekeeping` | M5 | 20,703 | `src/m_timekeeping.rs` | `src/timekeeping_data.cyr` (`src/t_timekeeping.rs`: the leap table derived from `leap_seconds_at`, the USNO segments extracted, both proven) |
 | `atomic` | M3 | 43,309 | `src/m_atomic.rs` | `src/atomic_data.cyr` (`src/t_atomic.rs`: the filling order and Bethe logarithms extracted, the 20 NIST exceptions derived from `electron_configuration`, all proven) |
-| reaction, scattering | M4 | — | — | `reaction_data.cyr` |
+| `reaction` | M4 | 7,965 | `src/m_reaction.rs` | `src/reaction_data.cyr` (`src/t_reaction.rs`: the presets, thermal cross sections, yields and pathways through the API; the resonance integrals and scattering's ζ(3) extracted and proven) |
+| `scattering` | M4 | 10,704 | `src/m_scattering.rs` | — (its ζ(3) is in `reaction_data.cyr`) |
 | optics | M6 | — | — | — |
 
 ## Format 1
@@ -158,6 +159,12 @@ together they are proven by recomputing `electron_configuration` for Z = 0–120
 are extracted from `bethe_log`'s match and proven by recomputing `lamb_shift_nlj_ev` for Z = 0–118 and u32::MAX over
 every (n ≤ 6, l ≤ n, 2j ≤ 2n + 1). A Bethe logarithm nudged by 1 ulp is refused (*Bethe-logarithm proof failed at
 Z=1 n=3 l=0 2j=1*), and so is a dropped exception (*configuration proof failed at Z=45*).
+
+**M4.** The presets, thermal cross sections, fission yields and nucleosynthesis pathways come through the public API
+(their strings as NUL-terminated UTF-8 in one byte table). `RESONANCE_INTEGRALS` is extracted and proven by recomputing
+all three lookups for every Z ≤ 130, A ≤ 300 and u32::MAX. Scattering's `ZETA3` is extracted and proven by recomputing
+`pair_production_cross_section` on its k ≥ 4 branch for Z = 1–100 over 13 decades. `libm.tsv`'s sin, cos and log rows
+are class A from M4: the port's `_tm_sin`, `_tm_cos` and `_tm_log` are Rust libm's algorithms.
 
 ### Emission rules
 

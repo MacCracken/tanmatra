@@ -50,6 +50,9 @@ modules = [
     "src/atomic_config.cyr",
     "src/atomic_hydrogenic.cyr",
     "src/atomic_qed.cyr",
+    "src/reaction_data.cyr",
+    "src/reaction.cyr",
+    "src/scattering.cyr",
     "src/timekeeping_data.cyr",
     "src/timekeeping.cyr",
 ]

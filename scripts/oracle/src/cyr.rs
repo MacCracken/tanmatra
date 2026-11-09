@@ -167,6 +167,10 @@ pub enum Elem {
     Bool(Vec<bool>),
     /// Names of constants (e.g. enum members), stored in a `u8` table.
     Names(Vec<String>),
+    /// 64-bit integers (e.g. packed nucleus words), stored in an `i64` table.
+    I64(Vec<i64>),
+    /// Names of constants stored in an `i64` table.
+    NamesI64(Vec<String>),
 }
 
 /// `var NAME: T[N] = { .. };`, one element per line with a trailing label comment.
@@ -179,6 +183,8 @@ pub fn table(name: &str, doc: &str, elem: &Elem, labels: &[String]) -> Result<St
         Elem::U8(v) => ("u8", v.iter().map(u8::to_string).collect()),
         Elem::Bool(v) => ("bool", v.iter().map(bool::to_string).collect()),
         Elem::Names(v) => ("u8", v.clone()),
+        Elem::I64(v) => ("i64", v.iter().map(i64::to_string).collect()),
+        Elem::NamesI64(v) => ("i64", v.clone()),
     };
     if vals.len() != labels.len() {
         return Err(format!(
