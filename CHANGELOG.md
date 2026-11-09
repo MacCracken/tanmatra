@@ -173,6 +173,20 @@ The Rust library and its behavior are unchanged, and `VERSION` stays 1.3.0 until
 - **Generator.** `rust_src.rs` reads `(integer, Enum::Variant)` tables, a pure lookup function's match arms, and per-entry citation comments; a const now ends at its first `;` outside a comment.
 - **`src/error.cyr`**'s header no longer promises an `err_out` detail pointer (decided against in M2).
 
+### Port — M6 Optics profile (2026-11-08)
+- **`cyrius.cyml`:** an optional `[deps.prakash]` (tag 2.15.1, commit-pinned in cyrius.lock with its hisab and sakshi), `[features] optics = ["prakash"]` (`default = []`, as in Rust), and `[lib.optics]`, the core plus `src/optics_data.cyr` and `src/optics.cyr`. `cyrius distlib --all` writes `dist/tanmatra-optics.cyr`. The core bundle and its sidecar are unchanged and never pull in prakash. A name scan finds no collision between tanmatra's 529 bundle names and prakash's 1,061. `sakshi` joins `[deps]` stdlib, which prakash's bundle needs in scope.
+- **`src/optics.cyr`** (the one src file with an include, `lib/prakash.cyr`): `struct TmSpectralLine`; `hydrogen_balmer_series` and `spectral_series_lines` into caller arrays; `lines_to_spd`, a prakash Spd via `spd_new` with every invalid-range guard; `line_to_rgb`, prakash's `wavelength_to_rgb` with its `err_out`.
+- **`src/optics_data.cyr`** (generated): the Storey & Hummer Case B Balmer intensities, from the oracle's output, with their upper levels proven against its wavelengths.
+- **Golden.** `optics.tsv` has 1,039 rows from the Rust oracle with the Rust prakash 1.2.0, replayed against the Cyrius prakash 2.15.1 on all three targets.
+  - `line_to_rgb` (838 rows, every branch edge) and the Balmer series are 0 ulp.
+  - `lines_to_spd` is class C with K = 38 (S = 3 by perturbation, 6 exp per sample): ≤ 2 ulp on x86_64, 0 on aarch64.
+  - `spectral_series_lines` (class D) has 3 of 2,250 values at 55–95 ulp, about 2 × 10⁻¹⁴ relative. All three are the 49p → 1s Einstein A, where the dipole integral's 49-term sum cancels and ganita's pow is the one inexact primitive. This qualifies M3's "every Einstein row is exact", which held for M3's grid.
+- **Harness.** The replay machinery moves to `tests/parity_core.cyr`. `tests/parity.tcyr` keeps the core dispatchers and skips the optics module, so the core suite needs no prakash; `tests/optics_parity.tcyr` replays optics. Rows take up to 1,024 tokens (an SPD row has 804).
+- **Tests.** `tests/optics.tcyr` ports the 4 Rust tests (8 assertions); the serde round-trip is not carried over.
+- **Benches.** `tests/optics.bcyr`: `balmer_spd_401` 68.1 µs vs Rust's 12.4 µs, and `spectral_series_lyman_10` 14.1 µs vs 7.32 µs (Rust timed with Instant).
+- **CI** resolves with `--features optics` and checks the lockfile both ways. Surface parity is 4/4 for optics.
+- ⚠ **Known warnings.** prakash 2.15.1's bundle adds three compile warnings to the two optics test files, and tanmatra's code adds none. Two are raw-bit compares that prakash documents as intended (`lib/prakash.cyr:9213–9214`); the third is an unreachable `num_fft` from hisab, which the bundle doesn't include.
+
 ### Port — M4 Reactions & scattering (2026-11-08)
 - **Exact sin, cos and log** (`src/numerics.cyr`): `_tm_sin`, `_tm_cos` and `_tm_log` transcribe Rust libm 0.2.16's sin, cos, k_sin, k_cos, rem_pio2 and log operation for operation; arguments past 2²⁰·π/2 use the stdlib's Payne–Hanek reduction. The port-parity rule required this. By perturbation, 12 of the 16 transcendental M4 functions came out past K = 64: the Mott factor at β → 1, the form factor near its zeros, Klein–Nishina's closed form above γ = 1e-2, ξ = 1 + (≈ −1) at large A. `f64_ln` is x87 on x86_64 and a different fdlibm form on aarch64, and `f64_sin` skips Rust's |x| ≤ 9π/4 reductions. A 680,010-input sweep matches Rust libm on every input on x86_64 ELF, x86_64 PE and aarch64; the cost is about 30% over the builtins. `libm.tsv`'s sin, cos and log rows move to the new primitives at class A, and are exact on every target.
 - **`src/reaction_data.cyr`** (generated):

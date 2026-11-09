@@ -1,0 +1,153 @@
+# optics_parity.tcyr — replays tests/golden/optics.tsv against the optics profile.
+#
+# The optics module needs prakash 2.15.1, vendored by `cyrius deps --features optics`, so it has
+# its own harness: tests/parity.tcyr replays every other module. The machinery, and the row
+# outcomes, are tests/parity_core.cyr's. The golden rows come from the Rust oracle with the Rust
+# prakash 1.2.0; the port runs against the Cyrius prakash 2.15.1.
+#
+# ⚠ prakash 2.15.1's bundle carries three compile warnings of its own (lib/prakash.cyr:9213 and
+# :9214, which prakash documents as intended raw-bit compares, and the unreachable hisab
+# `num_fft`). They are the only warnings in this compile; tanmatra's code adds none.
+
+include "tests/ulp.cyr"
+include "src/error.cyr"
+include "src/numerics.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
+include "src/decay_data.cyr"
+include "src/decay.cyr"
+include "src/atomic_data.cyr"
+include "src/atomic_config.cyr"
+include "src/atomic_hydrogenic.cyr"
+include "src/atomic_qed.cyr"
+include "src/reaction_data.cyr"
+include "src/reaction.cyr"
+include "src/scattering.cyr"
+include "src/timekeeping_data.cyr"
+include "src/timekeeping.cyr"
+include "src/optics_data.cyr"
+include "src/optics.cyr"
+
+alloc_init();
+
+include "tests/parity_core.cyr"
+
+# Appends `count` lines at `lines`: `v:count`, then `f:wavelength f:intensity` each.
+fn _par_got_lines(lines: *TmSpectralLine, count) {
+    _par_got_seq(count);
+    var k = 0;
+    while (k < count) {
+        var l: *TmSpectralLine = lines + k;
+        _par_got_f(l.wavelength_nm);
+        _par_got_f(l.intensity);
+        k = k + 1;
+    }
+}
+
+# Appends an error token by its Rust variant name.
+fn _par_got_err_name(name) {
+    var at = _par_got_n * 8;
+    store64(_par_got_k + at, 69);
+    store64(_par_got_v + at, name);
+    store64(_par_got_l + at, strlen(name));
+    _par_got_n = _par_got_n + 1;
+}
+
+# `optics` rows: src/optics.cyr against prakash.
+fn _par_optics(fp, fl): i64 {
+    var buf = alloc(64 * 16);
+    if (_par_eq(fp, fl, "hydrogen_balmer_series") == 1) {
+        var n = hydrogen_balmer_series(buf, 64);
+        _par_got_lines(buf, n);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "spectral_series_lines") == 1) {
+        var n2 = spectral_series_lines(_par_in(0), _par_in(1), _par_in(2), buf, 64);
+        if (n2 > 64) { return 0 - 1; }
+        _par_got_lines(buf, n2);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "lines_to_spd") == 1) {
+        var count = _par_in(0);
+        if (count > 64) { return 0 - 1; }
+        var k = 0;
+        while (k < count) {
+            store64(buf + k * 16, _par_in(1 + k * 2));
+            store64(buf + k * 16 + 8, _par_in(2 + k * 2));
+            k = k + 1;
+        }
+        var at = 1 + count * 2;
+        var fwhm: f64 = _par_in(at);
+        var start: f64 = _par_in(at + 1);
+        var end: f64 = _par_in(at + 2);
+        var step: f64 = _par_in(at + 3);
+        var spd = lines_to_spd(buf, count, fwhm, start, end, step);
+        if (spd == 0) { return 0 - 1; }
+        _par_got_f(Spd_start_nm(spd));
+        _par_got_f(Spd_step_nm(spd));
+        var len = Spd_len(spd);
+        _par_got_seq(len);
+        var values = Spd_values(spd);
+        var j = 0;
+        while (j < len && j < _PAR_MAX) {
+            _par_got_f(load64(values + j * 8));
+            j = j + 1;
+        }
+        return 1;
+    }
+    if (_par_eq(fp, fl, "line_to_rgb") == 1) {
+        var line: TmSpectralLine;
+        var w: f64 = _par_in(0);
+        var it: f64 = _par_in(1);
+        line.wavelength_nm = w;
+        line.intensity = it;
+        var err = 0;
+        var c = line_to_rgb(line, &err);
+        if (c == 0) {
+            var name = "?";
+            if (err == PK_ERR_WAVELENGTH_RANGE) { name = "WavelengthOutOfRange"; }
+            _par_got_err_name(name);
+            return 1;
+        }
+        _par_got_f(Rgb_r(c));
+        _par_got_f(Rgb_g(c));
+        _par_got_f(Rgb_b(c));
+        return 1;
+    }
+    return 0;
+}
+
+# Fills the got list for one row: 1 handled, 0 pending, -1 unusable.
+fn _par_dispatch(mp, ml, fp, fl): i64 {
+    _par_got_n = 0;
+    if (_par_eq(mp, ml, "optics") == 1) { return _par_optics(fp, fl); }
+    return 0;
+}
+
+# The class-C bound, in ulps. lines_to_spd: one exp result nudged ±1 ulp moves a sample's power by
+# S = 3 ulp at most over all 32 golden rows, with at most 6 lines (6 exp calls) per sample:
+# K = 2·3·6 + 2 (docs/development/port-parity.md, M6).
+#must_use
+fn _par_c_bound(fp, fl): i64 {
+    if (_par_eq(fp, fl, "lines_to_spd") == 1) { return 38; }
+    return 0 - 1;
+}
+
+# No optics row is an accepted divergence.
+#must_use
+fn _par_accepted(fp, fl, ip, il): i64 { return 0; }
+
+# This harness replays the optics module only.
+#must_use
+fn _par_skip(mp, ml): i64 {
+    if (_par_eq(mp, ml, "optics") == 1) { return 0; }
+    return 1;
+}
+
+var exit_code = _par_main();
+sys_exit_group(exit_code);

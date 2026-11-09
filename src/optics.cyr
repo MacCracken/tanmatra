@@ -1,0 +1,163 @@
+# optics.cyr — tanmatra's spectral lines as prakash spectral power distributions and colours
+# (port of rust-old/src/optics.rs, the Rust crate's `optics` feature).
+#
+# OPTIONAL: only the [lib.optics] profile (dist/tanmatra-optics.cyr) has this module; the core
+# bundle never pulls in prakash. prakash 2.15.1 is vendored by `cyrius deps --features optics`,
+# and this is the one src/ file with an include. The Storey & Hummer intensities are the
+# generated optics_data.cyr.
+#
+# - A line is `struct TmSpectralLine { wavelength_nm: f64; intensity: f64; }`. The Vec-returning
+#   functions fill a caller array (`var lines: TmSpectralLine[16];`, entry k through a typed
+#   pointer `base + k`) and return the count.
+# - lines_to_spd returns a prakash Spd handle (spd_new; its values are allocated here and owned
+#   by the Spd), or 0 if an allocation fails. line_to_rgb returns a prakash Rgb handle, or 0 with
+#   PK_ERR_WAVELENGTH_RANGE in *err_out outside 380–780 nm, as prakash's wavelength_to_rgb.
+# - Rust's operation order is kept. The SPD's Gaussians use f64_exp (class C); ln 2 is _tm_log,
+#   Rust libm's log bit for bit.
+
+include "lib/prakash.cyr"
+
+# A spectral emission or absorption line: wavelength (nm) and relative intensity (≥ 0). Mirrors
+# `SpectralLine`.
+struct TmSpectralLine {
+    wavelength_nm: f64;
+    intensity: f64;
+}
+
+# An empty prakash Spd starting at start_nm with the given step (Rust's `Vec::new()` values).
+#must_use
+fn _tm_empty_spd(start_nm: f64, step_nm: f64) {
+    var values = alloc(8);
+    if (values == 0) { return 0; }
+    return spd_new(start_nm, step_nm, values, 0);
+}
+
+# A prakash Spd sampled from start_nm to end_nm every step_nm, each of the `count` lines at
+# `lines` a Gaussian of full width at half maximum fwhm_nm (σ = FWHM/(2√(2 ln 2))). An invalid
+# range (a non-finite bound, end < start, step ≤ 0 or non-finite, more than 10⁷ samples) gives an
+# empty distribution; FWHM ≤ 0 or NaN gives zero power at every sample. Returns the Spd handle,
+# or 0 if an allocation fails. Mirrors `lines_to_spd`, which takes a slice.
+#must_use
+fn lines_to_spd(lines: *TmSpectralLine, count, fwhm_nm: f64, start_nm: f64, end_nm: f64, step_nm: f64) {
+    var valid = 0;
+    if (_tm_is_finite(start_nm) == 1 && _tm_is_finite(end_nm) == 1 && step_nm > 0.0 && _tm_is_finite(step_nm) == 1) {
+        valid = 1;
+    }
+    if (valid == 0 || end_nm < start_nm) {
+        var s0: f64 = 0.0;
+        if (_tm_is_finite(start_nm) == 1) { s0 = start_nm; }
+        return _tm_empty_spd(s0, 1.0);
+    }
+    var span_steps: f64 = f64_ceil((end_nm - start_nm) / step_nm);
+    if (span_steps != span_steps || span_steps > 10000000.0) { return _tm_empty_spd(start_nm, step_nm); }
+    var num_samples = f64_to(span_steps) + 1;
+    var values = alloc(num_samples * 8);
+    if (values == 0) { return 0; }
+    var i = 0;
+    if (fwhm_nm != fwhm_nm || fwhm_nm <= 0.0) {
+        while (i < num_samples) {
+            store64(values + i * 8, 0.0);
+            i = i + 1;
+        }
+        return spd_new(start_nm, step_nm, values, num_samples);
+    }
+    var ln2: f64 = _tm_log(2.0);
+    var root: f64 = f64_sqrt(2.0 * ln2);
+    var sigma: f64 = fwhm_nm / (2.0 * root);
+    var inv_2sigma2: f64 = 1.0 / ((2.0 * sigma) * sigma);
+    while (i < num_samples) {
+        var wavelength: f64 = start_nm + (f64_from(i) * step_nm);
+        var power: f64 = 0.0;
+        var k = 0;
+        while (k < count) {
+            var line: *TmSpectralLine = lines + k;
+            var dw: f64 = wavelength - line.wavelength_nm;
+            var mdw: f64 = -dw;
+            var e: f64 = f64_exp((mdw * dw) * inv_2sigma2);
+            power = power + (line.intensity * e);
+            k = k + 1;
+        }
+        store64(values + i * 8, power);
+        i = i + 1;
+    }
+    return spd_new(start_nm, step_nm, values, num_samples);
+}
+
+# Writes the hydrogen Balmer lines n = 3..=8 → 2 (Hα through H8) to out[] (up to `cap`) and
+# returns the count, 6: vacuum wavelengths with the proton reduced mass (Hα 656.470 nm), and
+# Case B recombination intensities relative to Hα for T_e = 10⁴ K, n_e = 10² cm⁻³ (Storey &
+# Hummer, MNRAS 272, 41 (1995)). Mirrors the Vec `hydrogen_balmer_series` returns.
+#must_use
+fn hydrogen_balmer_series(out: *TmSpectralLine, cap): i64 {
+    var n = 0;
+    var k = 0;
+    while (k < _TM_BALMER_COUNT) {
+        var t, v = spectral_line_vacuum_nm(1, 1, 2, _TM_BALMER_N_UPPER[k]);
+        if (is_ok(t) == 1) {
+            if (n < cap) {
+                var d: *TmSpectralLine = out + n;
+                var wl: f64 = v;
+                d.wavelength_nm = wl;
+                d.intensity = _TM_BALMER_INTENSITY[k];
+            }
+            n = n + 1;
+        }
+        k = k + 1;
+    }
+    return n;
+}
+
+# Writes the lines n_upper → n_lower, n_upper = n_lower + 1 ..= n_upper_max, of a hydrogen-like
+# ion of charge z to out[] (up to `cap`) and returns the count. Wavelengths are for an infinitely
+# heavy nucleus; each intensity is the total spontaneous rate Σ (2l′ + 1) A(n_upper l′ → n_lower l)
+# over the dipole-allowed (l′, l), a statistically populated upper level, normalized to the first
+# line (photon rates, no energy weighting). Mirrors the Vec `spectral_series_lines` returns.
+#must_use
+fn spectral_series_lines(z, n_lower, n_upper_max, out: *TmSpectralLine, cap): i64 {
+    if (_tm_u32_ok(z) != 1 || _tm_u32_ok(n_lower) != 1 || _tm_u32_ok(n_upper_max) != 1) { return 0; }
+    var n = 0;
+    var have_first = 0;
+    var first: f64 = 0.0;
+    var nu = n_lower + 1;
+    while (nu <= n_upper_max) {
+        var t, v = spectral_line_nm(z, n_lower, nu);
+        if (is_ok(t) == 1) {
+            var emission: f64 = 0.0;
+            var lu = 0;
+            while (lu < nu) {
+                var ll = 0;
+                while (ll < n_lower) {
+                    var ta, va = einstein_a_coefficient(z, nu, lu, n_lower, ll);
+                    if (is_ok(ta) == 1) {
+                        var a: f64 = va;
+                        emission = emission + (f64_from(2 * lu + 1) * a);
+                    }
+                    ll = ll + 1;
+                }
+                lu = lu + 1;
+            }
+            if (have_first == 0) {
+                first = emission;
+                have_first = 1;
+            }
+            var intensity: f64 = 0.0;
+            if (first > 0.0) { intensity = emission / first; }
+            if (n < cap) {
+                var d: *TmSpectralLine = out + n;
+                var wl: f64 = v;
+                d.wavelength_nm = wl;
+                d.intensity = intensity;
+            }
+            n = n + 1;
+        }
+        nu = nu + 1;
+    }
+    return n;
+}
+
+# The line's colour as a prakash Rgb handle (prakash's piecewise-linear CIE fit), or 0 with
+# PK_ERR_WAVELENGTH_RANGE in *err_out outside 380–780 nm (NaN included). Mirrors `line_to_rgb`.
+#must_use
+fn line_to_rgb(line: TmSpectralLine, err_out) {
+    return wavelength_to_rgb(line.wavelength_nm, err_out);
+}

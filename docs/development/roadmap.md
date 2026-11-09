@@ -29,7 +29,11 @@ yields and pathways; Rutherford, Mott, partial waves, Born, form factors, Kleinâ
 scattering formulas are ill-conditioned enough that the port reproduces Rust libm's sin, cos and log bit for bit, and
 every golden row is then bit-identical on all three targets.
 
-**Next: M6 Optics profile** (against prakash 2.15.1). Live status is in [`state.md`](state.md).
+**M6 Optics profile is done (2026-11-08):** spectral lines as prakash SPDs and colours, behind the optional `optics`
+feature and the `[lib.optics]` bundle. Every optics golden row passes against the Cyrius prakash 2.15.1 on all three
+targets, and the core bundle stays prakash-free.
+
+**Next: M7 Release 2.0.0.** Live status is in [`state.md`](state.md).
 
 - **Rust 1.3.0 is the final Rust feature release** and the reference implementation: every finding of the [2026-09-16 audit](../audit/2026-09-16-math-audit.md) is repaired and pinned by reference-value tests.
 - **tanmatra 2.0.0 is the Cyrius port**, initialized with `cyrius port` (Rust moves to `rust-old/` as the parity oracle).

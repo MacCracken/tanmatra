@@ -194,9 +194,12 @@ vacuum polarization, Dirac, hyperfine, the g-factors and Breit. The class-C and 
 
 - **The targets differ only through exp and ln**, as for the primitives: aarch64's fdlibm exp makes the radial
   functions bit-identical there, and its ln polyfill leaves 2 one-ulp Lamb rows against 14 on x86 (x87).
-- **The radial dipole integral is bit-identical.** Einstein A and B are class D: a double sum of pow terms whose
-  alternating signs cancel. Even so, every row matches exactly, out to n_u = 60, with `ganita_f64_pow` for the
-  (2/n)^i factors. Class D's 1e-12 stays the gate: a pow change upstream could move these rows by an ulp.
+- **The radial dipole integral is bit-identical on this grid.** Einstein A and B are class D: a double sum of pow
+  terms whose alternating signs cancel. Every row here matches exactly, out to n_u = 60, with `ganita_f64_pow` for the
+  (2/n)^i factors. The M6 optics rows found the exception: of the 4,215 transitions `spectral_series_lines` uses
+  (Z ∈ {1, 2, 26}, n_l ≤ 5, n_u ≤ 60), three differ, all 49p → 1s, by 55–96 ulp (about 2 × 10⁻¹⁴ relative). The
+  49-term sum cancels, and pow is the only primitive on that path that isn't exact. Class D's 1e-12 holds by two
+  orders of magnitude.
 - **Dirac is class B, not C.** `dirac_energy_mev` and its two callers use only sqrt and arithmetic, so their
   2,856 rows are B and bit-identical. That tightens the plan's class.
 
@@ -243,6 +246,25 @@ and is also 0 ulp. The `libm::sin`, `cos` and `log` rows move to the new primiti
 exact on every target (table above). The M0 rows for `f64_sin`, `f64_cos` and `f64_ln` keep their record of what the
 builtins do.
 
+## Optics (M6)
+
+The 1,039 `optics.tsv` rows come from the Rust oracle linked with the Rust prakash 1.2.0; the port runs against the
+Cyrius prakash 2.15.1, replayed by tests/optics_parity.tcyr. All pass on all three targets, on the first comparison:
+
+| Function | Class (K) | Rows | x86_64 ELF and PE | aarch64 |
+|---|---|---|---|---|
+| `hydrogen_balmer_series` | B | 1 (12 values) | all 0 | all 0 |
+| `spectral_series_lines` | D | 168 | 2,247 × 0, 3 × 55–95 | the same |
+| `lines_to_spd` | C (38) | 32 (4,391 values) | 4,268 × 0, 113 × 1, 10 × 2 | **all 0** |
+| `line_to_rgb` | B | 838 | all 0 | all 0 |
+
+- **prakash agrees with its Rust self.** `line_to_rgb` is prakash's piecewise CIE fit, so 838 bit-identical rows
+  across the 1.2.0 → 2.15.1 port boundary, every branch edge included, say the two prakash lines compute it the same
+  way.
+- **The SPDs differ only through exp**: x87 `f64_exp` on x86_64, fdlibm on aarch64 as in Rust. A sum of positive
+  Gaussians is well-conditioned, so 2 ulp is the most it moves.
+- **The three D outliers are Einstein A at 49p → 1s** (above, M3), through the series' A-value intensities.
+
 ## Rule for the class-C bounds of tanmatra's own functions
 
 Class C stays for formulas built on exp, ln, pow, sin, cos, tan or sinh, such as the shell term, Dirac, the
@@ -274,6 +296,7 @@ Never raise K_F after seeing the port's results. A row that fails K_F is a defec
 | `radial_wavefunction` | M3 | **2**: exp(−ρ/2) nudged ±1 ulp on every golden row; R = (N·P)·e, so a 1-ulp change of e moves R by at most 2 ulp across a binade. 26 edge rows whose exp result is 0 or ∞ (r ≥ 1e300, ±∞, NaN) are exact on both sides and excluded | 1 | **6** |
 | `radial_probability_density` | M3 | **8**: as `radial_wavefunction`, through R² r² | 1 | **18** |
 | `rutherford_total_above_angle` | M4 | **4**: ganita's tan(θ_min/2) nudged ±1 ulp on all 990 golden rows; the output goes as 1/tan² | 1 | **10** |
+| `lines_to_spd` | M6 | **3**: each exp result nudged ±1 ulp on every sample of all 32 golden SPDs (a 1-line, 2.5-intensity SPD is the worst); an exp that underflows to 0 is exact on both sides | 6 (one exp per line, at most 6 lines) | **38** |
 
 The Myers–Swiatecki shell term turned out to be class B, not C. It uses only cbrt (correctly rounded on both
 sides) and arithmetic, and its 14,160 rows are bit-identical.

@@ -31,7 +31,7 @@ prakash (optics/light), kiran (game engine), joshua (game manager), and any AGNO
 ## Quick Start
 
 ```sh
-cyrius deps                                   # resolve dependencies (vendors lib/)
+cyrius deps --features optics                 # resolve dependencies (vendors lib/), with prakash for the optics tests
 cyrius build src/main.cyr build/tanmatra      # compile
 cyrius test                                   # run tests/*.tcyr (parity + reference tests)
 cyrius bench                                  # run tests/*.bcyr
@@ -68,7 +68,7 @@ cyrius test --bounds
 cyrius bench
 cyrius distlib --all && cyrius distlib --check
 python3 -I scripts/surface_parity.py .           # every ported Rust pub item has its Cyrius name
-cyrius deps --locked
+cyrius deps --locked && cyrius deps --locked --features optics
 cyrius audit
 ```
 

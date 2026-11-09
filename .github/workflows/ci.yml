@@ -34,7 +34,10 @@ jobs:
           echo "$HOME/.cyrius/bin" >> "$GITHUB_PATH"
 
       - name: Resolve dependencies
-        run: cyrius deps
+        # With the optics feature: tests/optics.tcyr, tests/optics_parity.tcyr and
+        # tests/optics.bcyr include lib/prakash.cyr, which a bare `cyrius deps` never vendors.
+        # The feature stays off by default for consumers; the repo tests both profiles.
+        run: cyrius deps --features optics
 
       - name: Build
         run: |
@@ -53,12 +56,14 @@ jobs:
         run: cyrius test --bounds
 
       - name: Lockfile matches lib/
-        run: cyrius deps --locked
+        run: |
+          cyrius deps --locked
+          cyrius deps --locked --features optics
 
       - name: Audit (fmt, lint, test, bench)
         run: cyrius audit
 
-      - name: Bundle is current (dist/)
+      - name: Bundles are current (dist/, every profile)
         run: cyrius distlib --check
 
       - name: Surface parity against rust-old/

@@ -4,6 +4,7 @@ constants
 decay
 libm
 nucleus
+optics
 particle
 reaction
 relativity

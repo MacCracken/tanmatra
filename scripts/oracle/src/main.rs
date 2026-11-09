@@ -25,6 +25,7 @@ mod m_constants;
 mod m_decay;
 mod m_libm;
 mod m_nucleus;
+mod m_optics;
 mod m_particle;
 mod m_reaction;
 mod m_relativity;
@@ -35,6 +36,7 @@ mod t_atomic;
 mod t_constants;
 mod t_decay;
 mod t_nucleus;
+mod t_optics;
 mod t_particle;
 mod t_reaction;
 mod t_timekeeping;
@@ -53,6 +55,7 @@ fn golden_modules() -> Vec<tsv::Module> {
         m_decay::emit(),
         m_libm::emit(),
         m_nucleus::emit(),
+        m_optics::emit(),
         m_particle::emit(),
         m_reaction::emit(),
         m_relativity::emit(),
@@ -110,6 +113,7 @@ fn cyrius_outputs(root: &Path, prov: &str) -> Result<Vec<Output>, String> {
         "src/reaction_data.cyr",
         t_reaction::emit(&rust("reaction")?, &rust("scattering")?, prov)?,
     );
+    push("src/optics_data.cyr", t_optics::emit(prov)?);
     Ok(out)
 }
 

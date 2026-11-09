@@ -1,0 +1,62 @@
+# optics.bcyr — benches for the optics profile (needs `cyrius deps --features optics`). Rust's
+# suite has no optics bench, so the Rust side of each is timed with std::time::Instant in a
+# throwaway crate (docs/benchmarks-rust-v-cyrius.md, method).
+
+include "src/error.cyr"
+include "src/numerics.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
+include "src/decay_data.cyr"
+include "src/decay.cyr"
+include "src/atomic_data.cyr"
+include "src/atomic_config.cyr"
+include "src/atomic_hydrogenic.cyr"
+include "src/atomic_qed.cyr"
+include "src/optics_data.cyr"
+include "src/optics.cyr"
+
+# A sink the timed loops write to, so their results are used.
+var _bench_sink = 0;
+var _bench_lines: TmSpectralLine[8];
+var _bench_n = 0;
+
+# optics/balmer_spd_401: the six Balmer lines as a 401-sample SPD, 380–780 nm at 1 nm, FWHM 2 nm.
+fn bench_balmer_spd_401() {
+    _bench_sink = lines_to_spd(&_bench_lines, _bench_n, 2.0, 380.0, 780.0, 1.0);
+}
+
+# optics/spectral_series_lyman_10: the Lyman series n = 2..=10, with A-value intensities.
+fn bench_spectral_series_lyman_10() {
+    _bench_sink = spectral_series_lines(1, 1, 10, &_bench_lines, 8);
+}
+
+# Times `rounds` calls of a body fn per batch, over `batches` batches.
+fn run(name, fp, rounds, batches) {
+    var b = bench_new(name);
+    var k = 0;
+    while (k < batches) {
+        bench_batch_start(b);
+        var r = 0;
+        while (r < rounds) { fncall0(fp); r = r + 1; }
+        bench_batch_stop(b, rounds);
+        k = k + 1;
+    }
+    bench_report(b);
+}
+
+# Runs every bench.
+fn main(): i64 {
+    alloc_init();
+    _bench_n = hydrogen_balmer_series(&_bench_lines, 8);
+    run("optics/balmer_spd_401", &bench_balmer_spd_401, 20, 20);
+    run("optics/spectral_series_lyman_10", &bench_spectral_series_lyman_10, 20, 20);
+    return 0;
+}
+
+var r = main();
+sys_exit_group(r);

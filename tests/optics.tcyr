@@ -1,0 +1,82 @@
+# optics.tcyr — the reference tests of rust-old/src/optics.rs, ported one for one, in order
+# (each test_group is the Rust test's name). Not carried over (port plan §1): the serde
+# round-trip test serde_roundtrip_spectral_line (SpectralLine is not an M7 exchange type).
+# The golden corpus separately checks every function against the oracle (tests/optics_parity.tcyr).
+#
+# Needs prakash: `cyrius deps --features optics`. prakash 2.15.1's bundle adds three compile
+# warnings of its own (see tests/optics_parity.tcyr).
+
+include "tests/ulp.cyr"
+include "src/error.cyr"
+include "src/numerics.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
+include "src/decay_data.cyr"
+include "src/decay.cyr"
+include "src/atomic_data.cyr"
+include "src/atomic_config.cyr"
+include "src/atomic_hydrogenic.cyr"
+include "src/atomic_qed.cyr"
+include "src/optics_data.cyr"
+include "src/optics.cyr"
+
+alloc_init();
+
+var _lines: TmSpectralLine[16];
+
+fn _t_balmer_series_has_6_lines() {
+    test_group("balmer_series_has_6_lines");
+    var n = hydrogen_balmer_series(&_lines, 16);
+    assert_eq(n, 6, "six Balmer lines");
+    var base: *TmSpectralLine = &_lines;
+    var wl: f64 = base.wavelength_nm;
+    assert(f64_abs(wl - 656.3) < 1.0, "H-alpha should be ~656 nm");
+}
+
+fn _t_lines_to_spd_produces_valid_spd() {
+    test_group("lines_to_spd_produces_valid_spd");
+    var n = hydrogen_balmer_series(&_lines, 16);
+    var spd = lines_to_spd(&_lines, n, 2.0, 380.0, 780.0, 1.0);
+    assert(spd != 0, "an SPD is returned");
+    var val: f64 = spd_at(spd, 656.0);
+    assert(val > 0.0, "SPD should have power at H-alpha");
+}
+
+fn _t_spectral_series_lyman() {
+    test_group("spectral_series_lyman");
+    var n = spectral_series_lines(1, 1, 6, &_lines, 16);
+    assert_eq(n, 5, "n=2..=6 -> 5 lines");
+    var base: *TmSpectralLine = &_lines;
+    var wl: f64 = base.wavelength_nm;
+    assert(f64_abs(wl - 121.6) < 1.0, "Lyman-alpha should be ~121.6 nm");
+}
+
+fn _t_h_alpha_visible_color() {
+    test_group("h_alpha_visible_color");
+    var line: TmSpectralLine;
+    line.wavelength_nm = 656.3;
+    line.intensity = 1.0;
+    var err = 0;
+    var rgb = line_to_rgb(line, &err);
+    assert(rgb != 0 && err == PK_ERR_NONE, "656.3 nm is in the visible range");
+    var r: f64 = Rgb_r(rgb);
+    var b: f64 = Rgb_b(rgb);
+    assert(r > b, "H-alpha should be reddish");
+}
+
+# Runs every test and returns the failure count.
+fn main(): i64 {
+    _t_balmer_series_has_6_lines();
+    _t_lines_to_spd_produces_valid_spd();
+    _t_spectral_series_lyman();
+    _t_h_alpha_visible_color();
+    return assert_summary();
+}
+
+var rc = main();
+sys_exit_group(rc);

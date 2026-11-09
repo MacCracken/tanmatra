@@ -128,3 +128,16 @@ ionization-energy lookup is the same story at 6 ns a call.
 |---|---|---|
 | sin | `f64_sin`: 37.0 ns | `_tm_sin`: 48.1 ns |
 | ln | `f64_ln` (x87): 37.8 ns; `_f64_ln_polyfill`: 56.4 ns | `_tm_log`: 53.8 ns |
+
+## M6 Optics (2026-11-08)
+
+Rust's suite has no optics bench, so the Rust column is the `Instant` method (median of 21 batches of 200 calls,
+`black_box` on every input and result), against the Rust prakash 1.2.0.
+
+| Bench | Body | Rust | Cyrius | Cyrius / Rust |
+|---|---|---|---|---|
+| `optics/balmer_spd_401` | the six Balmer lines as a 401-sample SPD, 380–780 nm at 1 nm, FWHM 2 nm | 12.4 µs (Instant) | 68.1 µs | 5.5× |
+| `optics/spectral_series_lyman_10` | the Lyman series n = 2..=10 with A-value intensities | 7.32 µs (Instant) | 14.1 µs | 1.9× |
+
+The SPD is 2,406 exp calls (401 samples × 6 lines), so the gap is mostly `f64_exp`. The Lyman series is mostly
+Einstein A, whose hoisted dipole integral (M3) keeps it within 2× of Rust.

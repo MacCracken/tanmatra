@@ -48,7 +48,7 @@ python3 -I scripts/oracle/probe_tables.py .                                     
 | `atomic` | M3 | 43,309 | `src/m_atomic.rs` | `src/atomic_data.cyr` (`src/t_atomic.rs`: the filling order and Bethe logarithms extracted, the 20 NIST exceptions derived from `electron_configuration`, all proven) |
 | `reaction` | M4 | 7,965 | `src/m_reaction.rs` | `src/reaction_data.cyr` (`src/t_reaction.rs`: the presets, thermal cross sections, yields and pathways through the API; the resonance integrals and scattering's ζ(3) extracted and proven) |
 | `scattering` | M4 | 10,704 | `src/m_scattering.rs` | — (its ζ(3) is in `reaction_data.cyr`) |
-| optics | M6 | — | — | — |
+| `optics` | M6 | 1,039 | `src/m_optics.rs` (the oracle's `optics` feature, against the Rust prakash 1.2.0) | `src/optics_data.cyr` (`src/t_optics.rs`: the Balmer intensities through the API, their upper levels proven) |
 
 ## Format 1
 

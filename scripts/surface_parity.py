@@ -33,6 +33,7 @@ MODULES = {
     "atomic": {"values": {"OrbitalType"}, "structs": {"QuantumNumbers"}},
     "reaction": {"values": set(), "structs": {"NuclearReaction"}},
     "scattering": {"values": set(), "structs": set()},
+    "optics": {"values": set(), "structs": {"SpectralLine"}},
 }
 
 # Rust item -> why it has no direct Cyrius name.
