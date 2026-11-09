@@ -1,0 +1,699 @@
+# timekeeping.tcyr — the reference-value tests of rust-old/src/timekeeping.rs, ported one for
+# one (each test_group is the Rust test's name). Not carried over (port plan §1): the four
+# serde tests serde_roundtrip_frequency_standard, serde_roundtrip_time_scale,
+# serde_roundtrip_atomic_instant and atomic_instant_serde_normalizes; and
+# quality_factors_reasonable, whose every assert is on FrequencyStandard::quality_factor
+# (deprecated in 1.3.0), so no part of it is left to port. The golden corpus separately checks
+# every function against the oracle on the M5 grid, in its tolerance class (tests/parity.tcyr).
+
+include "tests/ulp.cyr"
+include "src/error.cyr"
+include "src/numerics.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
+include "src/decay_data.cyr"
+include "src/decay.cyr"
+include "src/timekeeping_data.cyr"
+include "src/timekeeping.cyr"
+
+alloc_init();
+
+# 1 if |a - b| < eps.
+#must_use
+fn near(a: f64, b: f64, eps: f64): i64 {
+    if (f64_abs(a - b) < eps) { return 1; }
+    return 0;
+}
+
+# Rust's f64::EPSILON, 2^-52 (0x3CB0000000000000).
+#must_use
+fn _f64_epsilon(): f64 {
+    var e: f64 = 0x3CB0000000000000;
+    return e;
+}
+
+# 1 if a == b: rust's derived PartialEq on AtomicInstant (both fields equal).
+#must_use
+fn _inst_eq(a: TmAtomicInstant, b: TmAtomicInstant): i64 {
+    if (a.seconds == b.seconds && a.nanos == b.nanos) { return 1; }
+    return 0;
+}
+
+# 1 if a < b: rust's derived PartialOrd on AtomicInstant (seconds, then nanos).
+#must_use
+fn _inst_lt(a: TmAtomicInstant, b: TmAtomicInstant): i64 {
+    if (a.seconds < b.seconds) { return 1; }
+    if (a.seconds == b.seconds && a.nanos < b.nanos) { return 1; }
+    return 0;
+}
+
+fn _t_cesium_frequency_exact() {
+    test_group("cesium_frequency_exact");
+    var eps: f64 = _f64_epsilon();
+    var f: f64 = frequency_standard_transition_frequency_hz(TM_FREQUENCY_STANDARD_CESIUM133);
+    assert(near(f, 9192631770.0, eps), "Cs-133 9 192 631 770 Hz exactly");
+}
+
+fn _t_rubidium_frequency() {
+    test_group("rubidium_frequency");
+    var f: f64 = frequency_standard_transition_frequency_hz(TM_FREQUENCY_STANDARD_RUBIDIUM87);
+    assert(near(f, 6834682610.904312, 1.0), "Rb-87 6 834 682 610.904 312 Hz");
+}
+
+fn _t_hydrogen_maser_frequency() {
+    test_group("hydrogen_maser_frequency");
+    var f: f64 = frequency_standard_transition_frequency_hz(TM_FREQUENCY_STANDARD_HYDROGEN_MASER);
+    assert(near(f, 1420405751.768, 1.0), "H maser 1 420 405 751.768 Hz");
+}
+
+fn _t_strontium_optical_frequency() {
+    test_group("strontium_optical_frequency");
+    var f: f64 = frequency_standard_transition_frequency_hz(TM_FREQUENCY_STANDARD_STRONTIUM_OPTICAL);
+    assert(near(f, 429228004229873.2, 10.0), "Sr-87 429 228 004 229 873.2 Hz");
+}
+
+fn _t_ytterbium_optical_frequency() {
+    test_group("ytterbium_optical_frequency");
+    var f: f64 = frequency_standard_transition_frequency_hz(TM_FREQUENCY_STANDARD_YTTERBIUM_OPTICAL);
+    assert(near(f, 518295836590863.6, 10.0), "Yb-171 518 295 836 590 863.6 Hz");
+}
+
+fn _t_cesium_wavelength() {
+    test_group("cesium_wavelength");
+    var wl: f64 = frequency_standard_transition_wavelength_m(TM_FREQUENCY_STANDARD_CESIUM133);
+    assert(near(wl, 0.0326, 0.001), "Cs-133 wavelength ~3.26 cm");
+}
+
+fn _t_strontium_wavelength() {
+    test_group("strontium_wavelength");
+    var wl: f64 = frequency_standard_transition_wavelength_m(TM_FREQUENCY_STANDARD_STRONTIUM_OPTICAL);
+    assert(near(wl, 0.000000698, 0.00000001), "Sr-87 wavelength ~698 nm");
+}
+
+fn _t_ytterbium_wavelength() {
+    test_group("ytterbium_wavelength");
+    var wl: f64 = frequency_standard_transition_wavelength_m(TM_FREQUENCY_STANDARD_YTTERBIUM_OPTICAL);
+    assert(near(wl, 0.000000578, 0.00000001), "Yb-171 wavelength ~578 nm");
+}
+
+fn _t_hydrogen_maser_wavelength() {
+    test_group("hydrogen_maser_wavelength");
+    var wl: f64 = frequency_standard_transition_wavelength_m(TM_FREQUENCY_STANDARD_HYDROGEN_MASER);
+    assert(near(wl, 0.211, 0.005), "H maser wavelength ~21 cm");
+}
+
+fn _t_fractional_stability_ordering() {
+    test_group("fractional_stability_ordering");
+    var sr: f64 = frequency_standard_fractional_stability(TM_FREQUENCY_STANDARD_STRONTIUM_OPTICAL);
+    var cs: f64 = frequency_standard_fractional_stability(TM_FREQUENCY_STANDARD_CESIUM133);
+    var yb: f64 = frequency_standard_fractional_stability(TM_FREQUENCY_STANDARD_YTTERBIUM_OPTICAL);
+    var rb: f64 = frequency_standard_fractional_stability(TM_FREQUENCY_STANDARD_RUBIDIUM87);
+    assert(sr < cs, "Sr optical more stable than Cs");
+    assert(yb < rb, "Yb optical more stable than Rb");
+}
+
+fn _t_all_standards_count() {
+    test_group("all_standards_count");
+    assert_eq(all_frequency_standard_count(), 5, "five frequency standards");
+}
+
+fn _t_all_standards_unique_frequencies() {
+    test_group("all_standards_unique_frequencies");
+    var n = all_frequency_standard_count();
+    var i = 0;
+    while (i < n) {
+        var j = i + 1;
+        while (j < n) {
+            var fi: f64 = frequency_standard_transition_frequency_hz(all_frequency_standard(i));
+            var fj: f64 = frequency_standard_transition_frequency_hz(all_frequency_standard(j));
+            assert(f64_abs(fi - fj) > 1.0, "standards have distinct frequencies");
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn _t_tai_tt_roundtrip() {
+    test_group("tai_tt_roundtrip");
+    var tai: f64 = 1000000.0;
+    var tt: f64 = tai_to_tt(tai);
+    var back: f64 = tt_to_tai(tt);
+    assert(near(back, tai, 0.000000000001), "TAI -> TT -> TAI");
+}
+
+fn _t_tai_tt_offset() {
+    test_group("tai_tt_offset");
+    var eps: f64 = _f64_epsilon();
+    var tt: f64 = tai_to_tt(0.0);
+    assert(near(tt, 32.184, eps), "TT = TAI + 32.184 s");
+}
+
+fn _t_tai_gps_roundtrip() {
+    test_group("tai_gps_roundtrip");
+    var tai: f64 = 500000.0;
+    var gps: f64 = tai_to_gps(tai);
+    var back: f64 = gps_to_tai(gps);
+    assert(near(back, tai, 0.000000000001), "TAI -> GPS -> TAI");
+}
+
+fn _t_tai_gps_offset() {
+    test_group("tai_gps_offset");
+    var eps: f64 = _f64_epsilon();
+    var gps: f64 = tai_to_gps(19.0);
+    assert(f64_abs(gps) < eps, "GPS = TAI - 19 s");
+}
+
+fn _t_tt_to_gps_via_tai() {
+    test_group("tt_to_gps_via_tai");
+    var tai: f64 = 1000000.0;
+    var tt: f64 = tai_to_tt(tai);
+    var gps: f64 = tai_to_gps(tai);
+    assert(near(tt - gps, 51.184, 0.0000000001), "TT - GPS = 51.184 s");
+}
+
+fn _t_leap_seconds_before_1972() {
+    test_group("leap_seconds_before_1972");
+    assert_eq(leap_seconds_at(1971, 12), 0, "1971-12: 0");
+    assert_eq(leap_seconds_at(1960, 6), 0, "1960-06: 0");
+}
+
+fn _t_leap_seconds_1972_jan() {
+    test_group("leap_seconds_1972_jan");
+    assert_eq(leap_seconds_at(1972, 1), 10, "1972-01: 10");
+}
+
+fn _t_leap_seconds_1972_jul() {
+    test_group("leap_seconds_1972_jul");
+    assert_eq(leap_seconds_at(1972, 7), 11, "1972-07: 11");
+}
+
+fn _t_leap_seconds_1972_between() {
+    test_group("leap_seconds_1972_between");
+    assert_eq(leap_seconds_at(1972, 6), 10, "1972-06: still 10");
+}
+
+fn _t_leap_seconds_2017() {
+    test_group("leap_seconds_2017");
+    assert_eq(leap_seconds_at(2017, 1), 37, "2017-01: 37");
+}
+
+fn _t_leap_seconds_2024() {
+    test_group("leap_seconds_2024");
+    assert_eq(leap_seconds_at(2024, 6), 37, "2024-06: still 37");
+}
+
+fn _t_leap_seconds_gps_epoch() {
+    test_group("leap_seconds_gps_epoch");
+    assert_eq(leap_seconds_at(1980, 1), 19, "GPS epoch 1980-01: 19");
+}
+
+fn _t_tai_to_utc_offset_2024() {
+    test_group("tai_to_utc_offset_2024");
+    var eps: f64 = _f64_epsilon();
+    var off: f64 = tai_to_utc_offset(2024, 1);
+    assert(near(off, 37.0, eps), "TAI - UTC = 37 s in 2024");
+}
+
+fn _t_utc_to_tai_offset_2024() {
+    test_group("utc_to_tai_offset_2024");
+    var eps: f64 = _f64_epsilon();
+    var off: f64 = utc_to_tai_offset(2024, 1);
+    assert(near(off, -37.0, eps), "UTC - TAI = -37 s in 2024");
+}
+
+fn _t_tai_utc_offsets_inverse() {
+    test_group("tai_utc_offsets_inverse");
+    var eps: f64 = _f64_epsilon();
+    var year = 2020;
+    var month = 6;
+    var fwd: f64 = tai_to_utc_offset(year, month);
+    var inv: f64 = utc_to_tai_offset(year, month);
+    assert(f64_abs(fwd + inv) < eps, "offsets cancel");
+}
+
+fn _t_atomic_instant_basic() {
+    test_group("atomic_instant_basic");
+    var t = TmAtomicInstant_new(100, 500000000);
+    var s: f64 = t.tai_seconds();
+    assert(near(s, 100.5, 0.000000001), "100 s + 0.5e9 ns = 100.5 s");
+}
+
+fn _t_atomic_instant_nanos_overflow() {
+    test_group("atomic_instant_nanos_overflow");
+    var t = TmAtomicInstant_new(10, 1500000000);
+    assert_eq(t.seconds, 11, "1.5e9 ns carries 1 s");
+    assert_eq(t.nanos, 500000000, "0.5e9 ns remain");
+}
+
+fn _t_atomic_instant_from_tai_seconds() {
+    test_group("atomic_instant_from_tai_seconds");
+    var t = TmAtomicInstant_from_tai_seconds(42.75);
+    assert_eq(t.seconds, 42, "42 whole seconds");
+    assert_eq(t.nanos, 750000000, "0.75 s = 750 000 000 ns");
+}
+
+fn _t_atomic_instant_tai_seconds_roundtrip() {
+    test_group("atomic_instant_tai_seconds_roundtrip");
+    var s: f64 = 123456789.12345679;
+    var t = TmAtomicInstant_from_tai_seconds(s);
+    var back: f64 = t.tai_seconds();
+    assert(near(back, s, 0.000001), "f64 -> instant -> f64");
+}
+
+fn _t_atomic_instant_to_tt() {
+    test_group("atomic_instant_to_tt");
+    var t = TmAtomicInstant_new(1000, 0);
+    var tt: f64 = t.to_tt_seconds();
+    assert(near(tt, 1032.184, 0.0000000001), "TT = 1032.184 s");
+}
+
+fn _t_atomic_instant_to_gps() {
+    test_group("atomic_instant_to_gps");
+    var t = TmAtomicInstant_new(1000, 0);
+    var gps: f64 = t.to_gps_seconds();
+    assert(near(gps, 981.0, 0.0000000001), "GPS = 981 s");
+}
+
+fn _t_atomic_instant_duration_since() {
+    test_group("atomic_instant_duration_since");
+    var t1 = TmAtomicInstant_new(100, 250000000);
+    var t2 = TmAtomicInstant_new(200, 750000000);
+    var dt: f64 = t2.duration_since(t1);
+    assert(near(dt, 100.5, 0.000000001), "dt = 100.5 s");
+}
+
+fn _t_atomic_instant_duration_since_negative() {
+    test_group("atomic_instant_duration_since_negative");
+    var t1 = TmAtomicInstant_new(200, 0);
+    var t2 = TmAtomicInstant_new(100, 0);
+    var dt: f64 = t2.duration_since(t1);
+    assert(near(dt, -100.0, 0.000000001), "dt = -100 s");
+}
+
+fn _t_atomic_instant_add_seconds() {
+    test_group("atomic_instant_add_seconds");
+    var t = TmAtomicInstant_new(100, 0);
+    var t2 = t.add_seconds(1.5);
+    var s: f64 = t2.tai_seconds();
+    assert(near(s, 101.5, 0.000000001), "100 s + 1.5 s");
+}
+
+fn _t_atomic_instant_add_negative() {
+    test_group("atomic_instant_add_negative");
+    var t = TmAtomicInstant_new(100, 0);
+    var dt: f64 = -10.0;
+    var t2 = t.add_seconds(dt);
+    var s: f64 = t2.tai_seconds();
+    assert(near(s, 90.0, 0.000000001), "100 s - 10 s");
+}
+
+fn _t_atomic_instant_ordering() {
+    test_group("atomic_instant_ordering");
+    var t1 = TmAtomicInstant_new(100, 0);
+    var t2 = TmAtomicInstant_new(100, 1);
+    var t3 = TmAtomicInstant_new(101, 0);
+    assert_eq(_inst_lt(t1, t2), 1, "(100, 0) < (100, 1)");
+    assert_eq(_inst_lt(t2, t3), 1, "(100, 1) < (101, 0)");
+}
+
+fn _t_gravitational_redshift_sign() {
+    test_group("gravitational_redshift_sign");
+    var shift: f64 = gravitational_redshift(100.0);
+    assert(shift < 0.0, "higher receiver: negative shift");
+}
+
+fn _t_gravitational_redshift_zero() {
+    test_group("gravitational_redshift_zero");
+    var eps: f64 = _f64_epsilon();
+    var shift: f64 = gravitational_redshift(0.0);
+    assert(f64_abs(shift) < eps, "no height difference: no shift");
+}
+
+fn _t_gravitational_redshift_magnitude() {
+    test_group("gravitational_redshift_magnitude");
+    var shift: f64 = gravitational_redshift(1.0);
+    assert(near(shift, -0.000000000000000109, 0.000000000000000001), "1 m: df/f ~ -1.09e-16");
+}
+
+fn _t_gps_clock_correction() {
+    test_group("gps_clock_correction");
+    var correction: f64 = schwarzschild_clock_correction_us_per_day(26560000.0, 3874.0);
+    assert(near(correction, 38.6, 1.0), "GPS correction ~38.6 us/day");
+}
+
+fn _t_gps_gravitational_part() {
+    test_group("gps_gravitational_part");
+    var c2: f64 = TM_C * TM_C;
+    var inv: f64 = (1.0 / 6371000.0) - (1.0 / 26560000.0);
+    var grav: f64 = (((TM_GM_EARTH / c2) * inv) * 86400.0) * 1000000.0;
+    assert(near(grav, 45.7, 0.5), "gravitational part ~45.7 us/day");
+}
+
+fn _t_gps_velocity_part() {
+    test_group("gps_velocity_part");
+    var c2: f64 = TM_C * TM_C;
+    var vel: f64 = (((3874.0 * 3874.0) / (2.0 * c2)) * 86400.0) * 1000000.0;
+    assert(near(vel, 7.2, 0.1), "velocity part ~7.2 us/day");
+}
+
+fn _t_schwarzschild_gps_iers_reference() {
+    test_group("schwarzschild_gps_iers_reference");
+    var a: f64 = 26561750.0;
+    var v: f64 = f64_sqrt(TM_GM_EARTH / a);
+    var net: f64 = schwarzschild_clock_correction_us_per_day(a, v);
+    assert(near(net, 38.575, 0.001), "net +38.575 us/day (IERS 2010 / Ashby 2003)");
+    var grav_only: f64 = schwarzschild_clock_correction_us_per_day(a, 0.0);
+    assert(near(grav_only, 45.788, 0.001), "gravitational +45.788 us/day");
+}
+
+fn _t_schwarzschild_leo() {
+    test_group("schwarzschild_leo");
+    var correction: f64 = schwarzschild_clock_correction_us_per_day(6771000.0, 7660.0);
+    assert(correction < 0.0, "LEO correction negative (velocity dominates)");
+}
+
+fn _t_second_order_doppler_zero() {
+    test_group("second_order_doppler_zero");
+    var eps: f64 = _f64_epsilon();
+    var shift: f64 = second_order_doppler_shift(0.0);
+    assert(f64_abs(shift) < eps, "beta = 0: no shift");
+}
+
+fn _t_second_order_doppler_sign() {
+    test_group("second_order_doppler_sign");
+    var shift: f64 = second_order_doppler_shift(0.1);
+    assert(shift < 0.0, "moving clock runs slow");
+}
+
+fn _t_second_order_doppler_magnitude() {
+    test_group("second_order_doppler_magnitude");
+    var shift: f64 = second_order_doppler_shift(0.01);
+    assert(near(shift, -0.00005, 0.0000000001), "beta = 0.01: df/f = -5e-5");
+}
+
+fn _t_sagnac_one_way_equatorial_loop() {
+    test_group("sagnac_one_way_equatorial_loop");
+    var r: f64 = 6378137.0;
+    var steps = 3600;
+    var fsteps: f64 = f64_from(steps);
+    var total: f64 = 0.0;
+    var k = 0;
+    while (k < steps) {
+        var fk: f64 = f64_from(k);
+        var fk1: f64 = f64_from(k + 1);
+        var a1: f64 = ((2.0 * _TM_PI) * fk) / fsteps;
+        var a2: f64 = ((2.0 * _TM_PI) * fk1) / fsteps;
+        var c1: f64 = f64_cos(a1);
+        var s1: f64 = f64_sin(a1);
+        var c2: f64 = f64_cos(a2);
+        var s2: f64 = f64_sin(a2);
+        var hop: f64 = sagnac_one_way_ns(r * c1, r * s1, r * c2, r * s2);
+        total = total + hop;
+        k = k + 1;
+    }
+    var exact: f64 = (((((2.0 * TM_EARTH_ROTATION_RAD_S) * _TM_PI) * r) * r) / (TM_C * TM_C)) * 1000000000.0;
+    assert(near(exact, 207.39, 0.01), "2 Omega (pi R^2) / c^2 = 207.39 ns");
+    assert(f64_abs(total - exact) / exact < 0.00001, "one-way hops sum to the loop value");
+}
+
+fn _t_cipm_2025_frequencies() {
+    test_group("cipm_2025_frequencies");
+    var sr: f64 = frequency_standard_transition_frequency_hz(TM_FREQUENCY_STANDARD_STRONTIUM_OPTICAL);
+    assert(near(sr, 429228004229872.992, 0.07), "Sr CIPM 2025");
+    var yb: f64 = frequency_standard_transition_frequency_hz(TM_FREQUENCY_STANDARD_YTTERBIUM_OPTICAL);
+    assert(near(yb, 518295836590863.632, 0.07), "Yb CIPM 2025");
+    var rb: f64 = frequency_standard_transition_frequency_hz(TM_FREQUENCY_STANDARD_RUBIDIUM87);
+    assert(near(rb, 6834682610.9043129, 0.000001), "Rb CIPM 2025");
+    var q: f64 = frequency_standard_quality_factor_for_linewidth(TM_FREQUENCY_STANDARD_CESIUM133, 1.0);
+    assert(near(q, 9192631770.0, 0.001), "Cs Q at 1 Hz linewidth");
+}
+
+fn _t_tcg_and_tdb_at_j2000() {
+    test_group("tcg_and_tdb_at_j2000");
+    var jd: f64 = 2451545.0;
+    var tcg_tt: f64 = tcg_minus_tt_seconds(jd);
+    assert(near(tcg_tt, 0.505833, 0.000001), "TCG - TT at J2000 ~0.505833 s");
+    var tcg: f64 = tt_to_tcg_jd(jd);
+    var tt: f64 = tcg_to_tt_jd(tcg);
+    assert(near(tt, jd, 0.000000001), "TT -> TCG -> TT");
+    var tdb: f64 = tcb_to_tdb_jd(jd);
+    var d: f64 = ((tdb - jd) * 86400.0) + 11.2537;
+    assert(f64_abs(d) < 0.001, "TDB - TCB at J2000 ~-11.2537 s");
+    var tcb: f64 = tdb_to_tcb_jd(tdb);
+    assert(near(tcb, jd, 0.000000001), "TCB -> TDB -> TCB");
+    var t0: f64 = TM_T0_JD;
+    var tcg_tt0: f64 = tcg_minus_tt_seconds(t0);
+    assert(f64_abs(tcg_tt0) < 0.000000000001, "TCG - TT = 0 at T0");
+    var sec0: f64 = tcb_minus_tcg_secular_seconds(t0);
+    assert(f64_abs(sec0) < 0.000000000001, "secular TCB - TCG = 0 at T0");
+}
+
+fn _t_tai_minus_utc_rubber_second_era() {
+    test_group("tai_minus_utc_rubber_second_era");
+    var a: f64 = tai_minus_utc_seconds_mjd(37300.0);
+    assert(near(a, 1.422818, 0.000000001), "MJD 37300 (1961-01-01): 1.422818 s");
+    var b: f64 = tai_minus_utc_seconds_mjd(41316.999);
+    assert(near(b, 9.892239, 0.00001), "end of 1971: ~9.892239 s");
+    var c: f64 = tai_minus_utc_seconds_mjd(41317.0);
+    assert(near(c, 10.0, 0.000000000001), "1972-01-01: 10 s");
+    var d: f64 = tai_minus_utc_seconds_mjd(57754.0);
+    assert(near(d, 37.0, 0.000000000001), "2017-01-01: 37 s");
+    var e: f64 = tai_minus_utc_seconds_mjd(57753.0);
+    assert(near(e, 36.0, 0.000000000001), "2016-12-31: 36 s");
+    var f: f64 = tai_minus_utc_seconds_mjd(30000.0);
+    assert(f64_abs(f) < 0.000000000001, "before 1961: 0 s");
+}
+
+fn _t_atomic_instant_exact_at_modern_epoch() {
+    test_group("atomic_instant_exact_at_modern_epoch");
+    var t0 = TmAtomicInstant_new(2100000000, 123456789);
+    var same = t0.add_seconds(0.0);
+    assert_eq(_inst_eq(same, t0), 1, "t0 + 0 s == t0");
+    var t1 = t0.add_seconds(0.000000001);
+    var hi1, lo1 = t1.nanoseconds_since(t0);
+    assert_eq(hi1, 0, "t0 + 1e-9 s: 1 ns later (high word)");
+    assert_eq(lo1, 1, "t0 + 1e-9 s: 1 ns later (low word)");
+    var t2 = t0.add_seconds(-2.5);
+    var hi2, lo2 = t2.nanoseconds_since(t0);
+    assert_eq(hi2, 0 - 1, "t0 - 2.5 s: -2 500 000 000 ns (high word)");
+    assert_eq(lo2, 0 - 2500000000, "t0 - 2.5 s: -2 500 000 000 ns (low word)");
+    var t3 = t0.add_nanoseconds(900000000);
+    assert_eq(t3.seconds, 2100000001, "t0 + 0.9e9 ns: seconds carry");
+    assert_eq(t3.nanos, 23456789, "t0 + 0.9e9 ns: nanos wrap");
+    var t4 = TmAtomicInstant_from_tai_seconds(0.3);
+    assert_eq(t4.nanos, 300000000, "0.3 s = 300 000 000 ns");
+}
+
+fn _t_time_dilation_exact_vs_leading_order() {
+    test_group("time_dilation_exact_vs_leading_order");
+    var exact: f64 = time_dilation_shift_exact(0.5);
+    var root: f64 = f64_sqrt(0.75);
+    assert(near(exact, root - 1.0, 0.000000000000001), "beta = 0.5: sqrt(0.75) - 1");
+    var lead: f64 = second_order_doppler_shift(0.0001);
+    var full: f64 = time_dilation_shift_exact(0.0001);
+    assert(near(lead, full, 0.0000000000000001), "beta = 1e-4: leading order = exact");
+}
+
+fn _t_sagnac_equator() {
+    test_group("sagnac_equator");
+    var dt: f64 = sagnac_correction_ns(0.0, 1000000.0);
+    assert(f64_abs(dt) < 0.0000000001, "equator: no Sagnac correction");
+}
+
+fn _t_sagnac_pole() {
+    test_group("sagnac_pole");
+    # core::f64::consts::FRAC_PI_2: pi / 2 halves exactly.
+    var half_pi: f64 = _TM_PI / 2.0;
+    var dt: f64 = sagnac_correction_ns(half_pi, 1000000.0);
+    assert(dt > 0.0, "pole: positive");
+    var expected: f64 = (((4.0 * TM_EARTH_ROTATION_RAD_S) * 1000000.0) / (TM_C * TM_C)) * 1000000000.0;
+    assert(near(dt, expected, 0.000001), "pole: 4 Omega A / c^2");
+}
+
+fn _t_sagnac_sign_hemisphere() {
+    test_group("sagnac_sign_hemisphere");
+    var dt_north: f64 = sagnac_correction_ns(0.5, 1000000.0);
+    assert(dt_north > 0.0, "northern hemisphere: positive");
+    var dt_south: f64 = sagnac_correction_ns(-0.5, 1000000.0);
+    assert(dt_south < 0.0, "southern hemisphere: negative");
+}
+
+fn _t_lg_rate_value() {
+    test_group("lg_rate_value");
+    var lg: f64 = TM_LG_RATE;
+    assert(near(lg, 0.0000000006969290134, 0.0000000000000000001), "L_G = 6.969290134e-10");
+}
+
+fn _t_lc_rate_value() {
+    test_group("lc_rate_value");
+    var lc: f64 = TM_LC_RATE;
+    assert(near(lc, 0.0000000148082686741, 0.000000000000000001), "L_C = 1.48082686741e-8");
+}
+
+fn _t_tai_tt_offset_value() {
+    test_group("tai_tt_offset_value");
+    var eps: f64 = _f64_epsilon();
+    var off: f64 = TM_TAI_TT_OFFSET_S;
+    assert(near(off, 32.184, eps), "TT - TAI = 32.184 s");
+}
+
+fn _t_tai_gps_offset_value() {
+    test_group("tai_gps_offset_value");
+    var eps: f64 = _f64_epsilon();
+    var off: f64 = TM_TAI_GPS_OFFSET_S;
+    assert(near(off, 19.0, eps), "TAI - GPS = 19 s");
+}
+
+fn _t_leap_second_table_length() {
+    test_group("leap_second_table_length");
+    assert_eq(_TM_LEAP_SECOND_COUNT, 28, "28 leap-second entries");
+}
+
+fn _t_leap_seconds_monotonic() {
+    test_group("leap_seconds_monotonic");
+    var i = 1;
+    while (i < _TM_LEAP_SECOND_COUNT) {
+        var y_prev = _TM_LEAP_SECOND_YEAR[i - 1];
+        var m_prev = _TM_LEAP_SECOND_MONTH[i - 1];
+        var d_prev = _TM_LEAP_SECOND_DELTA_AT[i - 1];
+        var y_curr = _TM_LEAP_SECOND_YEAR[i];
+        var m_curr = _TM_LEAP_SECOND_MONTH[i];
+        var d_curr = _TM_LEAP_SECOND_DELTA_AT[i];
+        # rust `(y_curr, m_curr) > (y_prev, m_prev)`: lexicographic.
+        var sorted = 0;
+        if (y_curr > y_prev || (y_curr == y_prev && m_curr > m_prev)) { sorted = 1; }
+        assert(sorted, "Table not sorted");
+        assert(d_curr > d_prev, "Delta AT not monotonically increasing");
+        i = i + 1;
+    }
+}
+
+fn _t_leap_seconds_first_and_last() {
+    test_group("leap_seconds_first_and_last");
+    assert_eq(_TM_LEAP_SECOND_YEAR[0], 1972, "first entry year 1972");
+    assert_eq(_TM_LEAP_SECOND_MONTH[0], 1, "first entry month 1");
+    assert_eq(_TM_LEAP_SECOND_DELTA_AT[0], 10, "first entry Delta AT 10");
+    var last = _TM_LEAP_SECOND_COUNT - 1;
+    assert_eq(_TM_LEAP_SECOND_YEAR[last], 2017, "last entry year 2017");
+    assert_eq(_TM_LEAP_SECOND_MONTH[last], 1, "last entry month 1");
+    assert_eq(_TM_LEAP_SECOND_DELTA_AT[last], 37, "last entry Delta AT 37");
+}
+
+fn _t_leap_seconds_all_valid_months() {
+    test_group("leap_seconds_all_valid_months");
+    var k = 0;
+    while (k < _TM_LEAP_SECOND_COUNT) {
+        var m = _TM_LEAP_SECOND_MONTH[k];
+        var valid = 0;
+        if (m == 1 || m == 7) { valid = 1; }
+        assert(valid, "Leap second in unexpected month");
+        k = k + 1;
+    }
+}
+
+fn _t_cesium_defines_si_second() {
+    test_group("cesium_defines_si_second");
+    var eps: f64 = _f64_epsilon();
+    var f: f64 = frequency_standard_transition_frequency_hz(TM_FREQUENCY_STANDARD_CESIUM133);
+    assert(near(f, 9192631770.0, eps), "SI second: 9 192 631 770 Cs-133 periods");
+}
+
+fn _t_gps_epoch_leap_seconds_consistent() {
+    test_group("gps_epoch_leap_seconds_consistent");
+    var eps: f64 = _f64_epsilon();
+    var delta_at = leap_seconds_at(1980, 1);
+    var d: f64 = f64_from(delta_at);
+    var off: f64 = TM_TAI_GPS_OFFSET_S;
+    assert(near(d, off, eps), "GPS epoch Delta AT = TAI - GPS = 19 s");
+}
+
+fn _t_atomic_instant_tt_gps_consistent() {
+    test_group("atomic_instant_tt_gps_consistent");
+    var t = TmAtomicInstant_new(1000000, 0);
+    var tt: f64 = t.to_tt_seconds();
+    var gps: f64 = t.to_gps_seconds();
+    assert(near(tt - gps, 51.184, 0.0000000001), "TT - GPS = 51.184 s");
+}
+
+# Runs every test and returns the failure count.
+fn main(): i64 {
+    _t_cesium_frequency_exact();
+    _t_rubidium_frequency();
+    _t_hydrogen_maser_frequency();
+    _t_strontium_optical_frequency();
+    _t_ytterbium_optical_frequency();
+    _t_cesium_wavelength();
+    _t_strontium_wavelength();
+    _t_ytterbium_wavelength();
+    _t_hydrogen_maser_wavelength();
+    _t_fractional_stability_ordering();
+    _t_all_standards_count();
+    _t_all_standards_unique_frequencies();
+    _t_tai_tt_roundtrip();
+    _t_tai_tt_offset();
+    _t_tai_gps_roundtrip();
+    _t_tai_gps_offset();
+    _t_tt_to_gps_via_tai();
+    _t_leap_seconds_before_1972();
+    _t_leap_seconds_1972_jan();
+    _t_leap_seconds_1972_jul();
+    _t_leap_seconds_1972_between();
+    _t_leap_seconds_2017();
+    _t_leap_seconds_2024();
+    _t_leap_seconds_gps_epoch();
+    _t_tai_to_utc_offset_2024();
+    _t_utc_to_tai_offset_2024();
+    _t_tai_utc_offsets_inverse();
+    _t_atomic_instant_basic();
+    _t_atomic_instant_nanos_overflow();
+    _t_atomic_instant_from_tai_seconds();
+    _t_atomic_instant_tai_seconds_roundtrip();
+    _t_atomic_instant_to_tt();
+    _t_atomic_instant_to_gps();
+    _t_atomic_instant_duration_since();
+    _t_atomic_instant_duration_since_negative();
+    _t_atomic_instant_add_seconds();
+    _t_atomic_instant_add_negative();
+    _t_atomic_instant_ordering();
+    _t_gravitational_redshift_sign();
+    _t_gravitational_redshift_zero();
+    _t_gravitational_redshift_magnitude();
+    _t_gps_clock_correction();
+    _t_gps_gravitational_part();
+    _t_gps_velocity_part();
+    _t_schwarzschild_gps_iers_reference();
+    _t_schwarzschild_leo();
+    _t_second_order_doppler_zero();
+    _t_second_order_doppler_sign();
+    _t_second_order_doppler_magnitude();
+    _t_sagnac_one_way_equatorial_loop();
+    _t_cipm_2025_frequencies();
+    _t_tcg_and_tdb_at_j2000();
+    _t_tai_minus_utc_rubber_second_era();
+    _t_atomic_instant_exact_at_modern_epoch();
+    _t_time_dilation_exact_vs_leading_order();
+    _t_sagnac_equator();
+    _t_sagnac_pole();
+    _t_sagnac_sign_hemisphere();
+    _t_lg_rate_value();
+    _t_lc_rate_value();
+    _t_tai_tt_offset_value();
+    _t_tai_gps_offset_value();
+    _t_leap_second_table_length();
+    _t_leap_seconds_monotonic();
+    _t_leap_seconds_first_and_last();
+    _t_leap_seconds_all_valid_months();
+    _t_cesium_defines_si_second();
+    _t_gps_epoch_leap_seconds_consistent();
+    _t_atomic_instant_tt_gps_consistent();
+    return assert_summary();
+}
+
+var exit_code = main();
+if (exit_code > 0) { exit_code = 1; }
+sys_exit_group(exit_code);

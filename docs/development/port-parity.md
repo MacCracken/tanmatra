@@ -30,8 +30,8 @@ Per Cyrius counterpart: rows, then the ulp histogram of each output against Rust
 | `floor` | `f64_floor` | A | 659 | all 0 | all 0 |
 | `trunc` | `f64_trunc` | A | 659 | all 0 | all 0 |
 | `cbrt` | `ganita_f64_cbrt` | A | 2,074 | all 0 | all 0 |
-| `round` | port helper (M5) | A | 659 | pending | pending |
-| `ldexp` | port helper (M2) | A | 306 | pending | pending |
+| `round` | **`_tm_round_half_away`** (M5): Rust libm's `trunc(x + copysign(0.5 − 0.25ε, x))` | A | 659 | **all 0** | **all 0** (x86_64 PE too) |
+| `ldexp` | **`_tm_ldexp`** (M2): Rust libm's scalbn | A | 306 | **all 0** | **all 0** (x86_64 PE too) |
 | `sin` | `f64_sin` | C | 710 | all 0 | all 0 |
 | `cos` | `f64_cos` | C | 710 | all 0 | all 0 |
 | `tan` | `ganita_f64_tan` | C | 710 | all 0 | all 0 |
@@ -197,6 +197,7 @@ Never raise K_F after seeing the port's results. A row that fails K_F is a defec
 |---|---|---|---|---|
 | `Nucleus::atomic_mass_amu` | M2 | **0**: the two `pow` results (Z^2.39 and Z^5.35) nudged ±1 ulp on all 2,053 golden rows, with `nuclear_mass` taken from the golden corpus. The electron binding is about 10⁻⁶ of the mass, so a 1-ulp change never moves the output | 2 | **2** |
 
+| `sagnac_correction_ns` | M5 | **2**: sin(φ) nudged ±1 ulp on all 21 golden rows, through four products and a quotient | 1 | **6** |
 | `remaining_fraction` | M2 | **1**: the output is the pow result itself, `pow(0.5, t / T½)` (t / T½ is a correctly rounded division on both sides) | 1 | **4** |
 
 The Myers–Swiatecki shell term turned out to be class B, not C. It uses only cbrt (correctly rounded on both

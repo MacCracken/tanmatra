@@ -25,11 +25,13 @@ mod m_libm;
 mod m_nucleus;
 mod m_particle;
 mod m_relativity;
+mod m_timekeeping;
 mod rust_src;
 mod t_constants;
 mod t_decay;
 mod t_nucleus;
 mod t_particle;
+mod t_timekeeping;
 mod tsv;
 
 use std::collections::BTreeSet;
@@ -46,6 +48,7 @@ fn golden_modules() -> Vec<tsv::Module> {
         m_nucleus::emit(),
         m_particle::emit(),
         m_relativity::emit(),
+        m_timekeeping::emit(),
     ]
 }
 
@@ -86,6 +89,10 @@ fn cyrius_outputs(root: &Path, prov: &str) -> Result<Vec<Output>, String> {
         t_nucleus::emit(&rust("nucleus")?, prov)?,
     );
     push("src/decay_data.cyr", t_decay::emit(&rust("decay")?, prov)?);
+    push(
+        "src/timekeeping_data.cyr",
+        t_timekeeping::emit(&rust("timekeeping")?, prov)?,
+    );
     Ok(out)
 }
 

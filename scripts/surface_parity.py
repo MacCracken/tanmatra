@@ -29,6 +29,7 @@ MODULES = {
     "relativity": {"values": set(), "structs": {"FourMomentum"}},
     "nucleus": {"values": {"Nucleus", "ShellLevel"}, "structs": {"SuperallowedDecay"}},
     "decay": {"values": set(), "structs": set()},
+    "timekeeping": {"values": {"FrequencyStandard"}, "structs": {"AtomicInstant"}},
 }
 
 # Rust item -> why it has no direct Cyrius name.
@@ -38,6 +39,9 @@ EXCEPTIONS = {
     "superallowed_ft_values": "a Vec: superallowed_ft_value_count + superallowed_ft_value(k)",
     "corrected_ft_value": "deprecated in 1.3.0, not carried over (port plan §1)",
     "known_isotopes": "a Vec: known_isotope_count + known_isotope(k), read from the baked table",
+    "all_frequency_standards": "a slice: all_frequency_standard_count + all_frequency_standard(k)",
+    "FrequencyStandard::quality_factor": "deprecated in 1.3.0, not carried over (port plan §1)",
+    "const LEAP_SECOND_TABLE_VALID_UNTIL": "a (year, month, day) tuple: TM_LEAP_SECOND_TABLE_VALID_UNTIL_YEAR / _MONTH / _DAY",
 }
 
 

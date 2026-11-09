@@ -28,6 +28,8 @@ include "src/nucleus.cyr"
 include "src/shell_model.cyr"
 include "src/decay_data.cyr"
 include "src/decay.cyr"
+include "src/timekeeping_data.cyr"
+include "src/timekeeping.cyr"
 
 alloc_init();
 
@@ -274,14 +276,15 @@ fn _par_constants(fp, fl): i64 {
 }
 
 # `libm::` rows: the Cyrius math function each libm call maps to (port plan §5).
-# libm::round needs the port's half-away helper (M5), so it is pending until then; libm::ldexp
-# is the port's _tm_ldexp (M2), Rust libm's scalbn operation for operation.
+# libm::round is the port's _tm_round_half_away (M5) and libm::ldexp its _tm_ldexp (M2), each
+# Rust libm's own algorithm operation for operation.
 fn _par_libm(fp, fl): i64 {
     var x: f64 = _par_in(0);
     if (_par_eq(fp, fl, "libm::sqrt") == 1) { var r: f64 = f64_sqrt(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::fabs") == 1) { var r: f64 = f64_abs(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::floor") == 1) { var r: f64 = f64_floor(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::trunc") == 1) { var r: f64 = f64_trunc(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::round") == 1) { var r: f64 = _tm_round_half_away(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::cbrt") == 1) { var r: f64 = ganita_f64_cbrt(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::sin") == 1) { var r: f64 = f64_sin(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::cos") == 1) { var r: f64 = f64_cos(x); _par_got_f(r); return 1; }
@@ -647,6 +650,167 @@ fn _par_decay(fp, fl): i64 {
     return 0;
 }
 
+# The TM_FREQUENCY_STANDARD_* value of input k's enum token, or -1.
+fn _par_standard(k): i64 {
+    var at = k * 8;
+    if (load64(_par_in_k + at) != 101) { return 0 - 1; }
+    var p = load64(_par_in_v + at);
+    var l = load64(_par_in_l + at);
+    if (_par_eq(p, l, "FrequencyStandard.Cesium133") == 1) { return TM_FREQUENCY_STANDARD_CESIUM133; }
+    if (_par_eq(p, l, "FrequencyStandard.Rubidium87") == 1) { return TM_FREQUENCY_STANDARD_RUBIDIUM87; }
+    if (_par_eq(p, l, "FrequencyStandard.HydrogenMaser") == 1) { return TM_FREQUENCY_STANDARD_HYDROGEN_MASER; }
+    if (_par_eq(p, l, "FrequencyStandard.StrontiumOptical") == 1) { return TM_FREQUENCY_STANDARD_STRONTIUM_OPTICAL; }
+    if (_par_eq(p, l, "FrequencyStandard.YtterbiumOptical") == 1) { return TM_FREQUENCY_STANDARD_YTTERBIUM_OPTICAL; }
+    return 0 - 1;
+}
+
+# A TmFrequencyStandard value's golden name.
+#must_use
+fn _par_standard_name(s): i64 {
+    if (s == TM_FREQUENCY_STANDARD_CESIUM133) { return "FrequencyStandard.Cesium133"; }
+    if (s == TM_FREQUENCY_STANDARD_RUBIDIUM87) { return "FrequencyStandard.Rubidium87"; }
+    if (s == TM_FREQUENCY_STANDARD_HYDROGEN_MASER) { return "FrequencyStandard.HydrogenMaser"; }
+    if (s == TM_FREQUENCY_STANDARD_STRONTIUM_OPTICAL) { return "FrequencyStandard.StrontiumOptical"; }
+    if (s == TM_FREQUENCY_STANDARD_YTTERBIUM_OPTICAL) { return "FrequencyStandard.YtterbiumOptical"; }
+    return "FrequencyStandard.?";
+}
+
+# Appends an instant as its golden tokens, `i:seconds i:nanos`.
+fn _par_got_inst(t: TmAtomicInstant) {
+    _par_got_i(t.seconds);
+    _par_got_i(t.nanos);
+}
+
+# The instant in inputs k, k + 1 (already normalized by the oracle).
+fn _par_inst(k): TmAtomicInstant {
+    var t: TmAtomicInstant;
+    t.seconds = _par_in(k);
+    t.nanos = _par_in(k + 1);
+    return t;
+}
+
+# `timekeeping` rows: src/timekeeping.cyr. An instant is `i:seconds i:nanos`.
+fn _par_timekeeping(fp, fl): i64 {
+    if (_par_eq(fp, fl, "const") == 1) {
+        var np = load64(_par_in_v);
+        var nl = load64(_par_in_l);
+        var x: f64 = 0.0;
+        if (_par_eq(np, nl, "LEAP_SECOND_TABLE_VALID_UNTIL") == 1) {
+            _par_got_i(TM_LEAP_SECOND_TABLE_VALID_UNTIL_YEAR);
+            _par_got_i(TM_LEAP_SECOND_TABLE_VALID_UNTIL_MONTH);
+            _par_got_i(TM_LEAP_SECOND_TABLE_VALID_UNTIL_DAY);
+            return 1;
+        }
+        if (_par_eq(np, nl, "TAI_TT_OFFSET_S") == 1) { x = TM_TAI_TT_OFFSET_S; }
+        elif (_par_eq(np, nl, "TAI_GPS_OFFSET_S") == 1) { x = TM_TAI_GPS_OFFSET_S; }
+        elif (_par_eq(np, nl, "LG_RATE") == 1) { x = TM_LG_RATE; }
+        elif (_par_eq(np, nl, "LC_RATE") == 1) { x = TM_LC_RATE; }
+        elif (_par_eq(np, nl, "LB_RATE") == 1) { x = TM_LB_RATE; }
+        elif (_par_eq(np, nl, "TDB0_S") == 1) { x = TM_TDB0_S; }
+        elif (_par_eq(np, nl, "T0_JD") == 1) { x = TM_T0_JD; }
+        else { return 0 - 1; }
+        _par_got_f(x);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "all_frequency_standards") == 1) {
+        var cnt = all_frequency_standard_count();
+        _par_got_seq(cnt);
+        var k = 0;
+        while (k < cnt) { _par_got_e(_par_standard_name(all_frequency_standard(k))); k = k + 1; }
+        return 1;
+    }
+    var fs = _par_standard(0);
+    if (fs >= 0) {
+        if (_par_eq(fp, fl, "FrequencyStandard::transition_frequency_hz") == 1) {
+            _par_got_f(frequency_standard_transition_frequency_hz(fs));
+            return 1;
+        }
+        if (_par_eq(fp, fl, "FrequencyStandard::transition_wavelength_m") == 1) {
+            _par_got_f(frequency_standard_transition_wavelength_m(fs));
+            return 1;
+        }
+        if (_par_eq(fp, fl, "FrequencyStandard::fractional_stability") == 1) {
+            _par_got_f(frequency_standard_fractional_stability(fs));
+            return 1;
+        }
+        if (_par_eq(fp, fl, "FrequencyStandard::quality_factor_for_linewidth") == 1) {
+            var lw: f64 = _par_in(1);
+            _par_got_f(frequency_standard_quality_factor_for_linewidth(fs, lw));
+            return 1;
+        }
+        return 0;
+    }
+    var a: f64 = _par_in(0);
+    var b: f64 = _par_in(1);
+    if (_par_eq(fp, fl, "tcg_minus_tt_seconds") == 1) { _par_got_f(tcg_minus_tt_seconds(a)); return 1; }
+    if (_par_eq(fp, fl, "tt_to_tcg_jd") == 1) { _par_got_f(tt_to_tcg_jd(a)); return 1; }
+    if (_par_eq(fp, fl, "tcg_to_tt_jd") == 1) { _par_got_f(tcg_to_tt_jd(a)); return 1; }
+    if (_par_eq(fp, fl, "tcb_to_tdb_jd") == 1) { _par_got_f(tcb_to_tdb_jd(a)); return 1; }
+    if (_par_eq(fp, fl, "tdb_to_tcb_jd") == 1) { _par_got_f(tdb_to_tcb_jd(a)); return 1; }
+    if (_par_eq(fp, fl, "tcb_minus_tcg_secular_seconds") == 1) {
+        _par_got_f(tcb_minus_tcg_secular_seconds(a));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "tai_to_tt") == 1) { _par_got_f(tai_to_tt(a)); return 1; }
+    if (_par_eq(fp, fl, "tt_to_tai") == 1) { _par_got_f(tt_to_tai(a)); return 1; }
+    if (_par_eq(fp, fl, "tai_to_gps") == 1) { _par_got_f(tai_to_gps(a)); return 1; }
+    if (_par_eq(fp, fl, "gps_to_tai") == 1) { _par_got_f(gps_to_tai(a)); return 1; }
+    if (_par_eq(fp, fl, "tai_minus_utc_seconds_mjd") == 1) { _par_got_f(tai_minus_utc_seconds_mjd(a)); return 1; }
+    if (_par_eq(fp, fl, "gravitational_redshift") == 1) { _par_got_f(gravitational_redshift(a)); return 1; }
+    if (_par_eq(fp, fl, "second_order_doppler_shift") == 1) { _par_got_f(second_order_doppler_shift(a)); return 1; }
+    if (_par_eq(fp, fl, "time_dilation_shift_exact") == 1) { _par_got_f(time_dilation_shift_exact(a)); return 1; }
+    if (_par_eq(fp, fl, "sagnac_correction_ns") == 1) { _par_got_f(sagnac_correction_ns(a, b)); return 1; }
+    if (_par_eq(fp, fl, "schwarzschild_clock_correction_us_per_day") == 1) {
+        _par_got_f(schwarzschild_clock_correction_us_per_day(a, b));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "sagnac_one_way_ns") == 1) {
+        var c: f64 = _par_in(2);
+        var d: f64 = _par_in(3);
+        _par_got_f(sagnac_one_way_ns(a, b, c, d));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "AtomicInstant::from_tai_seconds") == 1) {
+        var t = TmAtomicInstant_from_tai_seconds(a);
+        _par_got_inst(t);
+        return 1;
+    }
+    var ia = _par_in(0);
+    var ib = _par_in(1);
+    if (_par_eq(fp, fl, "leap_seconds_at") == 1) { _par_got_i(leap_seconds_at(ia, ib)); return 1; }
+    if (_par_eq(fp, fl, "tai_to_utc_offset") == 1) { _par_got_f(tai_to_utc_offset(ia, ib)); return 1; }
+    if (_par_eq(fp, fl, "utc_to_tai_offset") == 1) { _par_got_f(utc_to_tai_offset(ia, ib)); return 1; }
+    if (_par_eq(fp, fl, "AtomicInstant::new") == 1) {
+        var t = TmAtomicInstant_new(ia, ib);
+        _par_got_inst(t);
+        return 1;
+    }
+    var p = _par_inst(0);
+    if (_par_eq(fp, fl, "AtomicInstant::tai_seconds") == 1) { _par_got_f(p.tai_seconds()); return 1; }
+    if (_par_eq(fp, fl, "AtomicInstant::to_tt_seconds") == 1) { _par_got_f(p.to_tt_seconds()); return 1; }
+    if (_par_eq(fp, fl, "AtomicInstant::to_gps_seconds") == 1) { _par_got_f(p.to_gps_seconds()); return 1; }
+    if (_par_eq(fp, fl, "AtomicInstant::add_nanoseconds") == 1) {
+        var t = p.add_nanoseconds(_par_in(2));
+        _par_got_inst(t);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "AtomicInstant::add_seconds") == 1) {
+        var dt: f64 = _par_in(2);
+        var t = p.add_seconds(dt);
+        _par_got_inst(t);
+        return 1;
+    }
+    var q = _par_inst(2);
+    if (_par_eq(fp, fl, "AtomicInstant::duration_since") == 1) { _par_got_f(p.duration_since(q)); return 1; }
+    if (_par_eq(fp, fl, "AtomicInstant::nanoseconds_since") == 1) {
+        var hi, lo = p.nanoseconds_since(q);
+        _par_got_i(hi);
+        _par_got_i(lo);
+        return 1;
+    }
+    return 0;
+}
+
 # Routes a row to its module's dispatcher. 0 (pending) for a module with none yet.
 fn _par_dispatch(mp, ml, fp, fl): i64 {
     _par_got_n = 0;
@@ -656,6 +820,7 @@ fn _par_dispatch(mp, ml, fp, fl): i64 {
     if (_par_eq(mp, ml, "relativity") == 1) { return _par_relativity(fp, fl); }
     if (_par_eq(mp, ml, "nucleus") == 1) { return _par_nucleus(fp, fl); }
     if (_par_eq(mp, ml, "decay") == 1) { return _par_decay(fp, fl); }
+    if (_par_eq(mp, ml, "timekeeping") == 1) { return _par_timekeeping(fp, fl); }
     return 0;
 }
 
@@ -680,6 +845,8 @@ fn _par_c_bound(fp, fl): i64 {
     if (_par_eq(fp, fl, "Nucleus::atomic_mass_amu") == 1) { return 2; }
     # M2: the output is the pow result itself, so S = 1 with 1 call: K = 2·1·1 + 2.
     if (_par_eq(fp, fl, "remaining_fraction") == 1) { return 4; }
+    # M5: S = 2 (sin nudged ±1 ulp on all 21 golden rows), 1 call: K = 2·2·1 + 2.
+    if (_par_eq(fp, fl, "sagnac_correction_ns") == 1) { return 6; }
     return 0 - 1;
 }
 
@@ -825,7 +992,7 @@ fn _par_report_fns() {
     while (k < _par_fn_n) {
         var at = k * 8;
         print("  ", 2);
-        _par_print_pad(load64(_par_fn_p + at), load64(_par_fn_l + at), 40);
+        _par_print_pad(load64(_par_fn_p + at), load64(_par_fn_l + at), 50);
         var cls = load64(_par_fn_cls + at);
         var cb[8];
         store8(&cb, cls);

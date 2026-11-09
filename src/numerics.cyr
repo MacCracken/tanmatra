@@ -112,3 +112,24 @@ fn _tm_ldexp(x: f64, n): f64 {
     var r: f64 = y * scale;
     return r;
 }
+
+# round(x), halves away from zero, as Rust libm 0.2.16 computes it (its generic round):
+# trunc(x + copysign(0.5 − 0.25·ε, x)), where 0.5 − 0.25·ε is 0x3FDFFFFFFFFFFFFF, the double
+# just below ½. Cyrius f64_round rounds halves to even, so it can't stand in.
+#must_use
+fn _tm_round_half_away(x: f64): f64 {
+    var h: f64 = 0.49999999999999994;
+    if (_tm_bits(x) < 0) { h = -h; }
+    var r: f64 = f64_trunc(x + h);
+    return r;
+}
+
+# x as i64 with Rust's `as` semantics: truncation toward zero, NaN → 0, and saturation at
+# i64::MIN / i64::MAX.
+#must_use
+fn _tm_f64_to_i64_sat(x: f64): i64 {
+    if (x != x) { return 0; }
+    if (x >= 9223372036854775808.0) { return 0x7FFFFFFFFFFFFFFF; }
+    if (x < -9223372036854775808.0) { return 0x8000000000000000; }
+    return f64_to(x);
+}

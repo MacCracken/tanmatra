@@ -127,6 +127,24 @@ The Rust library and its behavior are unchanged, and `VERSION` stays 1.3.0 until
 - **Tooling.** stdlib adds `freelist`; `[lib]` adds `decay_data` and `decay`; surface parity is 122/122.
 - **M2 is complete.** Next is M5 Timekeeping.
 
+### Port — M5 Timekeeping (2026-11-08)
+- **`src/timekeeping_data.cyr`** (generated):
+  - `enum TmFrequencyStandard` and `enum TmTimeScale`;
+  - the CIPM 2025 frequencies and the stabilities;
+  - the time-scale constants (`TM_LG_RATE`, `TM_LB_RATE`, `TM_T0_JD`, ...);
+  - the 28-entry leap-second table, **derived from the public `leap_seconds_at`** and proven over 1900–2200 × months 0–13;
+  - the 13 USNO 1961–1971 segments and `MJD_1972`, extracted and proven over 24,000 quarter-day MJDs.
+- **`src/timekeeping.cyr`:**
+  - the frequency-standard functions, the TCG/TT and TCB/TDB conversions, and TAI/TT/GPS;
+  - `leap_seconds_at` and `tai_minus_utc_seconds_mjd`, with Fliegel & Van Flandern's integer calendar;
+  - the relativistic corrections;
+  - `struct TmAtomicInstant`: integer seconds and nanoseconds, `+|` saturation and a Euclidean carry. `nanoseconds_since` returns Rust's i128 as (hi, lo), using 128-bit subtract, × 10⁹ through `mulh64`, and carry.
+- **`src/numerics.cyr`** adds `_tm_round_half_away` (Rust libm's round; Cyrius `f64_round` rounds halves to even) and `_tm_f64_to_i64_sat` (Rust's saturating `as`).
+- **Golden.** `tests/golden/timekeeping.tsv` has 20,703 rows, including exact .5 ns ties found by search. **All are 0 ulp on x86_64 ELF, x86_64 PE and aarch64.** `sagnac_correction_ns` (sin) is class C with K = 6 by the port-parity rule (S = 2). `libm::round` is 659/659, so the golden corpus has no pending rows left: 121,963 ok and 1 ADR-accepted.
+- **Tests.** `tests/timekeeping.tcyr` ports 69 Rust tests (193 assertions).
+- **Bench.** `atomic_instant_add_seconds_1000`: 33.1 µs vs Rust's 12.9 µs.
+- **Generator.** snake() keeps acronyms whole (`TimeScale::TAI` → `TM_TIME_SCALE_TAI`); every earlier generated file is byte-identical. The parity report's function column is wider.
+
 ## [1.3.0] — 2026-09-16
 
 Repairs every finding of the 2026-09-16 math and data audit

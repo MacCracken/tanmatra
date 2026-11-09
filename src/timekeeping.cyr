@@ -1,0 +1,423 @@
+# timekeeping.cyr — frequency standards, atomic time scales, leap seconds, the exact
+# integer-nanosecond AtomicInstant, and relativistic clock corrections (port of
+# rust-old/src/timekeeping.rs).
+#
+# The standards, constants, leap-second table and 1961–1971 segments are generated
+# (timekeeping_data.cyr). AtomicInstant keeps whole seconds and nanoseconds as integers, with no
+# float in its arithmetic. Rust's i128 differences come back as (hi, lo) words, and its
+# saturating adds are `+|`.
+
+# ── frequency standards ─────────────────────────────────────────────────────────────
+
+# Transition frequency in Hz (Cs-133 exact; Rb, Sr, Yb CIPM 2025; H maser Hellwig et al. 1970).
+# NaN for a value outside TmFrequencyStandard. Mirrors `FrequencyStandard::transition_frequency_hz`.
+#must_use
+fn frequency_standard_transition_frequency_hz(fs): f64 {
+    if (_tm_in_range(fs, TM_FREQUENCY_STANDARD_COUNT) != 1) { return _tm_nan(); }
+    var f: f64 = TM_FREQUENCY_STANDARD_TRANSITION_FREQUENCY_HZ[fs];
+    return f;
+}
+
+# Transition wavelength λ = c / f, m. Mirrors `FrequencyStandard::transition_wavelength_m`.
+#must_use
+fn frequency_standard_transition_wavelength_m(fs): f64 {
+    var f: f64 = frequency_standard_transition_frequency_hz(fs);
+    var l: f64 = TM_C / f;
+    return l;
+}
+
+# Line quality factor Q = ν / Δν for an observed FWHM linewidth, Hz; 0 for a non-positive
+# linewidth. Mirrors `FrequencyStandard::quality_factor_for_linewidth`.
+#must_use
+fn frequency_standard_quality_factor_for_linewidth(fs, linewidth_hz: f64): f64 {
+    if (linewidth_hz <= 0.0) { return 0.0; }
+    var f: f64 = frequency_standard_transition_frequency_hz(fs);
+    var q: f64 = f / linewidth_hz;
+    return q;
+}
+
+# Fractional instability (Allan deviation) at τ = 1 s. Mirrors
+# `FrequencyStandard::fractional_stability`.
+#must_use
+fn frequency_standard_fractional_stability(fs): f64 {
+    if (_tm_in_range(fs, TM_FREQUENCY_STANDARD_COUNT) != 1) { return _tm_nan(); }
+    var s: f64 = TM_FREQUENCY_STANDARD_FRACTIONAL_STABILITY[fs];
+    return s;
+}
+
+# How many frequency standards there are (5). With all_frequency_standard(k) this mirrors the
+# slice `all_frequency_standards` returns.
+#must_use
+fn all_frequency_standard_count(): i64 { return TM_FREQUENCY_STANDARD_COUNT; }
+
+# The k-th frequency standard (a TmFrequencyStandard value), or -1 when k is out of range.
+#must_use
+fn all_frequency_standard(k): i64 {
+    if (_tm_in_range(k, TM_FREQUENCY_STANDARD_COUNT) != 1) { return 0 - 1; }
+    return k;
+}
+
+# ── time scales ─────────────────────────────────────────────────────────────────────
+
+# TCG − TT, s, for a TT Julian date: (L_G / (1 − L_G))(JD_TT − T0) · 86400 (IERS 2010, eq. 10.1).
+# Mirrors `tcg_minus_tt_seconds`.
+#must_use
+fn tcg_minus_tt_seconds(jd_tt: f64): f64 {
+    var k: f64 = TM_LG_RATE / (1.0 - TM_LG_RATE);
+    var r: f64 = (k * (jd_tt - TM_T0_JD)) * 86400.0;
+    return r;
+}
+
+# A TT Julian date as TCG (IERS 2010, eq. 10.1). Mirrors `tt_to_tcg_jd`.
+#must_use
+fn tt_to_tcg_jd(jd_tt: f64): f64 {
+    var d: f64 = tcg_minus_tt_seconds(jd_tt);
+    var r: f64 = jd_tt + (d / 86400.0);
+    return r;
+}
+
+# A TCG Julian date as TT: JD_TCG − L_G (JD_TCG − T0). Mirrors `tcg_to_tt_jd`.
+#must_use
+fn tcg_to_tt_jd(jd_tcg: f64): f64 {
+    var r: f64 = jd_tcg - (TM_LG_RATE * (jd_tcg - TM_T0_JD));
+    return r;
+}
+
+# A TCB Julian date as TDB: TCB − L_B (JD_TCB − T0) + TDB0 (IAU 2006 B3; IERS 2010, eq. 10.3).
+# Mirrors `tcb_to_tdb_jd`.
+#must_use
+fn tcb_to_tdb_jd(jd_tcb: f64): f64 {
+    var r: f64 = (jd_tcb - (TM_LB_RATE * (jd_tcb - TM_T0_JD))) + (TM_TDB0_S / 86400.0);
+    return r;
+}
+
+# A TDB Julian date as TCB, the exact inverse of tcb_to_tdb_jd. Mirrors `tdb_to_tcb_jd`.
+#must_use
+fn tdb_to_tcb_jd(jd_tdb: f64): f64 {
+    var num: f64 = (jd_tdb - (TM_LB_RATE * TM_T0_JD)) - (TM_TDB0_S / 86400.0);
+    var r: f64 = num / (1.0 - TM_LB_RATE);
+    return r;
+}
+
+# The secular part of TCB − TCG, s: L_C (JD_TT − T0) · 86400 / (1 − L_B) (IERS 2010, eq. 10.5).
+# Mirrors `tcb_minus_tcg_secular_seconds`.
+#must_use
+fn tcb_minus_tcg_secular_seconds(jd_tt: f64): f64 {
+    var r: f64 = ((TM_LC_RATE * (jd_tt - TM_T0_JD)) * 86400.0) / (1.0 - TM_LB_RATE);
+    return r;
+}
+
+# TT = TAI + 32.184 s. Mirrors `tai_to_tt`.
+#must_use
+fn tai_to_tt(tai_seconds: f64): f64 {
+    var r: f64 = tai_seconds + TM_TAI_TT_OFFSET_S;
+    return r;
+}
+
+# TAI = TT − 32.184 s. Mirrors `tt_to_tai`.
+#must_use
+fn tt_to_tai(tt_seconds: f64): f64 {
+    var r: f64 = tt_seconds - TM_TAI_TT_OFFSET_S;
+    return r;
+}
+
+# GPS = TAI − 19 s. Mirrors `tai_to_gps`.
+#must_use
+fn tai_to_gps(tai_seconds: f64): f64 {
+    var r: f64 = tai_seconds - TM_TAI_GPS_OFFSET_S;
+    return r;
+}
+
+# TAI = GPS + 19 s. Mirrors `gps_to_tai`.
+#must_use
+fn gps_to_tai(gps_seconds: f64): f64 {
+    var r: f64 = gps_seconds + TM_TAI_GPS_OFFSET_S;
+    return r;
+}
+
+# ── leap seconds ────────────────────────────────────────────────────────────────────
+
+# TAI − UTC (ΔAT), whole seconds, at (year, month) in the integer era from 1972: the latest
+# table entry at or before it; 0 before 1972. Mirrors `leap_seconds_at`.
+#must_use
+fn leap_seconds_at(year, month): i64 {
+    var result = 0;
+    var k = 0;
+    while (k < _TM_LEAP_SECOND_COUNT) {
+        var y = _TM_LEAP_SECOND_YEAR[k];
+        var m = _TM_LEAP_SECOND_MONTH[k];
+        if (year > y || (year == y && month >= m)) {
+            result = _TM_LEAP_SECOND_DELTA_AT[k];
+        } else {
+            return result;
+        }
+        k = k + 1;
+    }
+    return result;
+}
+
+# ΔAT as f64. Mirrors `tai_to_utc_offset`.
+#must_use
+fn tai_to_utc_offset(year, month): f64 {
+    var r: f64 = f64_from(leap_seconds_at(year, month));
+    return r;
+}
+
+# −ΔAT as f64, the additive TAI → UTC correction (−0.0 where ΔAT is 0, as Rust's negation).
+# Mirrors `utc_to_tai_offset`.
+#must_use
+fn utc_to_tai_offset(year, month): f64 {
+    var d: f64 = f64_from(leap_seconds_at(year, month));
+    var r: f64 = -d;
+    return r;
+}
+
+# The Gregorian (year, month) of a modified Julian date, as a pair (Fliegel & Van Flandern
+# 1968, rust mjd_to_year_month). The floor goes to an integer as Rust's `as i64` does, and year
+# and month wrap as `as i32` and `as u8`.
+fn _tm_mjd_to_year_month(mjd: f64) {
+    var jdn = _tm_f64_to_i64_sat(f64_floor(mjd + 2400001.0));
+    var l = jdn + 68569;
+    var n = (4 * l) / 146097;
+    l = l - ((146097 * n + 3) / 4);
+    var i = (4000 * (l + 1)) / 1461001;
+    l = (l - ((1461 * i) / 4)) + 31;
+    var j = (80 * l) / 2447;
+    var l2 = j / 11;
+    var month = (j + 2) - (12 * l2);
+    var year = (100 * (n - 49) + i) + l2;
+    var y32 = ((year & 0xFFFFFFFF) ^ 0x80000000) - 0x80000000;
+    return (y32, month & 0xFF);
+}
+
+# TAI − UTC, s, for a UTC modified Julian date, with the 1961–1971 "rubber second" segments
+# (USNO tai-utc.dat): offset + (MJD − MJD_ref) × rate. 0 before 1961-01-01 (MJD 37300).
+# Mirrors `tai_minus_utc_seconds_mjd`.
+#must_use
+fn tai_minus_utc_seconds_mjd(mjd_utc: f64): f64 {
+    if (mjd_utc < _TM_MJD_1972) {
+        var value: f64 = 0.0;
+        var k = 0;
+        while (k < _TM_TAI_UTC_SEGMENT_COUNT) {
+            var start: f64 = _TM_TAI_UTC_SEGMENT_START[k];
+            if (mjd_utc >= start) {
+                var off: f64 = _TM_TAI_UTC_SEGMENT_OFFSET[k];
+                var ref: f64 = _TM_TAI_UTC_SEGMENT_REFERENCE[k];
+                var rate: f64 = _TM_TAI_UTC_SEGMENT_RATE[k];
+                value = off + ((mjd_utc - ref) * rate);
+            } else {
+                return value;
+            }
+            k = k + 1;
+        }
+        return value;
+    }
+    var year, month = _tm_mjd_to_year_month(mjd_utc);
+    var r: f64 = f64_from(leap_seconds_at(year, month));
+    return r;
+}
+
+# ── AtomicInstant ───────────────────────────────────────────────────────────────────
+
+# 1 if a < b as unsigned 64-bit integers.
+#must_use
+fn _tm_ult(a, b): i64 {
+    if ((a ^ 0x8000000000000000) < (b ^ 0x8000000000000000)) { return 1; }
+    return 0;
+}
+
+# A TAI instant: whole seconds since 1958-01-01T00:00:00 TAI and nanoseconds in
+# [0, 999 999 999], both integers. Mirrors `AtomicInstant`.
+struct TmAtomicInstant {
+    seconds: i64;
+    nanos: i64;
+}
+
+impl TmAtomicInstant {
+    # An instant from seconds and nanoseconds. `nanos` is Rust's u32, taken mod 2^32; past
+    # 999 999 999 the excess carries into the seconds, which saturate. Mirrors `AtomicInstant::new`.
+    #must_use
+    fn new(seconds, nanos): TmAtomicInstant {
+        var t: TmAtomicInstant;
+        var n = nanos & 0xFFFFFFFF;
+        t.seconds = seconds;
+        t.nanos = n;
+        if (n > 999999999) {
+            t.seconds = seconds +| (n / 1000000000);
+            t.nanos = n % 1000000000;
+        }
+        return t;
+    }
+
+    # An instant from f64 TAI seconds, rounded to the nearest nanosecond with halves away from
+    # zero; a non-finite s gives the epoch. Mirrors `AtomicInstant::from_tai_seconds`.
+    #must_use
+    fn from_tai_seconds(s: f64): TmAtomicInstant {
+        if (_tm_is_finite(s) == 0) { return TmAtomicInstant_new(0, 0); }
+        var whole: f64 = f64_floor(s);
+        var frac_ns: f64 = _tm_round_half_away((s - whole) * 1000000000.0);
+        if (frac_ns < 0.0) { frac_ns = 0.0; }
+        if (frac_ns > 1000000000.0) { frac_ns = 1000000000.0; }
+        return TmAtomicInstant_new(_tm_f64_to_i64_sat(whole), f64_to(frac_ns));
+    }
+
+    # The instant as f64 TAI seconds. Mirrors `AtomicInstant::tai_seconds`.
+    #must_use
+    fn tai_seconds(self): f64 {
+        var s: f64 = f64_from(self.seconds);
+        var n: f64 = f64_from(self.nanos);
+        var r: f64 = s + (n / 1000000000.0);
+        return r;
+    }
+
+    # The instant as TT seconds (TAI + 32.184 s). Mirrors `AtomicInstant::to_tt_seconds`.
+    #must_use
+    fn to_tt_seconds(self): f64 {
+        var t: f64 = self.tai_seconds();
+        var r: f64 = tai_to_tt(t);
+        return r;
+    }
+
+    # The instant as GPS seconds (TAI − 19 s). Mirrors `AtomicInstant::to_gps_seconds`.
+    #must_use
+    fn to_gps_seconds(self): f64 {
+        var t: f64 = self.tai_seconds();
+        var r: f64 = tai_to_gps(t);
+        return r;
+    }
+
+    # Seconds from `earlier` to this instant, as f64 (negative if earlier is later). The seconds
+    # subtract as i64, as Rust's do. Mirrors `AtomicInstant::duration_since`.
+    #must_use
+    fn duration_since(self, earlier: TmAtomicInstant): f64 {
+        var dsec = self.seconds - earlier.seconds;
+        var dn = self.nanos - earlier.nanos;
+        var r: f64 = f64_from(dsec) + (f64_from(dn) / 1000000000.0);
+        return r;
+    }
+
+    # The exact nanoseconds from `earlier`, Rust's i128, as a pair (hi, lo): the signed high 64
+    # bits and the low 64 bits. When the result fits an i64, hi is its sign (0 or −1) and lo is
+    # the value. Mirrors `AtomicInstant::nanoseconds_since`.
+    #must_use
+    fn nanoseconds_since(self, earlier: TmAtomicInstant) {
+        var a = self.seconds;
+        var b = earlier.seconds;
+        # (a − b) in 128 bits.
+        var lo = a - b;
+        var hi = (a >>> 63) - (b >>> 63) - _tm_ult(a, b);
+        # × 1e9: the low word wraps; its carry is the unsigned high half of lo × 1e9.
+        var c = 1000000000;
+        var plo = lo * c;
+        var phi = hi * c + mulh64(lo, c);
+        # + (n_self − n_earlier), sign-extended.
+        var dn = self.nanos - earlier.nanos;
+        var rlo = plo + dn;
+        var carry = _tm_ult(rlo, plo);
+        if (dn < 0) { carry = carry - 1; }
+        return (phi + carry, rlo);
+    }
+
+    # The instant advanced by an exact dt_ns nanoseconds; the seconds saturate at the i64 range.
+    # Mirrors `AtomicInstant::add_nanoseconds`.
+    #must_use
+    fn add_nanoseconds(self, dt_ns): TmAtomicInstant {
+        var q = dt_ns / 1000000000;
+        var r = dt_ns % 1000000000;
+        if (r < 0) {
+            r = r + 1000000000;
+            q = q - 1;
+        }
+        var n = self.nanos + r;
+        if (n >= 1000000000) {
+            n = n - 1000000000;
+            q = q + 1;
+        }
+        var t: TmAtomicInstant;
+        t.seconds = self.seconds +| q;
+        t.nanos = n;
+        return t;
+    }
+
+    # The instant advanced by dt seconds: the offset is rounded to the nearest nanosecond
+    # (halves away from zero) and added in integers. A non-finite dt returns the instant
+    # unchanged. Mirrors `AtomicInstant::add_seconds`.
+    #must_use
+    fn add_seconds(self, dt: f64): TmAtomicInstant {
+        var same: TmAtomicInstant;
+        same.seconds = self.seconds;
+        same.nanos = self.nanos;
+        if (_tm_is_finite(dt) == 0) { return same; }
+        var whole: f64 = f64_trunc(dt);
+        var frac_ns: f64 = _tm_round_half_away((dt - whole) * 1000000000.0);
+        var w: f64 = whole;
+        if (w < -9000000000000000000.0) { w = -9000000000000000000.0; }
+        if (w > 9000000000000000000.0) { w = 9000000000000000000.0; }
+        var shifted: TmAtomicInstant;
+        shifted.seconds = self.seconds +| f64_to(w);
+        shifted.nanos = self.nanos;
+        return shifted.add_nanoseconds(f64_to(frac_ns));
+    }
+}
+
+# ── relativistic clock corrections ──────────────────────────────────────────────────
+
+# Gravitational redshift Δf/f = −g Δh / c² (first order, g = 9.80665 m/s²); negative for a
+# receiver above the emitter. Mirrors `gravitational_redshift`.
+#must_use
+fn gravitational_redshift(delta_h_m: f64): f64 {
+    var neg: f64 = -TM_STANDARD_GRAVITY;
+    var r: f64 = (neg * delta_h_m) / (TM_C * TM_C);
+    return r;
+}
+
+# A satellite clock's rate relative to the geoid, µs/day: gravitational (L_G − GM/(c² r)) and
+# velocity −v²/(2c²), times 86400 × 10⁶ (IERS 2010, eq. 10.9). Positive means the satellite runs
+# fast. Mirrors `schwarzschild_clock_correction_us_per_day`.
+#must_use
+fn schwarzschild_clock_correction_us_per_day(orbital_radius_m: f64, orbital_velocity_m_s: f64): f64 {
+    var c2: f64 = TM_C * TM_C;
+    var grav: f64 = TM_LG_RATE - (TM_GM_EARTH / (c2 * orbital_radius_m));
+    var vel: f64 = (orbital_velocity_m_s * orbital_velocity_m_s) / (2.0 * c2);
+    var r: f64 = ((grav - vel) * 86400.0) * 1000000.0;
+    return r;
+}
+
+# The leading-order transverse Doppler shift, Δf/f = −β²/2. Mirrors `second_order_doppler_shift`.
+#must_use
+fn second_order_doppler_shift(beta: f64): f64 {
+    var nb: f64 = -beta;
+    var r: f64 = (nb * beta) / 2.0;
+    return r;
+}
+
+# The exact moving-clock shift √(1 − β²) − 1, as −β²/(1 + √(1 − β²)); −1 for |β| ≥ 1 or NaN.
+# Mirrors `time_dilation_shift_exact`.
+#must_use
+fn time_dilation_shift_exact(beta: f64): f64 {
+    var b2: f64 = beta * beta;
+    if (b2 != b2 || b2 >= 1.0) { return -1.0; }
+    var nb2: f64 = -b2;
+    var r: f64 = nb2 / (1.0 + f64_sqrt(1.0 - b2));
+    return r;
+}
+
+# The Sagnac time difference of a horizontal closed loop on the rotating Earth, ns:
+# 4 Ω A sin φ / c². Mirrors `sagnac_correction_ns`.
+#must_use
+fn sagnac_correction_ns(latitude_rad: f64, area_m2: f64): f64 {
+    var c2: f64 = TM_C * TM_C;
+    var s: f64 = f64_sin(latitude_rad);
+    var dt_s: f64 = (((4.0 * TM_EARTH_ROTATION_RAD_S) * area_m2) * s) / c2;
+    var r: f64 = dt_s * 1000000000.0;
+    return r;
+}
+
+# The Sagnac correction of a one-way signal between Earth-fixed points, ns:
+# Ω (x₁ y₂ − y₁ x₂) / c², positive eastward (Ashby 2003, eq. 32). Mirrors `sagnac_one_way_ns`.
+#must_use
+fn sagnac_one_way_ns(x1_m: f64, y1_m: f64, x2_m: f64, y2_m: f64): f64 {
+    var area: f64 = (x1_m * y2_m) - (y1_m * x2_m);
+    var r: f64 = ((TM_EARTH_ROTATION_RAD_S * area) / (TM_C * TM_C)) * 1000000000.0;
+    return r;
+}

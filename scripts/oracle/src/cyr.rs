@@ -61,12 +61,23 @@ fn positional(x: f64) -> String {
     }
 }
 
-/// `ElectronNeutrino` → `ELECTRON_NEUTRINO`, `WPlus` → `W_PLUS`.
+/// `ElectronNeutrino` → `ELECTRON_NEUTRINO`, `WPlus` → `W_PLUS`, `TAI` → `TAI`,
+/// `Cesium133` → `CESIUM133`. An underscore goes before a capital that follows a lowercase
+/// letter or digit, or that starts a new capitalised word after a run of capitals. A run of
+/// capitals (an acronym) stays one word.
 pub fn snake(camel: &str) -> String {
+    let c: Vec<char> = camel.chars().collect();
     let mut out = String::new();
-    for (k, ch) in camel.chars().enumerate() {
+    for (k, &ch) in c.iter().enumerate() {
         if ch.is_ascii_uppercase() && k > 0 {
-            out.push('_');
+            let prev = c[k - 1];
+            let next_lower = c.get(k + 1).is_some_and(char::is_ascii_lowercase);
+            if prev.is_ascii_lowercase()
+                || prev.is_ascii_digit()
+                || (prev.is_ascii_uppercase() && next_lower)
+            {
+                out.push('_');
+            }
         }
         out.push(ch.to_ascii_uppercase());
     }

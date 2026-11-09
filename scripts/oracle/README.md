@@ -44,7 +44,7 @@ python3 -I scripts/oracle/probe_tables.py .                                     
 | `libm` | M0 step 8 | 11,549 | `src/m_libm.rs` | — |
 | `nucleus` (with the shell model) | M2 | 74,297 | `src/m_nucleus.rs` | `src/nucleus_data.cyr` (`src/t_nucleus.rs`, with the private-value proofs) |
 | `decay` | M2 | 8,511 | `src/m_decay.rs` | `src/decay_data.cyr` (`src/t_decay.rs`) |
-| timekeeping | M5 | — | — | leap-second and frequency tables |
+| `timekeeping` | M5 | 20,703 | `src/m_timekeeping.rs` | `src/timekeeping_data.cyr` (`src/t_timekeeping.rs`: the leap table derived from `leap_seconds_at`, the USNO segments extracted, both proven) |
 | atomic | M3 | — | — | `atomic_data.cyr` |
 | reaction, scattering | M4 | — | — | `reaction_data.cyr` |
 | optics | M6 | — | — | — |
@@ -143,7 +143,10 @@ whole milestone grid, requiring identical bits.
 - Nudging a single extracted coefficient by 1 ulp makes the generator refuse to write
   (*extraction proof failed: binding_energy(1, 2)*).
 
-The leap-second table and the USNO segments (M5) follow the same path.
+**M5.** The leap-second table needed no extraction: it is derived from the public `leap_seconds_at` (one entry per
+change between consecutive months), then proven over years 1900–2200 and months 0–13. The 1961–1971 USNO segments
+and `MJD_1972` are extracted, then proven by recomputing `tai_minus_utc_seconds_mjd` over 24,000 quarter-day MJDs
+plus every segment start ±1e-6.
 
 ### Emission rules
 
@@ -168,7 +171,7 @@ A bundle is concatenated into its consumers, so every generated global is prefix
 |---|---|
 | `const` row `s:ELECTRON_MASS_MEV` | `const TM_ELECTRON_MASS_MEV` |
 | enum `Quark` | `enum TmQuark`, plus `const TM_QUARK_COUNT` |
-| `e:Quark.Up`, `e:Boson.WPlus` | `TM_QUARK_UP`, `TM_BOSON_W_PLUS`: `TM_` + snake(enum) + `_` + snake(variant). Values follow the Rust declaration order |
+| `e:Quark.Up`, `e:Boson.WPlus`, `e:TimeScale.TAI` | `TM_QUARK_UP`, `TM_BOSON_W_PLUS`, `TM_TIME_SCALE_TAI`: `TM_` + snake(enum) + `_` + snake(variant). snake() splits before a capital that follows a lowercase letter or digit, or that starts a new word after a run of capitals, so an acronym (`TAI`) stays one word. Values follow the Rust declaration order |
 | `Quark::mass_mev` (tabulated) | `TM_QUARK_MASS_MEV[q]` |
 | `FundamentalForce::mediator` (a slice) | `TM_FUNDAMENTAL_FORCE_MEDIATORS[START[f] .. START[f] + COUNT[f]]` |
 

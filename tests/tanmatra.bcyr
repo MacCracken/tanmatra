@@ -16,6 +16,8 @@ include "src/nucleus.cyr"
 include "src/shell_model.cyr"
 include "src/decay_data.cyr"
 include "src/decay.cyr"
+include "src/timekeeping_data.cyr"
+include "src/timekeeping.cyr"
 
 # A sink the timed loops write to, so their results are used.
 var _bench_sink = 0;
@@ -214,6 +216,18 @@ fn bench_known_isotopes_all() {
     }
 }
 
+# timekeeping/atomic_instant_add_seconds_1000: 1000 chained add_seconds(1.000000001) from
+# (2.1e9 s, 123 456 789 ns), the Rust bench's body.
+fn bench_atomic_instant_add_seconds_1000() {
+    var x = TmAtomicInstant_new(2100000000, 123456789);
+    var k = 0;
+    while (k < 1000) {
+        x = x.add_seconds(1.000000001);
+        k = k + 1;
+    }
+    _bench_sink = x.nanos;
+}
+
 # Times `rounds` calls of a body fn per batch, over `batches` batches.
 fn run(name, fp, rounds, batches) {
     var b = bench_new(name);
@@ -244,6 +258,7 @@ fn main(): i64 {
     run("decay/bateman_chain_3", &bench_bateman_chain_3, 200, 20);
     run("decay/bateman_u238_series_15", &bench_bateman_u238_series_15, 5, 20);
     run("decay/known_isotopes_all", &bench_known_isotopes_all, 200, 20);
+    run("timekeeping/atomic_instant_add_seconds_1000", &bench_atomic_instant_add_seconds_1000, 50, 20);
     return 0;
 }
 

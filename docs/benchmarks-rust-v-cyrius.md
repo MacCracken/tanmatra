@@ -70,3 +70,12 @@ types the same 14 half-lives inline.
 574 µs (15×) for the U-238 series, 6.80 µs for `bateman_chain_3`. It now walks the two pointers directly, giving the same
 products in the same order: 270 µs and 5.42 µs. All 28 Bateman golden rows give the same ulp histogram as before.
 
+## M5 Timekeeping (2026-11-08)
+
+| Bench | Body | Rust | Cyrius | Cyrius / Rust |
+|---|---|---|---|---|
+| `timekeeping/atomic_instant_add_seconds_1000` | 1000 chained `add_seconds(1.000000001)` from (2.1e9 s, 123 456 789 ns) | 12.91 µs | 33.1 µs | 2.6× |
+
+Each call does a trunc, a half-away round, two saturating integer adds and the Euclidean nanosecond carry, and
+returns the 16-byte instant by value.
+

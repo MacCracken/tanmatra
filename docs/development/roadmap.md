@@ -16,7 +16,10 @@ to Rust on x86_64, Windows PE and aarch64.
 **M2 Nuclear is done (2026-11-08):** nucleus, shell model, decay and Bateman. Every class A/B golden row is
 bit-identical on all three targets. Bateman is within 9 ulp on x86_64 and bit-identical on aarch64.
 
-**Next: M5 Timekeeping.** Live status is in [`state.md`](state.md).
+**M5 Timekeeping is done (2026-11-08):** exact integer-nanosecond `AtomicInstant`, leap seconds back to 1961, and
+TCG/TT and TCB/TDB. Every golden row is bit-identical on all three targets, and no golden row is pending any more.
+
+**Next: M3 Atomic.** Live status is in [`state.md`](state.md).
 
 - **Rust 1.3.0 is the final Rust feature release** and the reference implementation: every finding of the [2026-09-16 audit](../audit/2026-09-16-math-audit.md) is repaired and pinned by reference-value tests.
 - **tanmatra 2.0.0 is the Cyrius port**, initialized with `cyrius port` (Rust moves to `rust-old/` as the parity oracle).

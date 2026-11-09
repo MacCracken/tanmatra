@@ -100,3 +100,58 @@ pub fn u32_triples(src: &str, name: &str, len: usize) -> Result<Vec<(u32, u32, u
     }
     Ok(out)
 }
+
+/// A private `const NAME: &[(f64, ..., f64)] = &[(a, b, ...), ...];` slice of `arity`-tuples of
+/// decimal literals. A slice declares no length, so the count is proven by the emitter's
+/// recomputation, never assumed here.
+pub fn f64_tuples(src: &str, name: &str, arity: usize) -> Result<Vec<Vec<f64>>, String> {
+    let body = const_body(src, name)?;
+    let text: String = body
+        .lines()
+        .map(|l| l.split("//").next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let inner = text
+        .trim()
+        .strip_prefix("&[")
+        .and_then(|b| b.trim_end().strip_suffix(']'))
+        .ok_or_else(|| format!("{name}: not a slice literal"))?;
+    let mut out = Vec::new();
+    let mut rest = inner;
+    while let Some(open) = rest.find('(') {
+        let close = rest[open..]
+            .find(')')
+            .ok_or_else(|| format!("{name}: unclosed tuple"))?
+            + open;
+        let parts = rest[open + 1..close]
+            .split(',')
+            .map(|s| {
+                let lit = s.trim().replace('_', "");
+                let plain = !lit.is_empty()
+                    && lit
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | 'e' | 'E' | '+'));
+                if !plain {
+                    return Err(format!(
+                        "{name}: `{}` is not a plain decimal literal",
+                        s.trim()
+                    ));
+                }
+                lit.parse::<f64>()
+                    .map_err(|e| format!("{name}: `{lit}`: {e}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if parts.len() != arity {
+            return Err(format!(
+                "{name}: a tuple of {} elements, expected {arity}",
+                parts.len()
+            ));
+        }
+        out.push(parts);
+        rest = &rest[close + 1..];
+    }
+    if out.is_empty() {
+        return Err(format!("{name}: no tuples"));
+    }
+    Ok(out)
+}

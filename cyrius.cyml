@@ -46,4 +46,6 @@ modules = [
     "src/shell_model.cyr",
     "src/decay_data.cyr",
     "src/decay.cyr",
+    "src/timekeeping_data.cyr",
+    "src/timekeeping.cyr",
 ]
