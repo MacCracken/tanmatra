@@ -663,7 +663,7 @@ mod tests {
         let u238 = Nucleus::uranium_238();
         let chain = decay_chain(&u238, 5);
         // U-238 -> Th-234 (alpha) -> Pa-234m (beta-) -> U-234 (beta-) -> Th-230 (alpha)
-        assert!(!chain.is_empty());
+        assert_ne!(chain, [] as [(Nucleus, DecayMode); 0]);
         // First step should be alpha decay
         assert_eq!(chain[0].1, DecayMode::Alpha);
         // Daughter of first step should be Th-234
@@ -877,6 +877,6 @@ mod tests {
     #[test]
     fn bateman_empty_chain() {
         let pops = bateman_chain(&[], 1000.0, 1.0);
-        assert!(pops.is_empty());
+        assert_eq!(pops, [] as [f64; 0]);
     }
 }

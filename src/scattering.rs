@@ -1043,9 +1043,10 @@ mod tests {
             let series = 1.0 - x * x / 10.0 + x.powi(4) / 280.0;
             assert!((nuclear_form_factor_uniform(x, 1.0) - series).abs() < 1e-14);
         }
-        // Continuity across the switch.
-        let a = nuclear_form_factor_uniform(0.5 * (1.0 - 1e-12), 1.0);
-        let b = nuclear_form_factor_uniform(0.5 * (1.0 + 1e-12), 1.0);
+        // Continuity across the switch at qR = 0.5.
+        let switch = 0.5_f64;
+        let a = nuclear_form_factor_uniform(switch * (1.0 - 1e-12), 1.0);
+        let b = nuclear_form_factor_uniform(switch * (1.0 + 1e-12), 1.0);
         assert!((a - b).abs() < 1e-13, "{a} vs {b}");
     }
 

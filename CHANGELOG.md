@@ -5,6 +5,15 @@ All notable changes to tanmatra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Maintenance only. The library and its behavior are unchanged, and `VERSION` stays 1.3.0.
+
+### Changed
+- **tests**: 8 assertions updated for lints new in clippy 1.99 (`assert_is_empty`, `manual_midpoint`), so the Rust oracle is clean on rustc 1.99.1 before the Cyrius port freezes it.
+- **deny.toml**: the license allowlist is trimmed to the four licenses in the dependency graph (MIT, Apache-2.0, GPL-3.0-only, Unicode-3.0).
+- **docs**: `docs/development/tanmatra-port-plan.md` revised for Cyrius 6.7.18 (ganita 1.2.15). The 6.6.5 start condition is met.
+
 ## [1.3.0] — 2026-09-16
 
 Repairs every finding of the 2026-09-16 math and data audit

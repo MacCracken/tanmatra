@@ -507,10 +507,10 @@ mod tests {
 
     #[test]
     fn force_all_mediators() {
-        assert!(!FundamentalForce::Strong.mediator().is_empty());
-        assert!(!FundamentalForce::Electromagnetic.mediator().is_empty());
-        assert!(!FundamentalForce::Weak.mediator().is_empty());
-        assert!(FundamentalForce::Gravity.mediator().is_empty());
+        assert_ne!(FundamentalForce::Strong.mediator(), []);
+        assert_ne!(FundamentalForce::Electromagnetic.mediator(), []);
+        assert_ne!(FundamentalForce::Weak.mediator(), []);
+        assert_eq!(FundamentalForce::Gravity.mediator(), []);
     }
 
     #[test]

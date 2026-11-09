@@ -280,6 +280,6 @@ mod tests {
     fn nuclear_single_nucleon() {
         let nuc = NuclearStructure::from_nucleon_count(1, 0, "H");
         assert_eq!(nuc.protons.len(), 1);
-        assert!(nuc.neutrons.is_empty());
+        assert_eq!(nuc.neutrons, [] as [[f32; 3]; 0]);
     }
 }

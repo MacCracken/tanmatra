@@ -4,34 +4,84 @@
 > Rust **1.3.0** is the final Rust feature release and the **reference implementation**;
 > the Cyrius port ships as **2.0.0**.
 >
-> ⏸ **Start condition: wait for the Cyrius 6.6.5 release.** tanmatra needs `f64_cbrt`,
-> which first shipped in ganita 1.2.6. Cyrius 6.6.4 still bundles ganita 1.2.5, so the
-> port begins on 6.6.5, the release that bundles ganita ≥ 1.2.6. The pre-port assessment
-> found no other blocker; the cube-root gap it exposed is resolved upstream.
+> ▶ **Start on Cyrius 6.7.18.** The original start condition was ganita ≥ 1.2.6, for
+> `f64_cbrt`. It is met: 6.7.18 bundles ganita **1.2.15**, and its `f64_cbrt` is correctly
+> rounded. This revision (2026-11-08) re-checks the plan against the installed 6.7.18
+> toolchain. Every language claim in §5 marked *probed* was compiled and run on it.
 
 | Thing | Value | Source |
 |---|---|---|
-| Rust source (oracle) | tanmatra **1.3.0**, 11,418 lines in `src/` | `Cargo.toml`, `VERSION` |
-| Rust health at port start | 476 unit + 20 integration + 2 doc tests; fmt, clippy `-D warnings`, rustdoc `-D warnings`, `cargo audit` and `cargo deny` all clean; 19 criterion benches | `docs/guides/testing.md` |
-| Correctness baseline | Every finding of the 2026-09-16 audit repaired and pinned by reference-value tests | [`../audit/2026-09-16-math-audit.md`](../audit/2026-09-16-math-audit.md) |
-| Cyrius toolchain | **6.6.5** — the port starts on this release (pin in `cyrius.cyml`). 6.6.4 bundles ganita 1.2.5, which lacks `f64_cbrt` | cyrius releases |
-| ganita | **1.2.6** (first release with `f64_cbrt`), reached through the 6.6.5 stdlib bundle | `/home/macro/Repos/ganita` |
-| prakash | **2.4.0**, Cyrius (ported) | `/home/macro/Repos/prakash` |
-| bijli, kimiya, soorat | **Rust**, not yet ported (kimiya 1.1.1, soorat 1.0.0) | respective repos |
+| Rust source (oracle) | tanmatra **1.3.0**, 11,418 lines in `src/`, unchanged since 2026-09-16 | `Cargo.toml`, `VERSION` |
+| Rust health, re-run 2026-11-08 on rustc 1.99.1 | ✅ all green after M0 step 0: 476 unit + 20 integration + 2 doc tests; fmt, clippy `-D warnings`, rustdoc `-D warnings`, `cargo audit` and `cargo deny`, with zero warnings. Step 0 fixed 8 test-only lints new in clippy 1.99 and trimmed 7 unused license allowances | local run |
+| Correctness baseline | Every finding of the 2026-09-16 audit is repaired and pinned by reference-value tests | [`../audit/2026-09-16-math-audit.md`](../audit/2026-09-16-math-audit.md) |
+| Cyrius toolchain | **6.7.18** (installed; `cyrius port` pins it) | `~/.cyrius/current` |
+| ganita | **1.2.15**, bundled in the 6.7.18 stdlib. There is no separate pin | `~/.cyrius/versions/6.7.18/lib/ganita.cyr:2` |
+| prakash | **2.15.1**, Cyrius, pinned to 6.7.18. `spd_new` and `wavelength_to_rgb` keep their 2.4.0 signatures | `/home/macro/Repos/prakash` |
+| Deferred consumers | Still in Rust and untouched since spring: kimiya 1.1.1, soorat 1.0.0, bhava 2.0.0. bijli, jyotish, falak, hisab-mimamsa, kiran and joshua have no local repo | respective repos |
 | Target | tanmatra **2.0.0**, Cyrius | this document |
 
-Porting model to copy: **prakash**. It is a science library with the same shape as
-tanmatra: flat modules, heavy f64 math, generated constant tables, and a
-Rust-vs-Cyrius benchmark record.
-- `/home/macro/Repos/prakash/cyrius.cyml` — `[lib]` bundle order
-- `src/spectral_cie.cyr` — generated hex tables
-- `docs/benchmarks-rust-v-cyrius.md`
+## 0. What changed since the 6.6.5 draft
 
-Language and toolchain references:
-- `/home/macro/Repos/cyrius/docs/guides/cyrius-guide.md`
-- `docs/stdlib-reference.md`
-- `docs/api-surface.snapshot`
-- `/home/macro/Repos/szal/docs/development/port-plan.md` §1 — Rust→Cyrius cheat-sheet
+The scope, the milestones and the parity policy still stand. Cyrius 6.6.6 – 6.7.18 changed
+the mechanics underneath them:
+
+- **The start condition is met.** ganita 1.2.15 has a correctly rounded `f64_cbrt`. Rust's
+  `libm` 0.2.16 `cbrt` is the CORE-MATH port, also correctly rounded, so cube roots are
+  bit-identical.
+- **`cyrius port` overwrites project files.** It replaces `CLAUDE.md`, the roadmap,
+  `.gitignore` and both workflows, sets `version = "0.1.0"`, and leaves `bench` out of
+  `[test] stdlib`. M0 step 2 restores the files, and the bugs are filed upstream.
+- **Several §5 constraints are gone:**
+  - functions with 7 or more arguments work (stack args), so no params structs;
+  - negative literals exist;
+  - there is no globals cap;
+  - array locals live on the stack.
+- **New traps for f64 code.** These four are all *probed*. `(0 - x)` on an f64 is now wrong.
+  A hex literal in a `const` is an integer. `f64_round` rounds ties to even. `+?` aborts the
+  process.
+- **Better data representations exist:**
+  - generated tables become **baked typed column arrays**, not lazy hex accessors;
+  - `FourMomentum`, `AtomicInstant` and `Nucleus` become **struct values**;
+  - `ElectronAffinity` becomes a **`: stack` payload enum**;
+  - errors propagate with **`?`**.
+- **`optics` becomes a real feature:** `[features]` plus `optional = true` on the prakash
+  dependency, as well as the `[lib.optics]` bundle profile.
+- **Gates changed:**
+  - `--strict` is dropped (it has been a no-op since 6.3.2);
+  - `cyrius test` must be **warning-free**, because the f64 type diagnostics appear only
+    there and not in `cyrius lint`;
+  - new gates: `--bounds`, `distlib --check`, `deps --locked` and a surface-parity check.
+- **Class C is measured per target.** On x86_64, `f64_exp` and `f64_ln` use x87, so their bits
+  differ between targets.
+- **ranga joins prakash as a porting model**, for the differential oracle. The szal
+  cheat-sheet is retired: it uses the 6.1.33 nomenclature.
+
+## Porting models and references
+
+- **prakash 2.15.1**, `/home/macro/Repos/prakash`. It has tanmatra's shape: a science library
+  with flat modules, heavy f64 math, generated constant tables and a Rust-vs-Cyrius
+  benchmark record.
+  - Copy the `cyrius.cyml` `[lib]` / `[lib.ai]` layout. A profile repeats the whole module
+    list; the order is load-bearing, because no `src/` file has an `include`.
+  - Copy `docs/benchmarks-rust-v-cyrius.md`.
+  - **Don't** copy its lazily built hex tables in `src/spectral_cie.cyr`, or its `alloc_reset`
+    workaround. Both predate baked typed arrays (6.6.16).
+  - Its `rust-old/` was removed in 2.2.3.
+- **ranga 2.3.2**, `/home/macro/Repos/ranga`, pinned to 6.7.18 and keeping `rust-old/`. It is
+  the differential-oracle model.
+  - `scripts/oracle/`: a Rust driver builds against `rust-old/` by path, and a Cyrius probe
+    runs beside it. Both print f64 bit patterns, and `compare.py` reports ulp distances.
+    Accepted divergences are listed in its `ACCEPTED` table, each with the ADR that decided
+    it.
+  - `docs/development/parity-rust-v-cyrius.md` and `docs/development/port-mechanics.md`.
+  - ⚠ port-mechanics §3 predates two fixes. Decimal literals have been correctly rounded
+    since 6.6.10, and `f64_cbrt` exists now.
+- **mela 1.5.2**: `docs/development/rust-parity.md`, a per-module ledger of Rust tests (each
+  covered or not applicable). It is the model for the M7 test ledger.
+- **Language and toolchain**, in `/home/macro/Repos/cyrius`:
+  - `docs/guides/cyrius-guide.md`, `docs/stdlib-reference.md`, `docs/api-surface.snapshot`;
+  - `docs/development/ecosystem-migration.md`: read the 6.7.x entries at every pin bump;
+  - `cyrius help manifest` for the manifest keys.
 
 ---
 
@@ -51,95 +101,230 @@ Language and toolchain references:
 | `reaction.rs` | 780 | 25 | 43 | `src/reaction_data.cyr`, `src/reaction.cyr` |
 | `scattering.rs` | 543 | 18 | 53 | `src/scattering.cyr` |
 | `timekeeping.rs` | 747 | 35 | 74 | `src/timekeeping.cyr` |
-| `optics.rs` (feature `optics`) | 172 | 4 | 5 | `src/optics.cyr`, opt-in `[lib.optics]` profile against **prakash 2.4.0** |
+| `optics.rs` (feature `optics`) | 172 | 4 | 5 | `src/optics.cyr`, behind the `optics` feature and the `[lib.optics]` profile, against **prakash 2.15.1** |
+
+The counts were re-verified 2026-11-08. They are unchanged.
 
 prakash is already in Cyrius, so the `optics` integration is ported with parity:
-- `lines_to_spd` → prakash `spd_new`
-- `line_to_rgb` → prakash `wavelength_to_rgb(wavelength_nm, err_out)`
-- `hydrogen_balmer_series` and `spectral_series_lines` are pure tanmatra math
+- `lines_to_spd` → prakash `spd_new(start_nm, step_nm, values, len)`, which borrows `values`
+  and returns 0 if allocation fails;
+- `line_to_rgb` → prakash `wavelength_to_rgb(wavelength_nm, err_out)`, which sets
+  `PK_ERR_WAVELENGTH_RANGE` outside 380 – 780 nm;
+- `hydrogen_balmer_series` and `spectral_series_lines` are pure tanmatra math.
 
-As with prakash's `ai` module, `optics.cyr` ships as an opt-in bundle profile so a
-consumer that doesn't need prakash doesn't pull it in.
+The default bundle must not pull in prakash, as with prakash's own `ai` module. §2 step 3
+shows the feature wiring.
 
 ### Deferred until the consumers exist in Cyrius
 
 | Rust surface | Why deferred | Unblocked when |
 |---|---|---|
-| `bridge.rs` — bijli bridges (`energy_to_wavelength_nm`, `nuclear_charge_field`) | bijli is not in Cyrius | bijli ports |
-| `bridge.rs` — kimiya bridges (`atomic_number_to_valence`, `neutron_count`, `mass_to_binding_deficit_mev`, `half_life_to_decay_constant`) | kimiya is Rust (1.1.1) | kimiya ports |
-| `bridge.rs` — prakash-labelled helpers (`transitions_to_wavelengths`, `nuclear_spin_to_hyperfine_scale`) | kept with the bridge module for one coherent later port | bridge phase |
-| `bridge.rs` — jyotish, chrono, hisab-mimamsa, falak bridges and `SimulationClock` (kiran/joshua) | consumers not in Cyrius | each consumer ports |
-| `bridge.rs` — bhava `TimeContext` | bhava is Rust (2.0.0) | bhava ports |
+| `bridge.rs`: bijli bridges (`energy_to_wavelength_nm`, `nuclear_charge_field`) | bijli is not in Cyrius (no repo yet) | bijli ports |
+| `bridge.rs`: kimiya bridges (`atomic_number_to_valence`, `neutron_count`, `mass_to_binding_deficit_mev`, `half_life_to_decay_constant`) | kimiya is Rust (1.1.1) | kimiya ports |
+| `bridge.rs`: prakash-labelled helpers (`transitions_to_wavelengths`, `nuclear_spin_to_hyperfine_scale`) | kept with the bridge module for one coherent later port | bridge phase |
+| `bridge.rs`: jyotish, hisab-mimamsa and falak bridges, and `SimulationClock` (kiran/joshua) | consumers not in Cyrius | each consumer ports |
+| `bridge.rs`: chrono bridge (`utc_date_to_tai_offset`, `utc_to_tai_seconds`, `tai_to_utc_seconds`) | Rust targets the `chrono` crate | **unblocked**: the Cyrius stdlib has `lib/chrono.cyr`. Port it in the first bridge release |
+| `bridge.rs`: bhava `TimeContext` | bhava is Rust (2.0.0) | bhava ports |
 | `integration/soorat.rs` (feature `soorat-compat`) | soorat is Rust (1.0.0) | soorat ports |
 
-Every deferred function is a thin wrapper over in-scope physics, for example
-`tai_to_tt` over timekeeping and `mass_to_binding_deficit_mev` over constants.
-Porting the physics first means each bridge later is a small, parity-testable
-file. `rust-old/` keeps the Rust bridge code and its tests as the reference until
-then.
+Every deferred function is a thin wrapper over in-scope physics; for example, `tai_to_tt`
+wraps timekeeping and `mass_to_binding_deficit_mev` wraps constants. Porting the physics
+first makes each later bridge a small file that can be parity-tested. Until then,
+`rust-old/` keeps the Rust bridge code and its tests as the reference.
 
 ### Not carried over
 
-- **Deprecated in 1.3.0:** `nucleus::corrected_ft_value` (ignored its argument) and
-  `FrequencyStandard::quality_factor` (unsourced values). Their replacements
+- **Deprecated in 1.3.0.** `nucleus::corrected_ft_value` ignored its argument, and
+  `FrequencyStandard::quality_factor` used unsourced values. Their replacements are in scope:
   `SuperallowedDecay::corrected_ft_seconds`, `superallowed_average_ft` and
-  `quality_factor_for_linewidth` are in scope.
-- **Rust-only mechanics:** `no_std`/`alloc` gating, `Send + Sync` assertions, and
-  cargo features, which become `[lib]` profiles.
-- **serde:** the Rust suite's serde round-trip tests do not port as-is. JSON
-  exchange is ported only for types a Cyrius consumer actually exchanges, via
-  `#derive(Serialize)`/bayan — see M7.
+  `quality_factor_for_linewidth`.
+- **Rust-only mechanics:** `no_std`/`alloc` gating and `Send + Sync` assertions. Cargo features
+  map to `[features]` plus `[lib.<profile>]`.
+- **serde.** The Rust suite's serde round-trip tests don't port as they are. JSON exchange is
+  ported only for types a Cyrius consumer actually exchanges; see M7.
 
 ---
 
 ## 2. M0 — Initialize with `cyrius port`
 
-`cyrius port` is the initializer. Do not hand-create the project structure; if the
-tool misses something, fix the tool.
+`cyrius port` is the initializer. Don't hand-create the project structure. Where the tool
+gets something wrong, repair the output here and file the defect upstream (step 2).
 
-```sh
-cd /home/macro/Repos/tanmatra
-cyrius port --dry-run .     # review: moves src/, Cargo.toml, tests/, benches/ → rust-old/
-cyrius port .               # scaffolds src/main.cyr, cyrius.cyml (pins the installed toolchain — must be 6.6.5), CI, port doc templates
-```
+0. ✅ **Freeze a green oracle (Rust, before the move). Done 2026-11-08.**
+   - Fixed the 8 test-only lints new in clippy 1.99:
+     - 7 × `assert_is_empty`, now `assert_eq!`/`assert_ne!` against `[]`, so a failure prints
+       the value;
+     - 1 × `manual_midpoint` in `form_factor_small_qr_no_cancellation`. The qR = 0.5 switch
+       point is now a named local, which gives the same values bit for bit.
+   - Trimmed `deny.toml`'s license allowlist to the four licenses actually in the graph: MIT,
+     Apache-2.0, GPL-3.0-only and Unicode-3.0. The other seven were never matched.
+   - Only tests and lint config changed, so `VERSION` stays **1.3.0**.
+   - The full P(-1) cleanliness check is clean on rustc 1.99.1.
+1. **Scaffold.**
+   ```sh
+   cd /home/macro/Repos/tanmatra
+   cyrius port --dry-run .
+   cyrius port .
+   ```
+   This was verified on a copy of the repo on 2026-11-08.
+   - **Moved into `rust-old/`:** `Cargo.toml`, `Cargo.lock`, `src/`, `tests/`, `benches/`,
+     `examples/`, `Makefile`, `codecov.yml` and `deny.toml`.
+   - **Written:** `src/main.cyr`, `cyrius.cyml` (pinned to `cyrius = "6.7.18"`, with no
+     `[lib]`), `cyrius.lock`, `lib/`, `tests/tanmatra.{tcyr,bcyr,fcyr}`,
+     `docs/{adr,architecture,guides,examples}/` and `docs/development/state.md`.
+   - **Left alone:** `CHANGELOG.md`, `README.md`, `docs/audit/`, this plan and `scripts/`.
+2. **Repair what the scaffold overwrites.**
+   - **`CLAUDE.md` is replaced.** Restore it with `git show HEAD:CLAUDE.md` and merge in the
+     scaffold's Cyrius gate commands. Keep the project identity, consumers, process and
+     DO NOT list. Translate the Rust key principles:
 
-After the scaffold:
+     | Rust principle | Cyrius equivalent |
+     |---|---|
+     | `#[non_exhaustive]` | append-only enum values that are never renumbered |
+     | `#[must_use]` | `#must_use`, plus `#pure` where it applies |
+     | serde on every type | JSON only for exchange types (M7) |
+     | zero unwrap/panic | no `+?`, `-?`, `*?`, `assert_fatal` or `result_unwrap` in `src/` |
 
-1. **`cyrius.cyml`**
-   - `[package].cyrius = "6.6.5"`.
-   - `[deps] stdlib`: `string, fmt, alloc, io, vec, str, syscalls, assert, bench, math`, plus `ganita`.
-   - `[lib] modules` in dependency order: error → constants → particle → relativity → nucleus_data → nucleus → shell_model → decay_data → decay → atomic_* → reaction_* → scattering → timekeeping. `optics` goes in `[lib.optics]`.
-2. **ganita cube root — resolved: wait for 6.6.5.** tanmatra calls `cbrt` in the binding energy, the nuclear radius, Thomas–Fermi screening and form factors. `f64_cbrt` first appears in ganita **1.2.6** (filed from the tanmatra assessment as `ganita/docs/development/issues/archived/2026-09-16-f64-cbrt-missing.md`). Cyrius 6.6.4 bundles ganita 1.2.5, so M0 starts only on **Cyrius 6.6.5**, which bundles ganita ≥ 1.2.6. There is no separate `cyrius deps` pin for ganita. At M0, confirm `lib/ganita.cyr` in the 6.6.5 snapshot reports version ≥ 1.2.6 and that `f64_cbrt` is present.
-3. **Golden-value generator in `rust-old/`** — a Rust example, e.g. `rust-old/examples/golden.rs`, that writes `tests/golden/<module>.tsv`: one line per call, with inputs and outputs as **IEEE-754 hex bit patterns** plus the tolerance class (§4). It covers every in-scope public function over the input grids listed per milestone. It is the parity oracle and is regenerated only from Rust 1.3.0.
-4. **Table generator in `rust-old/`** — writes the Cyrius data modules (`*_data.cyr`) with every f64 as exact hex, following prakash `spectral_cie.cyr`. Tables are generated, never re-typed; the audit found 17/32 AME rows and ~30/118 EA rows hand-transcribed wrong.
-5. **Parity harness** — `tests/parity.tcyr` loads `tests/golden/*.tsv` and asserts each row within its class. Counts are printed per module and the exit code is the number of failing modules (ecosystem repro convention).
-6. **Baseline measurements** — before porting any formula, run the golden inputs through Cyrius `f64_exp`, `f64_ln`, `f64_sin`, `f64_cos`, `f64_pow`, `f64_cbrt` and `f64_sinh` against Rust `libm` and record the ulp distributions in `docs/development/port-parity.md`. These fix the tolerance of class C (§4) from evidence, not guesswork.
+   - **`docs/development/roadmap.md` is replaced** (123 → 36 lines). Restore it from git.
+   - **`.gitignore` and `.github/workflows/{ci,release}.yml` are replaced.** Keep the
+     scaffold's Cyrius CI. Re-add the Rust oracle job only if the golden corpus is to be
+     regenerated in CI; otherwise regenerate it locally.
+   - Move `scripts/bench-history.sh` and `scripts/version-bump.sh` (cargo scripts) to
+     `rust-old/scripts/`, and replace them with Cyrius equivalents when needed.
+   - **File upstream** in `cyrius/docs/development/issues/`:
+     - `cyrius port` overwrites an existing `CLAUDE.md` and roadmap without merging;
+     - it writes `version = "0.1.0"` when `VERSION` already exists;
+     - it leaves `bench` out of `[test] stdlib`, so `cyrius bench` and `cyrius audit` fail
+       straight after scaffolding.
+3. **`cyrius.cyml`.** The shape below is from `cyrius help manifest` and prakash's manifest.
+   Confirm the `[features]` / `optional` keys when M6 adds the profile; prakash doesn't use
+   them, so this is new ground.
+   ```toml
+   [package]
+   name = "tanmatra"
+   version = "${file:VERSION}"
+   license = "GPL-3.0-only"
+   language = "cyrius"
+   cyrius = "6.7.18"
 
-**Gate:** `cyrius build --strict` of the empty bundle, `cyrius test` running the parity harness (0 modules yet), both generators committed.
+   [deps]
+   stdlib = ["syscalls", "string", "alloc", "str", "fmt", "io", "vec", "math", "ganita", "overflow"]
+
+   [deps.prakash]
+   git = "https://github.com/MacCracken/prakash.git"
+   tag = "2.15.1"
+   modules = ["dist/prakash.cyr"]
+   optional = true
+
+   [features]
+   optics = ["prakash"]
+
+   [test]
+   stdlib = ["assert", "bench"]
+
+   [lib]
+   modules = ["src/error.cyr", ...]   # dependency order (below)
+
+   [lib.optics]
+   modules = [ <the whole [lib] list>, "src/optics.cyr" ]
+   ```
+   - `math` is required for `f64_sin` and `f64_cos` on every target, and for
+     exp/ln/atan on aarch64.
+   - `overflow` provides the saturating `+|`, `-|` and `*|` operators.
+   - `[lib]` order: error → constants → particle → relativity → nucleus_data → nucleus →
+     shell_model → decay_data → decay → atomic_data → atomic_config → atomic_hydrogenic →
+     atomic_qed → reaction_data → reaction → scattering → timekeeping.
+   - `[lib] modules = []` is invalid, so `[lib]` gets its first entry, `src/error.cyr`, in M1.
+4. **ganita check.** Confirm that `lib/ganita.cyr` reports `1.2.15` and that
+   `ganita_f64_cbrt` is present. Use the canonical `ganita_f64_*` names throughout. The short
+   aliases `f64_sinh`, `f64_pow`, `f64_atan2` and `f64_hypot` are marked *Deprecated alias …
+   migration window only*.
+5. **Golden-value generator in `rust-old/`.**
+   - A Rust example, e.g. `rust-old/examples/golden.rs`, writes `tests/golden/<module>.tsv`.
+   - Each line is one call. Inputs and outputs are **IEEE-754 hex bit patterns**, followed by
+     the tolerance class (§4). ranga's `scripts/oracle` uses the same format.
+   - It covers every in-scope public function over the input grids listed per milestone.
+   - It is the parity oracle and is regenerated only from Rust 1.3.0.
+6. **Table and constant generator in `rust-old/`.** Tables are generated, never re-typed: the
+   audit found 17 of 32 AME rows and about 30 of 118 EA rows hand-transcribed wrong.
+   - **Data modules** (`src/*_data.cyr`) are written as **baked typed column arrays**. Each
+     array holds one field of the table, with a trailing comment giving the decimal value:
+     ```
+     var AME_Z: u16[32] = { 1, … };
+     var AME_MASS_EXCESS_KEV: f64[32] = { 0x…, … };  # 7288.971064, …
+     ```
+     - Baked arrays are in the image, need no initialization, and are immune to
+       `alloc_reset` (6.6.16).
+     - Arrays of structs are refused, so a table becomes parallel columns.
+     - Hex bit patterns are exact inside a typed `f64` slot (*probed*).
+   - **`src/constants.cyr`** is generated from CODATA 2022 `allascii.txt` as decimal `const`s
+     written out in full, e.g. `const ELEMENTARY_CHARGE_C = 0.0000000000000000001602176634;`.
+     - The lexer has **no exponent notation**: `1.5e-3` is a parse error.
+     - Decimal literals have been correctly rounded since 6.6.10. That literal gives
+       `0x3c07a4da290c1653`, bit-identical to Python's `1.602176634e-19` (*probed*).
+     - **Never put a hex pattern in a `const`.** It is an integer, and `CONST * x` then does
+       integer arithmetic with only a warning (*probed*: the result was `0x4000000000000000`).
+   - Class-A golden rows (§4) pin every generated constant and table cell bit for bit.
+7. **Parity harness.**
+   - `tests/parity.tcyr` loads `tests/golden/*.tsv` and checks each row within its class. It
+     prints counts per module.
+   - Its exit code is the number of failing modules, following the ecosystem repro
+     convention. That is at most 13, so the 8-bit exit status can't wrap.
+   - `lib/assert.cyr` has no float assertion, so add `tests/ulp.cyr` with
+     `assert_bits_eq(got, want, label)` and `assert_ulp(got, want, max_ulp, label)`. The
+     reference-value tests use the same file.
+8. **Baseline measurements.** Before porting any formula, run the golden inputs through each
+   Cyrius function tanmatra uses (§5 table) against Rust `libm`.
+   - Run it **on every CI target**. On x86_64, `f64_exp` and `f64_ln` go through x87, so
+     their bits differ from aarch64.
+   - Record the ulp distributions per target in `docs/development/port-parity.md`. This sets
+     class C (§4) from evidence, not guesswork.
+   - Expected 0 ulp: `f64_sqrt` (IEEE) and `ganita_f64_cbrt` (correctly rounded on both
+     sides). Any non-zero distance there is a defect.
+
+**Gate:**
+- `cyrius build` and `cyrius bench` pass. `bench` proves the step-2 manifest fix.
+- `cyrius test` runs the parity harness (0 modules yet) with no warnings.
+- `cyrius lint` and `cyrius fmt --check` are clean.
+- Both generators and `tests/ulp.cyr` are committed, along with the upstream issues.
 
 ---
 
 ## 3. Milestones
 
 Each milestone ends with the same gates:
-- `cyrius build --strict`
-- `cyrius test`, with the module's golden rows plus its ported reference-value tests
-- `cyrius bench`, with the module's benches recorded against the Rust numbers
-- `cyrius vet`, `cyrius lint`, `cyrius fmt --check`
-- CHANGELOG and `state.md` updated
+- `cyrius build`. `--strict` has been a no-op since 6.3.2, because undefined functions are
+  already errors.
+- `cyrius test` and `cyrius test --bounds`, run on the module's golden rows plus its ported
+  reference-value tests, and **with no warnings**.
+  - The f64 type diagnostics come only from the compiles that `test` and `build` drive, not
+    from `cyrius lint`. Each one is a bug: *integer arithmetic with an f64 right operand*,
+    *f64 arithmetic with a non-f64 right operand*, *an integer stored into an f64 slot*,
+    *comparison mixes f64 and integer*.
+  - From M6, also `cyrius test --features optics`.
+- `cyrius bench`, with the module's benches recorded against the Rust numbers.
+- `cyrius vet`, `cyrius lint` and `cyrius fmt --check`.
+- `cyrius distlib --all`, then `cyrius distlib --check` for the base bundle and every profile;
+  then `cyrius deps --locked`.
+- **Surface parity** (ranga pattern):
+  - every in-scope Rust `pub fn` in the module has a Cyrius counterpart or a written reason;
+  - `rust-old/src/X.rs` `pub fn` names are normalized and diffed against `src/X*.cyr` `fn`
+    names;
+  - the same diff is the M7 release gate.
+- CHANGELOG and `state.md` updated.
 
 | Milestone | Modules | Key work | Golden grid (minimum) |
 |---|---|---|---|
-| **M1 Foundation** | error, constants, particle, relativity | Constants as hex (CODATA 2022). `TanmatraError` → error enum. `FourMomentum` as a 4-f64 heap struct with accessors. Enum methods (`Quark`, `Lepton`, `Boson`, `FundamentalForce`) as `fn quark_mass_mev(q)` switch tables | every enum variant; β ∈ {0, ±0.5, ±(1−1e-12), ±1, ±1.5}; four-momenta from 1 keV to 10 GeV |
-| **M2 Nuclear** | nucleus_data, nucleus, shell_model, decay_data, decay | Generated AME2020, radii, moments, superallowed and 114-isotope tables. SEMF + Myers–Swiatecki (`f64_cbrt`). Mayer–Jensen and empirical p/n orders; Brennan–Bernstein coupling. `decay_chain` with the IT ground-state rule. **Bateman scaling-and-squaring matrix exponential** | all (Z, A) with 1 ≤ Z ≤ 118, Z ≤ A ≤ 3Z (binding, shell-corrected, J^π); all isotopes; the U-238/U-235/Th-232 chains; Bateman: equal λ, 9-member long-lived chain, U-238 series at 1 y / 10³ y / 4.463e9 y |
-| **M3 Atomic** | atomic_data, atomic_config, atomic_hydrogenic, atomic_qed | Generated IE (118) and EA (118, 3-state) tables. Configurations with the 20 NIST exceptions. Rydberg and reduced-mass lines. Dirac and first-order fine structure. Radial functions (Laguerre coefficients and factorial-ratio normalisation) for n ≤ 60. Exact radial dipole integrals → Einstein A/B. Lamb shift with Bethe logarithms, VP, hyperfine, g-factors, Breit | Z = 1..118 (configs, IE, EA); n1 < n2 ≤ 12, Z ∈ {1, 2, 3, 26, 92}; R_nl for all n ≤ 10, l < n, 50 radii; A-values for every allowed n_u ≤ 10 → n_l; all (n, l, j) with n ≤ 4 |
-| **M4 Reactions & scattering** | reaction_data, reaction, scattering | ENDF/B-VIII.0 thermal cross sections, resonance integrals and yields (generated). `NuclearReaction` layout with optional projectile, neutron counts and lepton vec. Presets. Rutherford, Mott (p·β), Born, form factor (series branch), Klein–Nishina (series branch), Maximon pair production (both branches) | all presets; energies spanning each branch point (KN γ = 1e-2; form factor qR = 0.5; pair k = 4) on both sides; θ ∈ {1e-3, 0.1, π/2, π} |
-| **M5 Timekeeping** | timekeeping | CIPM 2025 standards. Leap-second table plus the 1961–1971 USNO segments and MJD→calendar. `AtomicInstant` in integer nanoseconds. Geoid-referenced satellite correction. Sagnac (loop and one-way). TCG/TT and TCB/TDB conversions | leap lookups 1961–2030; `AtomicInstant` add/diff at epochs 0, 2.1e9 s and ±9.2e18 s edges; J2000 and T0 conversions |
-| **M6 Optics profile** | optics (prakash 2.4.0) | `lines_to_spd` → `spd_new`; the Storey & Hummer Balmer series; A-value series intensities; `line_to_rgb` → `wavelength_to_rgb` | Balmer SPD at 0.1 and 1 nm FWHM; invalid-range guards |
-| **M7 Release 2.0.0** | all | JSON for exchange types (`Nucleus`, `Isotope`, `FourMomentum`, `AtomicInstant`, `NuclearReaction`) if a consumer needs them. `cyrius distlib` bundle. `docs/benchmarks-rust-v-cyrius.md`. `cyrius audit`. VERSION 2.0.0 | full golden corpus green |
+| **M1 Foundation** | error, constants, particle, relativity | Generated CODATA 2022 `const`s. `TanmatraError` → a code enum plus an `err_out` detail. `FourMomentum` as an inline **struct value** with four typed f64 fields and a `FourMomentum_add` overload for `+` (Rust implements only `Add`). Enum methods (`Quark`, `Lepton`, `Boson`, `FundamentalForce`) as `match` tables. Probe the `Nucleus` value struct inside a `Result` (§5) | every enum variant; β ∈ {0, ±0.5, ±(1−1e-12), ±1, ±1.5}; four-momenta from 1 keV to 10 GeV |
+| **M2 Nuclear** | nucleus_data, nucleus, shell_model, decay_data, decay | Generated AME2020, radii, moments, superallowed and 114-isotope **baked column tables**. SEMF + Myers–Swiatecki (`ganita_f64_cbrt`). Mayer–Jensen and empirical p/n orders; Brennan–Bernstein coupling. `decay_chain` with the IT ground-state rule. **Bateman scaling-and-squaring matrix exponential**, with `ldexp` as a multiply by `f64_exp2(k)` | all (Z, A) with 1 ≤ Z ≤ 118, Z ≤ A ≤ 3Z (binding, shell-corrected, J^π); all isotopes; the U-238, U-235 and Th-232 chains; Bateman with equal λ, the 9-member long-lived chain, and the U-238 series at 1 y, 10³ y and 4.463e9 y |
+| **M3 Atomic** | atomic_data, atomic_config, atomic_hydrogenic, atomic_qed | Generated IE (118) and EA (118, 3-state) tables; `ElectronAffinity` as a `: stack` enum. Configurations with the 20 NIST exceptions. Rydberg and reduced-mass lines. Dirac and first-order fine structure. Radial functions (Laguerre coefficients and factorial-ratio normalization) for n ≤ 60. Exact radial dipole integrals → Einstein A/B. Lamb shift with Bethe logarithms, VP, hyperfine, g-factors, Breit. Write the `powi` sites in Rust's evaluation order (§5) | Z = 1..118 (configs, IE, EA); n1 < n2 ≤ 12, Z ∈ {1, 2, 3, 26, 92}; R_nl for all n ≤ 10, l < n, at 50 radii; A-values for every allowed n_u ≤ 10 → n_l; all (n, l, j) with n ≤ 4 |
+| **M4 Reactions & scattering** | reaction_data, reaction, scattering | ENDF/B-VIII.0 thermal cross sections, resonance integrals and yields (generated). `NuclearReaction` layout with an optional projectile, neutron counts and a lepton vec. Presets. Rutherford (`ganita_f64_tan`), Mott (p·β), Born, the form factor (series branch), Klein–Nishina (series branch), Maximon pair production (both branches). The 7-argument `breit_wigner_cross_section` and `born_screened_coulomb_with_masses` keep their Rust signatures | all presets; energies on both sides of each branch point (KN γ = 1e-2, form factor qR = 0.5, pair k = 4); θ ∈ {1e-3, 0.1, π/2, π} |
+| **M5 Timekeeping** | timekeeping | CIPM 2025 standards. Leap-second table, plus the 1961–1971 USNO segments and MJD → calendar. `AtomicInstant` as a value struct in integer nanoseconds; `+|` at Rust's three `saturating_add` sites; local round-half-away (§5); `nanoseconds_since` returns a `(seconds, nanos)` tuple. Geoid-referenced satellite correction. Sagnac (loop and one-way). TCG/TT and TCB/TDB conversions | leap lookups 1961–2030; `AtomicInstant` add/diff at epoch 0, at 2.1e9 s and at the ±9.2e18 s edges, plus **exact .5 ns ties** in `from_tai_seconds` and `add_seconds`; J2000 and T0 conversions |
+| **M6 Optics profile** | optics (prakash 2.15.1) | `[features] optics` + optional `[deps.prakash]` + `[lib.optics]`. `lines_to_spd` → `spd_new`; the Storey & Hummer Balmer series; A-value series intensities; `line_to_rgb` → `wavelength_to_rgb` | Balmer SPD at 0.1 and 1 nm FWHM; invalid-range guards |
+| **M7 Release 2.0.0** | all | JSON for the exchange types (`Nucleus`, `Isotope`, `FourMomentum`, `AtomicInstant`, `NuclearReaction`) if a consumer needs them. Use `#derive(Serialize)` only once cyrius issue `2026-11-07-derive-serialize-key-scan-reads-past-nul` is fixed; until then, write it by hand on bayan. Rust-test ledger (mela pattern): each of the 476 + 20 + 2 Rust tests is ported, folded into golden rows, or marked not applicable / deferred-bridge. Full surface-parity diff. `cyrius distlib --all`. `docs/benchmarks-rust-v-cyrius.md`. `cyrius audit`. VERSION 2.0.0 | full golden corpus green on every CI target |
 
-Suggested order: M1 → M2 → M5 → M3 → M4 → M6 → M7. Timekeeping is self-contained
-and exercises the integer-time paths early. Atomic is the largest module.
+Suggested order: M1 → M2 → M5 → M3 → M4 → M6 → M7. Timekeeping is self-contained and
+exercises the integer-time paths early. Atomic is the largest module.
 
 ---
 
@@ -149,15 +334,31 @@ Every golden row carries one tolerance class:
 
 | Class | Tolerance | Applies to |
 |---|---|---|
-| **A — exact** | bit-identical, or equal integers/strings | constants and table lookups; configurations; J^π; decay chains; leap seconds; `AtomicInstant`; magic numbers; enum properties |
-| **B — arithmetic** | ≤ 2 ulp | formulas using only + − × ÷ √ and correctly rounded `f64_cbrt`: SEMF, Rutherford, Klein–Nishina (series branch), relativity, Q-value arithmetic |
-| **C — transcendental** | relative ≤ bound measured in M0 step 6 (expected ~1e-14) | anything through exp/ln/pow/trig: shell term, Dirac, Lamb shift, Mott, pair production, form factor, radial functions |
+| **A — exact** | bit-identical, or equal integers/strings | constants and table cells; configurations; J^π; decay chains; leap seconds; `AtomicInstant`; magic numbers; enum properties |
+| **B — arithmetic** | ≤ 2 ulp, **expected 0** | formulas using only + − × ÷ √ and `ganita_f64_cbrt`: SEMF, Rutherford, Klein–Nishina (series branch), relativity, Q-value arithmetic. Both sides round each operation correctly and neither contracts to FMA. A non-zero distance means the operation order differs from Rust, so check that first |
+| **C — transcendental** | relative error ≤ the per-target bound measured in M0 step 8 (expected ~1e-14) | anything through exp/ln/pow/sin/cos/tan/sinh/hypot: shell term, Dirac, Lamb shift, Mott, pair production, form factor, radial functions |
 | **D — iterative** | relative ≤ 1e-12 | Bateman matrix exponential, radial dipole integrals, numerically integrated references |
 
 Rules:
-- **Never widen a class to make a row pass.** A class-C failure beyond the M0 bound is a defect: in the port, in the Cyrius math function (file it upstream as with `f64_cbrt`), or in the Rust oracle (fix Rust, bump 1.3.x, regenerate).
-- **The physics reference tests travel with the code.** The audit's reference-value tests (NIST A-values, measured Lamb shifts, AME2020 binding energies, IERS offsets, ENDF values) are ported as Cyrius assertions in addition to golden parity: parity proves "same as Rust", the reference tests prove "right".
-- **Branch points are tested on both sides:** the Klein–Nishina series switch, form-factor series switch, pair-production k = 4 join, Bateman degenerate λ, and the pre/post-1972 TAI−UTC switch.
+- **Never widen a class to make a row pass.** A failure beyond its class is a defect in one of
+  three places:
+  - in the port;
+  - in the Cyrius math function: file it upstream, as was done for `f64_cbrt`;
+  - in the Rust oracle: fix Rust, bump to 1.3.x and regenerate.
+- **The one exception is a divergence accepted by an ADR** in `docs/adr/`. An example is a row
+  where Cyrius is correctly rounded and `libm` is not (ranga's ADR 002 is the precedent). The
+  harness lists such rows by name, and they are still reported.
+- **The physics reference tests travel with the code.** The audit's reference-value tests are
+  ported as Cyrius assertions as well as golden parity: NIST A-values, measured Lamb shifts,
+  AME2020 binding energies, IERS offsets and ENDF values. Parity proves "same as Rust"; the
+  reference tests prove "right".
+- **Branch points are tested on both sides:**
+  - the Klein–Nishina series switch;
+  - the form-factor series switch;
+  - the pair-production k = 4 join;
+  - the degenerate-λ case in Bateman;
+  - the pre/post-1972 TAI−UTC switch;
+  - the .5 ns rounding tie.
 
 ---
 
@@ -165,54 +366,102 @@ Rules:
 
 ### Math functions
 
-| Rust (`libm` / core) | Cyrius | Note |
-|---|---|---|
-| `sqrt`, `exp`, `log`, `sin`, `cos`, `atan`, `floor`, `ceil`, `fabs` | `f64_sqrt`, `f64_exp`, `f64_ln`, `f64_sin`, `f64_cos`, `f64_atan`, `f64_floor`, `f64_ceil`, `f64_abs` | builtins |
-| `cbrt` | `f64_cbrt` | ganita ≥ 1.2.6 via the Cyrius 6.6.5 stdlib (§2 step 2); correctly rounded, matches musl |
-| `pow` | `f64_pow` | exact path for integer exponents; `x^(5/3)` stays `x·cbrt(x)²` as in Rust |
-| `sinh`, `hypot`, `trunc` | `f64_sinh`, `f64_hypot`, `f64_trunc` | ganita / stdlib |
-| `round` | `f64_round` | confirm ties-away-from-zero matches `libm::round` in the M0 baseline |
-| `tan` | local `sin/cos` (hisab `f64_util.cyr` precedent) | used only in Rutherford total |
-| `ldexp` | multiply by an exact power of two built from bits | Bateman scaling |
-| `f64::powi` | repeated multiplication | Lamb shift `(Zα)⁴` |
-| `f64::midpoint` | `(a + b) / 2` | j + ½ |
-| `i128` (`AtomicInstant::nanoseconds_since`) | split seconds/nanos arithmetic with checked ops (`+?`, `-?`) | no i128 in Cyrius |
+This table covers every `libm` call in tanmatra 1.3.0 (`grep -oh 'libm::[a-z0-9_]*' src`) and
+every core f64 method it uses.
+
+| Rust (calls) | Cyrius | From | Parity |
+|---|---|---|---|
+| `sqrt` (23), `fabs` (9), `floor` (2), `trunc` (1) | `f64_sqrt`, `f64_abs`, `f64_floor`, `f64_trunc` | compiler builtins | exact |
+| `sin` (15), `cos` (7) | `f64_sin`, `f64_cos` | builtins, needing `math` on every target | fdlibm, ≤ 1 ulp, same bits on every target; class C |
+| `exp` (9), `log` (6) | `f64_exp`, `f64_ln` | builtins, needing `math` on aarch64 | ≤ 1 ulp; x87 on x86_64, so the bits are **not** the same across targets; class C per target |
+| `cbrt` (7) | `ganita_f64_cbrt` | ganita 1.2.15 | correctly rounded, as is `libm` 0.2.16's CORE-MATH `cbrt` → bit-identical; class B |
+| `pow` (5) | `ganita_f64_pow` | ganita (fdlibm `e_pow`) | ≤ 1 ulp, exact for representable integer powers; class C. Keep `x^(5/3)` as `x·cbrt(x)²`, as in Rust |
+| `sinh` (1), `tan` (1), `hypot` (2) | `ganita_f64_sinh`, `ganita_f64_tan`, `ganita_f64_hypot` | ganita | class C. `tan` no longer needs a local sin/cos (ganita 1.2.11) |
+| `round` (2: `timekeeping.rs:523`, `:600`) | local `tm_round_half_away` | tanmatra | ⚠ `f64_round` rounds **ties to even** (2.5 → 2, −2.5 → −2; *probed*). `libm::round` rounds ties away from zero. A precedent exists: abaco `src/dsp.cyr` `f64_round_half_away` |
+| `ldexp` (2: Bateman scaling) | multiply by `f64_exp2(k)` | builtin | exact for integer k in the normal range; there is no ldexp/scalbn in the stdlib |
+| `f64::powi` (`atomic.rs:782`, `:832`, `:1107`) | explicit products in LLVM's square-and-multiply order: `x*x`, `x*(x*x)`, `(x*x)*(x*x)` | — | bit-identical to Rust. `((x*x)*x)*x` is **not** |
+| `f64::midpoint` (2, for j + ½) | `(a + b) / 2.0` | — | identical for in-range arguments |
+| `i128` (`AtomicInstant::nanoseconds_since`) | normalized `(seconds, nanos)` tuple | — | there is no i128, and `u128` supports only + and − and can't be a parameter, return or field type |
+| `saturating_add` (`timekeeping.rs:503`, `:580`, `:606`) | `+|` | stdlib `overflow` | `+?`, `-?` and `*?` **abort the process with exit 57** (*probed*), so they are forbidden in `src/` |
+
+Some functions are absent from the 6.7.18 stdlib: fma, expm1, log1p, log10, copysign, fmod
+and isnan. tanmatra uses none of them; test for NaN with `x != x`.
+
+**Typing rule.** Bind every call result to a `: f64` local before using it in an operator.
+- The ganita functions return an untyped `i64`.
+- Binary operators are typed by their **left** operand.
+- An untyped left operand silently does integer arithmetic. `var q = ganita_f64_pow(…); q * 2.0`
+  gives 0 (*probed*).
 
 ### Data model
 
 | Rust | Cyrius |
 |---|---|
-| `Nucleus { z: u32, a: u32 }` (Copy, validated) | packed value `(z << 16) \| a` in one i64 with `nuc_new/z/a/n` accessors: no allocation in hot loops; validation in `nuc_new` returns an error code |
-| `#[non_exhaustive] enum` (DecayMode, OrbitalType, TimeScale, FrequencyStandard, …) | `enum` with explicit numeric values; property functions via `switch` |
-| `ElectronAffinity::{Bound(f64), Unbound, Unknown}` | tag + value pair (`return (tag, ev)`) or value-form `Result`; not a heap tagged union in hot lookups |
-| `Result<T, TanmatraError>` | value-form `Result` (zero-alloc since cyrius 6.6.0), with a `TanmatraError` code enum plus a detail string only on error. Match hisab 3.x, which moved to `Result<T,E>` at 3.0.0 |
-| Structs with identity (`Isotope`, `NuclearReaction`, `ShellLevel`, `SuperallowedDecay`, `ThermalCrossSection`, `FissionYield`, `FourMomentum`, `AtomicInstant`) | heap blob + `#derive(accessors)` + layout comment |
-| `Vec<T>` returns (configurations, shell occupation, series, yields, chains, Bateman populations) | `lib/vec.cyr` of pointers, or f64 buffers with explicit length; hot APIs take a caller buffer |
-| `known_isotopes()` (allocates 114 structs per call) | lazily built static table + indexed accessors, allocated once, as prakash CIE tables |
+| `Nucleus { z: u32, a: u32 }` (Copy, validated) | `struct Nucleus { z: u32; a: u32; }` **by value**: 8 bytes in one register, no allocation (*probed*). `nucleus_new` validates and returns a `Result`. If M1's probe finds that a struct payload won't ride a value-form `Result`, fall back to a packed `(z << 16) \| a` i64 with `nuc_z`/`nuc_a` accessors |
+| `FourMomentum` (4 × f64, Copy, `impl Add`) | inline struct value with typed f64 fields and a `FourMomentum_add` overload for `+`. When returning by value, bind the literal to a local first, because `return S{…}` is refused |
+| `AtomicInstant { seconds: i64, nanos: u32 }` | value struct `{ seconds: i64; nanos: u32; }` with a normalizing constructor |
+| `#[non_exhaustive] enum` (DecayMode, OrbitalType, TimeScale, FrequencyStandard, …) | `enum` with explicit, append-only numeric values. Property functions use `match` with an `_ =>` arm, because `match` warns on a non-exhaustive enum. Case values may be any const expression |
+| `ElectronAffinity::{Bound(f64), Unbound, Unknown}` | `enum ElectronAffinity: stack { Bound(ev); Unbound(); Unknown(); }`, which allocates nothing (*probed*). Bind the payload with `var e: f64 = ev;`. A user enum can't be a function's return type, so leave the function's return unannotated. A plain enum without `: stack` that carries a payload allocates |
+| `Result<T, TanmatraError>` | value-form `Result` with **`?`** propagation (*probed*), plus a `TanmatraError` code enum. There is only one payload word, so detail strings go through an `err_out` pointer (the prakash pattern). Never return a `Result` through `callptr`: its payload is lost |
+| Identity structs carrying strings or vecs (`Isotope`, `NuclearReaction`, `ShellLevel`, `SuperallowedDecay`, `ThermalCrossSection`, `FissionYield`) | heap structs with typed fields, read as `p.field` through a `*T`. **Avoid `#derive(accessors)` getters on f64 fields.** They are untyped, so `P_x(p) + P_y(p)` is an integer add |
+| `Vec<T>` returns (configurations, shell occupation, series, yields, chains, Bateman populations) | `lib/vec.cyr` of pointers, or f64 buffers with an explicit length. Hot APIs take a caller buffer |
+| `known_isotopes()` (allocates 114 structs per call) and every data table | baked typed column arrays from M0 step 6, with indexed accessors. There is no lazy initialization and no `alloc_reset` hazard |
+| constants | generated decimal `const`s (M0 step 6). **No hex in a `const`** |
 | `String` names and labels | `Str` via `str_builder` |
 
-### Cyrius constraints that change tanmatra APIs
+### Cyrius rules that shape tanmatra's code
 
-- **More than 6 arguments.** `breit_wigner_cross_section` (7) and `born_screened_coulomb_with_masses` (7) exceed the 6 register arguments; take a params struct pointer.
-- **Negative literals.** None exist; write `(0 - x)`. Negative table entries (mass excesses, magnetic moments, quadrupoles) are generated as hex bit patterns anyway.
-- **`var buf[N]` is static.** Never return one. Bateman and radial-integral scratch use `alloc` or a caller buffer; a long-running consumer loop must not leak through the bump allocator, so scratch goes in an arena.
-- **Globals.** At most 4,096 globals with non-literal initializers per compilation unit (raised at v6.3.41; integer-literal initializers and enum members don't count). Keep f64 constants in `fn` accessors returning hex, and tables in lazily initialized buffers, as prakash does. Handle `alloc_reset()` invalidating lazily built tables; prakash `spectral_cie.cyr` documents the hazard and its fix.
-- **Unsigned semantics.** u32 has no Cyrius equivalent, so validate non-negative Z, A, n, l and j explicitly at each API boundary.
+- **Arguments.** Arguments past the sixth are passed on the stack, so the two 7-argument
+  functions keep their signatures. Named and default arguments (6.7.7) keep call sites
+  readable.
+- **Negation.**
+  - Write `-x` or `0.0 - x`.
+  - `(0 - x)` on an f64 is an integer subtraction of the bit pattern (*probed*; it warns).
+  - Negative literals such as `-1.5` and `-0.0` work.
+- **Literals.** There is no exponent notation. The generator expands every value to positional
+  decimal, or emits hex inside a typed `f64` slot.
+- **Arrays and scratch memory.**
+  - Array locals have been per-call stack storage since 6.3.15. Arrays above ~120 KB fall back
+    to static storage, with a warning.
+  - Never return an array local.
+  - Bateman and radial-integral scratch uses a caller buffer or an arena. The heap is still a
+    bump allocator, so a long-running consumer loop must not leak through it.
+- **Globals.** The 4,096 non-literal-initializer cap was removed in 6.6.9.
+- **Unsigned types.**
+  - `u8`, `u16` and `u32` exist as locals, parameters (narrowed) and packed fields, but not as
+    return types.
+  - `u64` behaves as `i64`: there is no unsigned compare.
+  - Validate non-negative Z, A, n, l and j at every API boundary.
+- **Shifts.** `>>` is logical and `>>>` is arithmetic, the reverse of Java and JavaScript.
+  Choose by the signedness of the Rust operand.
+- **Struct values** changed heavily between 6.7.10 and 6.7.17.
+  - Keep the shapes simple: no struct-valued calls at top level, and pass a `*T` when the
+    callee mutates.
+  - Re-probe struct values at every pin bump.
+- **SIMD.** Don't use the `f64v_*` builtins until cyrius issue
+  `2026-11-06-f64v-builtins-no-scalar-tail` is fixed: they overrun `dst` when `n` isn't a
+  multiple of the lane count.
 
 ---
 
 ## 6. After 2.0.0
 
-1. **Bridges** (`src/bridge.cyr`) — ported per consumer as each lands in Cyrius:
-   - kimiya, bijli, bhava;
-   - jyotish, chrono, hisab-mimamsa, falak;
+1. **Bridges** (`src/bridge.cyr`), ported per consumer as each lands in Cyrius:
+   - chrono first, against stdlib `lib/chrono.cyr`, which is unblocked now;
+   - kimiya, bijli and bhava;
+   - jyotish, hisab-mimamsa and falak;
    - kiran/joshua (`SimulationClock`).
 
    Parity comes from the Rust bridge tests in `rust-old/`.
-2. **soorat integration** (`src/soorat.cyr`) when soorat ports.
-3. **Removing `rust-old/`** happens only after every deferred bridge and integration is ported or explicitly dropped, and the golden corpus and generators are archived (prakash removed `rust-old/` in 2.2.3 and keeps it recoverable from git).
+2. **soorat integration** (`src/soorat.cyr`), once soorat ports.
+3. **Removing `rust-old/`.** This happens only after three things:
+   - every deferred bridge and integration is ported or explicitly dropped;
+   - the golden corpus and the generators are archived;
+   - the M7 Rust-test ledger is closed.
+
+   prakash removed its `rust-old/` in 2.2.3 and mela in 1.1.6; both keep it recoverable from git.
 4. **Roadmap items continue in Cyrius:**
-   - v1.1 remainder: Y_lm, oscillator strengths, Hartree screening, He⁺/Li²⁺ validation;
+   - the v1.1 remainder: Y_lm, oscillator strengths, Hartree screening, He⁺/Li²⁺ validation;
    - v1.6: simulation support.
 
 ---
@@ -221,7 +470,7 @@ Rules:
 
 | Milestone | Status | Golden rows | Reference tests | Benches | Notes |
 |---|---|---|---|---|---|
-| M0 Initialize | ⏸ | — | — | — | waiting for Cyrius 6.6.5 (bundles ganita ≥ 1.2.6 with `f64_cbrt`) |
+| M0 Initialize | ◐ step 0 done | — | — | — | Cyrius 6.7.18 is installed (ganita 1.2.15, correctly rounded `f64_cbrt`). The Rust oracle is frozen green on rustc 1.99.1. Next: step 1, `cyrius port` |
 | M1 Foundation | ☐ | | | | |
 | M2 Nuclear | ☐ | | | | |
 | M5 Timekeeping | ☐ | | | | |
@@ -229,5 +478,5 @@ Rules:
 | M4 Reactions & scattering | ☐ | | | | |
 | M6 Optics profile | ☐ | | | | |
 | M7 Release 2.0.0 | ☐ | | | | |
-| Bridges (deferred) | ⏸ | | | | waits on bijli, kimiya, bhava, jyotish, falak, hisab-mimamsa, kiran/joshua |
+| Bridges (deferred) | ⏸ | | | | chrono is unblocked (stdlib `lib/chrono.cyr`). The rest wait on bijli, kimiya, bhava, jyotish, falak, hisab-mimamsa and kiran/joshua |
 | soorat integration (deferred) | ⏸ | | | | waits on soorat |
