@@ -1,0 +1,202 @@
+# shell_model.cyr — the nuclear shell model: Mayer–Jensen levels, occupation, closures and
+# ground-state J^π (port of the shell-model half of rust-old/src/nucleus.rs).
+#
+# A ShellLevel is a packed word, n_shell | (l << 21) | (two_j << 42), each field below 2^21:
+# Rust's three u32 fields, which never exceed a few dozen physically. The tables are the
+# generated nucleus_data.cyr. Everything here is integer logic, so the golden rows are
+# class A.
+
+# A shell level from its quantum numbers (n_shell, l, 2j). Mirrors constructing `ShellLevel`.
+#must_use
+fn shell_level_new(n_shell, l, two_j): i64 {
+    return (n_shell & 0x1FFFFF) | ((l & 0x1FFFFF) << 21) | ((two_j & 0x1FFFFF) << 42);
+}
+
+# Radial quantum number n within its l (1-based). Mirrors `ShellLevel::n_shell`.
+#must_use
+fn shell_level_n_shell(lv): i64 { return lv & 0x1FFFFF; }
+
+# Orbital angular momentum l. Mirrors `ShellLevel::l`.
+#must_use
+fn shell_level_l(lv): i64 { return (lv >> 21) & 0x1FFFFF; }
+
+# Twice the total angular momentum, 2j. Mirrors `ShellLevel::two_j`.
+#must_use
+fn shell_level_two_j(lv): i64 { return (lv >> 42) & 0x1FFFFF; }
+
+# The degeneracy 2j + 1. Mirrors `ShellLevel::degeneracy`.
+#must_use
+fn shell_level_degeneracy(lv): i64 { return shell_level_two_j(lv) + 1; }
+
+# j as an f64. Mirrors `ShellLevel::j`.
+#must_use
+fn shell_level_j(lv): f64 {
+    var j: f64 = f64_from(shell_level_two_j(lv)) / 2.0;
+    return j;
+}
+
+# The spectroscopic label, e.g. "1s1/2" or "1h11/2"; l > 6 is '?'. Mirrors `ShellLevel::label`.
+#must_use
+fn shell_level_label(lv): Str {
+    var l = shell_level_l(lv);
+    var c = 63;
+    if (l == 0) { c = 115; }
+    elif (l == 1) { c = 112; }
+    elif (l == 2) { c = 100; }
+    elif (l == 3) { c = 102; }
+    elif (l == 4) { c = 103; }
+    elif (l == 5) { c = 104; }
+    elif (l == 6) { c = 105; }
+    var sb = str_builder_new();
+    str_builder_add_int(sb, shell_level_n_shell(lv));
+    str_builder_putc(sb, c);
+    str_builder_add_int(sb, shell_level_two_j(lv));
+    str_builder_add_cstr(sb, "/2");
+    return str_builder_build(sb);
+}
+
+# How many Mayer–Jensen levels are tabulated (32, through 3f7/2). With shell_model_level(k)
+# this mirrors the slice `shell_model_levels` returns.
+#must_use
+fn shell_model_level_count(): i64 { return TM_SHELL_LEVEL_COUNT; }
+
+# The k-th Mayer–Jensen level in energy order, or 0 when k is out of range.
+#must_use
+fn shell_model_level(k): i64 {
+    if (k < 0 || k >= TM_SHELL_LEVEL_COUNT) { return 0; }
+    return shell_level_new(TM_SHELL_LEVEL_N_SHELL[k], TM_SHELL_LEVEL_L[k], TM_SHELL_LEVEL_TWO_J[k]);
+}
+
+# Fills the Mayer–Jensen levels with `nucleon_count` nucleons in order. It writes up to `cap`
+# (level word, occupation) pairs to levels_out[] and occ_out[] (i64 arrays) and returns how
+# many levels hold nucleons. Mirrors the Vec `shell_occupation` returns. 32 entries always
+# suffice.
+#must_use
+fn shell_occupation(nucleon_count, levels_out, occ_out, cap): i64 {
+    var remaining = nucleon_count;
+    var n = 0;
+    var k = 0;
+    while (k < TM_SHELL_LEVEL_COUNT && remaining > 0) {
+        var lv = shell_model_level(k);
+        var deg = shell_level_degeneracy(lv);
+        var fill = remaining;
+        if (remaining >= deg) { fill = deg; }
+        if (n < cap) {
+            store64(levels_out + n * 8, lv);
+            store64(occ_out + n * 8, fill);
+        }
+        n = n + 1;
+        remaining = remaining - fill;
+        k = k + 1;
+    }
+    return n;
+}
+
+# Level k of the empirical proton (species 0) or neutron (species 1) filling order.
+#must_use
+fn _tm_order_level(species, k): i64 {
+    if (species == 0) {
+        return shell_level_new(_TM_PROTON_ORDER_N_SHELL[k], _TM_PROTON_ORDER_L[k], _TM_PROTON_ORDER_TWO_J[k]);
+    }
+    return shell_level_new(_TM_NEUTRON_ORDER_N_SHELL[k], _TM_NEUTRON_ORDER_L[k], _TM_NEUTRON_ORDER_TWO_J[k]);
+}
+
+# 2j of level k of the species' order: the only column the walk below needs.
+#must_use
+fn _tm_order_two_j(species, k): i64 {
+    if (species == 0) { return _TM_PROTON_ORDER_TWO_J[k]; }
+    return _TM_NEUTRON_ORDER_TWO_J[k];
+}
+
+# The level holding the last of `count` nucleons in the species' order, and how many occupy
+# it, as a pair. Past the table (count > 184), it is the last listed level with occupation 1:
+# rust last_filled_level, then `unwrap_or_else`. The walk reads only the 2j column; the level
+# word is built once, for the level found.
+fn _tm_last_filled(species, count) {
+    var remaining = count;
+    var k = 0;
+    while (k < 32) {
+        var deg = _tm_order_two_j(species, k) + 1;
+        if (remaining <= deg) { return (_tm_order_level(species, k), remaining); }
+        remaining = remaining - deg;
+        k = k + 1;
+    }
+    return (_tm_order_level(species, 31), 1);
+}
+
+# +1 for even l, −1 for odd.
+#must_use
+fn _tm_parity_of(l): i64 {
+    if ((l & 1) == 0) { return 1; }
+    return 0 - 1;
+}
+
+# The ground-state spin and parity in the extreme single-particle shell model, as a pair
+# `var two_j, parity = ground_state_spin_parity(n);` (parity +1 or −1):
+# - even-even: 0+;
+# - odd A: the unpaired nucleon's level, in the empirical proton / neutron orders;
+# - odd-odd: parity (−1)^(l_p + l_n), with spin by the Brennan–Bernstein rules. A particle–hole
+#   pair gives j_p + j_n − 1; otherwise the Nordheim number gives |j_p − j_n| or j_p + j_n.
+# Mirrors `ground_state_spin_parity`.
+#must_use
+fn ground_state_spin_parity(n) {
+    var z = nucleus_z(n);
+    var nn = nucleus_n(n);
+    var z_odd = z & 1;
+    var n_odd = nn & 1;
+    if (z_odd == 0 && n_odd == 0) { return (0, 1); }
+    if (z_odd == 1 && n_odd == 0) {
+        var p, po = _tm_last_filled(0, z);
+        return (shell_level_two_j(p), _tm_parity_of(shell_level_l(p)));
+    }
+    if (z_odd == 0 && n_odd == 1) {
+        var q, qo = _tm_last_filled(1, nn);
+        return (shell_level_two_j(q), _tm_parity_of(shell_level_l(q)));
+    }
+    var pl, p_occ = _tm_last_filled(0, z);
+    var nl, n_occ = _tm_last_filled(1, nn);
+    var pj = shell_level_two_j(pl);
+    var nj = shell_level_two_j(nl);
+    var parity = _tm_parity_of(shell_level_l(pl) + shell_level_l(nl));
+    var p_hole = 0;
+    if (p_occ > shell_level_degeneracy(pl) / 2) { p_hole = 1; }
+    var n_hole = 0;
+    if (n_occ > shell_level_degeneracy(nl) / 2) { n_hole = 1; }
+    var sign_p = pj - 2 * shell_level_l(pl);
+    var sign_n = nj - 2 * shell_level_l(nl);
+    var two_j = pj + nj;
+    if (p_hole != n_hole) {
+        two_j = pj + nj - 2;
+    } elif (sign_p + sign_n == 0) {
+        two_j = pj - nj;
+        if (two_j < 0) { two_j = 0 - two_j; }
+    }
+    return (two_j, parity);
+}
+
+# The shell closure at or below `nucleon_count` (0 below the first, 2). Mirrors
+# `shell_closure_below`.
+#must_use
+fn shell_closure_below(nucleon_count): i64 {
+    var result = 0;
+    var k = 0;
+    while (k < TM_SHELL_CLOSURE_COUNT) {
+        var c = TM_SHELL_CLOSURES[k];
+        if (c <= nucleon_count) { result = c; } else { return result; }
+        k = k + 1;
+    }
+    return result;
+}
+
+# The next shell closure above `nucleon_count`: Some(closure), or None past 184. Mirrors
+# `next_shell_closure`.
+#must_use
+fn next_shell_closure(nucleon_count): Option {
+    var k = 0;
+    while (k < TM_SHELL_CLOSURE_COUNT) {
+        var c = TM_SHELL_CLOSURES[k];
+        if (c > nucleon_count) { return Some(c); }
+        k = k + 1;
+    }
+    return None();
+}

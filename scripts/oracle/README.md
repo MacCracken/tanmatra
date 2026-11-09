@@ -42,7 +42,8 @@ python3 -I scripts/oracle/probe_tables.py .                                     
 | `particle` | M1 | 102 | `src/m_particle.rs` | `src/particle_data.cyr` (`src/t_particle.rs`) |
 | `relativity` | M1 | 6,768 | `src/m_relativity.rs` | — (no tables) |
 | `libm` | M0 step 8 | 11,549 | `src/m_libm.rs` | — |
-| nucleus, shell model, decay | M2 | — | — | `nucleus_data.cyr`, `decay_data.cyr` |
+| `nucleus` (with the shell model) | M2 | 74,297 | `src/m_nucleus.rs` | `src/nucleus_data.cyr` (`src/t_nucleus.rs`, with the private-value proofs) |
+| decay | M2 | — | — | `decay_data.cyr` |
 | timekeeping | M5 | — | — | leap-second and frequency tables |
 | atomic | M3 | — | — | `atomic_data.cyr` |
 | reaction, scattering | M4 | — | — | `reaction_data.cyr` |
@@ -116,12 +117,30 @@ reported as `accepted (ADR n)` on every run.
 
 ## Generated Cyrius sources
 
-Values always come from the oracle's public API. The Rust source is read only for its `///`
-doc comments, which carry the data citations (CODATA 2022, PDG 2024, ...) into the Cyrius
-file. A table with no public accessor gets its emitter when its milestone designs the
-Cyrius layout. That covers the proton/neutron level orders, the leap-second table and the
-USNO segments: they are reached through the functions that use them, and they are never
-re-typed.
+Values come from the oracle's public API wherever one exists. The Rust source is also read
+for its `///` doc comments, which carry the data citations (CODATA 2022, PDG 2024, ...) into
+the Cyrius file.
+
+### Private values (from M2)
+
+Some values have no public accessor: the SEMF and Myers–Swiatecki coefficients, AME2020's
+u→keV factor, `MS_MAGIC`, and the empirical proton and neutron level orders. They are never
+re-typed. `src/rust_src.rs` extracts them mechanically under strict rules:
+- it reads only a `const NAME: TYPE = <literal>;` item: a plain decimal, or a list of integer
+  tuples;
+- a table's element count must match its declared length;
+- floats are parsed with `str::parse::<f64>`, correctly rounded like rustc's own literal
+  conversion.
+
+**Every extracted value is then proven before anything is written.** The emitter transcribes
+the Rust function that uses the value and recomputes the oracle's output from it, over the
+whole milestone grid, requiring identical bits.
+- `t_nucleus.rs` recomputes `binding_energy` and `binding_energy_shell_corrected` (all 14,160
+  nuclei), `ground_state_spin_parity` (all 14,160), and every `experimental_atomic_mass_amu`.
+- Nudging a single extracted coefficient by 1 ulp makes the generator refuse to write
+  (*extraction proof failed: binding_energy(1, 2)*).
+
+The leap-second table and the USNO segments (M5) follow the same path.
 
 ### Emission rules
 

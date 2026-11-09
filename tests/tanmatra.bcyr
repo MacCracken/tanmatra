@@ -11,6 +11,9 @@ include "src/constants.cyr"
 include "src/particle_data.cyr"
 include "src/particle.cyr"
 include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
 
 # A sink the timed loops write to, so their results are used.
 var _bench_sink = 0;
@@ -54,6 +57,94 @@ fn bench_particle_properties_all() {
     }
 }
 
+# The nuclei each nucleus bench iterates, built once (as the Rust benches build theirs
+# outside `b.iter`): word arrays with their counts.
+var _bench_be = 0;
+var _bench_be_n = 0;
+var _bench_sc = 0;
+var _bench_sc_n = 0;
+var _bench_jp = 0;
+var _bench_jp_n = 0;
+
+# Builds the three nucleus lists of rust-old/benches/benchmarks.rs.
+fn bench_build_nuclei() {
+    _bench_be = alloc(8 * 1000);
+    _bench_sc = alloc(8 * 1000);
+    _bench_jp = alloc(8 * 100);
+    var z = 1;
+    while (z <= 100) {
+        var a_max = z * 3;
+        if (a_max > z + 9) { a_max = z + 9; }
+        var a = z;
+        while (a <= a_max) {
+            store64(_bench_be + _bench_be_n * 8, _tm_nuc(z, a));
+            _bench_be_n = _bench_be_n + 1;
+            a = a + 1;
+        }
+        a = z;
+        while (a <= z + 9) {
+            store64(_bench_sc + _bench_sc_n * 8, _tm_nuc(z, a));
+            _bench_sc_n = _bench_sc_n + 1;
+            a = a + 1;
+        }
+        z = z + 1;
+    }
+    z = 1;
+    while (z <= 99) {
+        store64(_bench_jp + _bench_jp_n * 8, _tm_nuc(z, 2 * z + 1));
+        _bench_jp_n = _bench_jp_n + 1;
+        z = z + 2;
+    }
+    z = 1;
+    while (z <= 99) {
+        store64(_bench_jp + _bench_jp_n * 8, _tm_nuc(z, 2 * z));
+        _bench_jp_n = _bench_jp_n + 1;
+        z = z + 2;
+    }
+}
+
+# nucleus/binding_energy_1000: SEMF over Z = 1..100, A = Z..min(3Z, Z + 9) (984 nuclei).
+fn bench_binding_energy_1000() {
+    var k = 0;
+    while (k < _bench_be_n) {
+        var b: f64 = nucleus_binding_energy(load64(_bench_be + k * 8));
+        _bench_sink = b;
+        k = k + 1;
+    }
+}
+
+# nucleus/binding_energy_shell_corrected_1000: over Z = 1..100, A = Z..Z + 9 (1000 nuclei).
+fn bench_binding_energy_shell_corrected_1000() {
+    var k = 0;
+    while (k < _bench_sc_n) {
+        var b: f64 = nucleus_binding_energy_shell_corrected(load64(_bench_sc + k * 8));
+        _bench_sink = b;
+        k = k + 1;
+    }
+}
+
+# nucleus/ground_state_spin_parity_100: odd Z = 1..99 at A = 2Z + 1 (odd A) and A = 2Z (odd-odd).
+fn bench_ground_state_spin_parity_100() {
+    var k = 0;
+    while (k < _bench_jp_n) {
+        var tj, par = ground_state_spin_parity(load64(_bench_jp + k * 8));
+        _bench_sink = tj + par;
+        k = k + 1;
+    }
+}
+
+# nucleus/shell_occupation_126: occupations for 1..126 nucleons. Rust allocates a Vec per call;
+# the Cyrius API fills caller buffers, so this times the fill alone.
+fn bench_shell_occupation_126() {
+    var lvs[256];
+    var occ[256];
+    var n = 1;
+    while (n <= 126) {
+        _bench_sink = shell_occupation(n, &lvs, &occ, 32);
+        n = n + 1;
+    }
+}
+
 # Times `rounds` calls of a body fn per batch, over `batches` batches.
 fn run(name, fp, rounds, batches) {
     var b = bench_new(name);
@@ -74,6 +165,11 @@ fn main(): i64 {
     run("relativity/lorentz_gamma_1000", &bench_lorentz_gamma_1000, 200, 20);
     run("relativity/invariant_mass_1000", &bench_invariant_mass_1000, 50, 20);
     run("particle/properties_all", &bench_particle_properties_all, 20000, 20);
+    bench_build_nuclei();
+    run("nucleus/binding_energy_1000", &bench_binding_energy_1000, 20, 20);
+    run("nucleus/binding_energy_shell_corrected_1000", &bench_binding_energy_shell_corrected_1000, 5, 20);
+    run("nucleus/ground_state_spin_parity_100", &bench_ground_state_spin_parity_100, 50, 20);
+    run("nucleus/shell_occupation_126", &bench_shell_occupation_126, 50, 20);
     return 0;
 }
 

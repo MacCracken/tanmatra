@@ -23,14 +23,17 @@ include "src/constants.cyr"
 include "src/particle_data.cyr"
 include "src/particle.cyr"
 include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
 
 alloc_init();
 
 # ── tokens ──────────────────────────────────────────────────────────────────────────
-# Three token lists: the row's inputs, its wanted outputs, and what the port returned.
+# Three token lists of up to _PAR_MAX tokens: the row's inputs, its wanted outputs, and what the port returned.
 # Each slot is a kind byte ('f' 'i' 'e' 's' 'n' 'E' 'v'), a value word (f64 bits, an
 # integer, or a pointer to text) and a text length.
-var _PAR_MAX = 64;
+var _PAR_MAX = 256;
 var _par_in_k = 0;
 var _par_in_v = 0;
 var _par_in_l = 0;
@@ -376,6 +379,193 @@ fn _par_relativity(fp, fl): i64 {
     return 0;
 }
 
+# Appends Option::None (`n:`) to the got list.
+fn _par_got_none() {
+    var at = _par_got_n * 8;
+    store64(_par_got_k + at, 110);
+    store64(_par_got_v + at, 0);
+    store64(_par_got_l + at, 0);
+    _par_got_n = _par_got_n + 1;
+}
+
+# Appends an error (`E:Variant`) to the got list, by its Rust variant name.
+fn _par_got_err(code) {
+    var name = tm_error_name(code);
+    var at = _par_got_n * 8;
+    store64(_par_got_k + at, 69);
+    store64(_par_got_v + at, name);
+    store64(_par_got_l + at, strlen(name));
+    _par_got_n = _par_got_n + 1;
+}
+
+# Appends a text result (`s:`) to the got list.
+fn _par_got_s(p, len) {
+    var at = _par_got_n * 8;
+    store64(_par_got_k + at, 115);
+    store64(_par_got_v + at, p);
+    store64(_par_got_l + at, len);
+    _par_got_n = _par_got_n + 1;
+}
+
+# Appends an Option<f64>: the float for Some, `n:` for None.
+fn _par_got_opt_f(t, v) {
+    if (is_some(t) == 1) { _par_got_f(v); } else { _par_got_none(); }
+}
+
+# Appends a nucleus word as its golden tokens, `i:Z i:A`.
+fn _par_got_nuc(p) {
+    _par_got_i(nucleus_z(p));
+    _par_got_i(nucleus_a(p));
+}
+
+# `nucleus` rows: src/nucleus.cyr and src/shell_model.cyr. A nucleus input is `i:Z i:A`.
+fn _par_nucleus(fp, fl): i64 {
+    if (_par_eq(fp, fl, "Nucleus::hydrogen_1") == 1) { _par_got_nuc(nucleus_hydrogen_1()); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::helium_4") == 1) { _par_got_nuc(nucleus_helium_4()); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::carbon_12") == 1) { _par_got_nuc(nucleus_carbon_12()); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::iron_56") == 1) { _par_got_nuc(nucleus_iron_56()); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::uranium_235") == 1) { _par_got_nuc(nucleus_uranium_235()); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::uranium_238") == 1) { _par_got_nuc(nucleus_uranium_238()); return 1; }
+    if (_par_eq(fp, fl, "superallowed_ft_values") == 1) {
+        var cnt = superallowed_ft_value_count();
+        _par_got_seq(cnt);
+        var k = 0;
+        while (k < cnt) {
+            var d = superallowed_ft_value(k);
+            _par_got_i(nucleus_z(d.parent));
+            _par_got_i(nucleus_a(d.parent));
+            _par_got_i(nucleus_z(d.daughter));
+            _par_got_i(nucleus_a(d.daughter));
+            _par_got_f(d.ft_seconds);
+            k = k + 1;
+        }
+        return 1;
+    }
+    if (_par_eq(fp, fl, "superallowed_average_ft") == 1) {
+        var ft, unc = superallowed_average_ft();
+        _par_got_f(ft);
+        _par_got_f(unc);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "shell_model_levels") == 1) {
+        var cnt = shell_model_level_count();
+        _par_got_seq(cnt);
+        var k = 0;
+        while (k < cnt) {
+            var lv = shell_model_level(k);
+            _par_got_i(shell_level_n_shell(lv));
+            _par_got_i(shell_level_l(lv));
+            _par_got_i(shell_level_two_j(lv));
+            k = k + 1;
+        }
+        return 1;
+    }
+    var x = _par_in(0);
+    if (_par_eq(fp, fl, "is_magic_number") == 1) { _par_got_i(is_magic_number(x)); return 1; }
+    if (_par_eq(fp, fl, "shell_closure_below") == 1) { _par_got_i(shell_closure_below(x)); return 1; }
+    if (_par_eq(fp, fl, "next_shell_closure") == 1) {
+        var t, v = next_shell_closure(x);
+        if (is_some(t) == 1) { _par_got_i(v); } else { _par_got_none(); }
+        return 1;
+    }
+    if (_par_eq(fp, fl, "shell_occupation") == 1) {
+        var lvs[256];
+        var occ[256];
+        var cnt = shell_occupation(x, &lvs, &occ, 32);
+        _par_got_seq(cnt);
+        var k = 0;
+        while (k < cnt) {
+            var lv = load64(&lvs + k * 8);
+            _par_got_i(shell_level_n_shell(lv));
+            _par_got_i(shell_level_l(lv));
+            _par_got_i(shell_level_two_j(lv));
+            _par_got_i(load64(&occ + k * 8));
+            k = k + 1;
+        }
+        return 1;
+    }
+    var y = _par_in(1);
+    if (_par_eq(fp, fl, "Nucleus::new") == 1) {
+        var t, v = nucleus_new(x, y);
+        if (is_ok(t) == 1) { _par_got_i(nucleus_z(v)); _par_got_i(nucleus_a(v)); }
+        else { _par_got_err(v); }
+        return 1;
+    }
+    if (_par_in_n == 3) {
+        var lv = shell_level_new(x, y, _par_in(2));
+        if (_par_eq(fp, fl, "ShellLevel::degeneracy") == 1) { _par_got_i(shell_level_degeneracy(lv)); return 1; }
+        if (_par_eq(fp, fl, "ShellLevel::j") == 1) { _par_got_f(shell_level_j(lv)); return 1; }
+        if (_par_eq(fp, fl, "ShellLevel::label") == 1) {
+            var lab = shell_level_label(lv);
+            _par_got_s(str_data(lab), str_len(lab));
+            return 1;
+        }
+        return 0;
+    }
+    if (_par_eq(fp, fl, "SuperallowedDecay::corrected_ft_seconds") == 1) {
+        var sd: TmSuperallowedDecay;
+        sd.parent = _tm_nuc(x, y);
+        sd.daughter = _tm_nuc(_par_in(2), _par_in(3));
+        var ftv: f64 = _par_in(4);
+        sd.ft_seconds = ftv;
+        var t, v = sd.corrected_ft_seconds();
+        _par_got_opt_f(t, v);
+        return 1;
+    }
+    var n = _tm_nuc(x, y);
+    if (_par_eq(fp, fl, "Nucleus::binding_energy") == 1) { _par_got_f(nucleus_binding_energy(n)); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::binding_energy_shell_corrected") == 1) {
+        _par_got_f(nucleus_binding_energy_shell_corrected(n));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "ground_state_spin_parity") == 1) {
+        var tj, par = ground_state_spin_parity(n);
+        _par_got_i(tj);
+        _par_got_i(par);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "Nucleus::z") == 1) { _par_got_i(nucleus_z(n)); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::a") == 1) { _par_got_i(nucleus_a(n)); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::n") == 1) { _par_got_i(nucleus_n(n)); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::binding_energy_per_nucleon") == 1) {
+        _par_got_f(nucleus_binding_energy_per_nucleon(n));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "Nucleus::mass_defect") == 1) { _par_got_f(nucleus_mass_defect(n)); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::nuclear_mass") == 1) { _par_got_f(nucleus_nuclear_mass(n)); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::atomic_mass_amu") == 1) { _par_got_f(nucleus_atomic_mass_amu(n)); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::nuclear_mass_amu") == 1) { _par_got_f(nucleus_nuclear_mass_amu(n)); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::nuclear_radius") == 1) { _par_got_f(nucleus_nuclear_radius(n)); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::is_magic") == 1) { _par_got_i(nucleus_is_magic(n)); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::is_doubly_magic") == 1) { _par_got_i(nucleus_is_doubly_magic(n)); return 1; }
+    if (_par_eq(fp, fl, "Nucleus::experimental_mass_excess_kev") == 1) {
+        var t, v = nucleus_experimental_mass_excess_kev(n);
+        _par_got_opt_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "Nucleus::experimental_atomic_mass_amu") == 1) {
+        var t, v = nucleus_experimental_atomic_mass_amu(n);
+        _par_got_opt_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "Nucleus::charge_radius_fm") == 1) {
+        var t, v = nucleus_charge_radius_fm(n);
+        _par_got_opt_f(t, v);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "Nucleus::nuclear_moments") == 1) {
+        var mom: TmNuclearMoments;
+        if (nucleus_nuclear_moments(n, &mom) == 1) {
+            _par_got_f(mom.magnetic_dipole_mu_n);
+            _par_got_f(mom.electric_quadrupole_barn);
+        } else {
+            _par_got_none();
+        }
+        return 1;
+    }
+    return 0;
+}
+
 # Routes a row to its module's dispatcher. 0 (pending) for a module with none yet.
 fn _par_dispatch(mp, ml, fp, fl): i64 {
     _par_got_n = 0;
@@ -383,6 +573,7 @@ fn _par_dispatch(mp, ml, fp, fl): i64 {
     if (_par_eq(mp, ml, "libm") == 1) { return _par_libm(fp, fl); }
     if (_par_eq(mp, ml, "particle") == 1) { return _par_particle(fp, fl); }
     if (_par_eq(mp, ml, "relativity") == 1) { return _par_relativity(fp, fl); }
+    if (_par_eq(mp, ml, "nucleus") == 1) { return _par_nucleus(fp, fl); }
     return 0;
 }
 
@@ -403,6 +594,8 @@ fn _par_c_bound(fp, fl): i64 {
     if (_par_eq(fp, fl, "libm::log") == 1) { return 2; }
     if (_par_eq(fp, fl, "libm::sinh") == 1) { return 2; }
     if (_par_eq(fp, fl, "libm::pow") == 1) { return 2; }
+    # M2, by the port-parity rule: S = 0 (pow results nudged ±1 ulp on all 2,053 golden rows), 2 calls.
+    if (_par_eq(fp, fl, "Nucleus::atomic_mass_amu") == 1) { return 2; }
     return 0 - 1;
 }
 
@@ -703,23 +896,23 @@ fn _par_module(mp, ml): i64 {
 # The token and statistics buffers live on the heap: as statics they would push the test
 # past the compiler's 128 KiB static-data advisory, and a warning fails the gate.
 fn _par_alloc(): i64 {
-    _par_in_k = alloc(512);
+    _par_in_k = alloc(2048);
     if (_par_in_k == 0) { println("parity: out of memory"); return 1; }
-    _par_in_v = alloc(512);
+    _par_in_v = alloc(2048);
     if (_par_in_v == 0) { println("parity: out of memory"); return 1; }
-    _par_in_l = alloc(512);
+    _par_in_l = alloc(2048);
     if (_par_in_l == 0) { println("parity: out of memory"); return 1; }
-    _par_want_k = alloc(512);
+    _par_want_k = alloc(2048);
     if (_par_want_k == 0) { println("parity: out of memory"); return 1; }
-    _par_want_v = alloc(512);
+    _par_want_v = alloc(2048);
     if (_par_want_v == 0) { println("parity: out of memory"); return 1; }
-    _par_want_l = alloc(512);
+    _par_want_l = alloc(2048);
     if (_par_want_l == 0) { println("parity: out of memory"); return 1; }
-    _par_got_k = alloc(512);
+    _par_got_k = alloc(2048);
     if (_par_got_k == 0) { println("parity: out of memory"); return 1; }
-    _par_got_v = alloc(512);
+    _par_got_v = alloc(2048);
     if (_par_got_v == 0) { println("parity: out of memory"); return 1; }
-    _par_got_l = alloc(512);
+    _par_got_l = alloc(2048);
     if (_par_got_l == 0) { println("parity: out of memory"); return 1; }
     _par_fn_p = alloc(768);
     if (_par_fn_p == 0) { println("parity: out of memory"); return 1; }

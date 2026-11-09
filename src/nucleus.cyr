@@ -1,0 +1,372 @@
+# nucleus.cyr — nuclear structure: the semi-empirical mass formula with the Myers–Swiatecki
+# shell term, masses, radii, AME2020 / charge-radius / moment lookups, superallowed ft
+# (port of rust-old/src/nucleus.rs; the shell model is in shell_model.cyr).
+#
+# A Nucleus is a packed word, z | (a << 32): the bytes of Rust's struct { z: u32, a: u32 }.
+# A small struct can't round-trip through a value-form Result (a cyrius defect, filed as
+# 2026-11-08-small-struct-result-payload-read-as-address), and a word can. Build one with
+# nucleus_new (validated, a Result) or a preset.
+#
+# Every formula keeps Rust's operation order, with cbrt and sqrt correctly rounded on both
+# sides, so the golden rows are class B (bit-identical expected). atomic_mass_amu goes
+# through pow and is class C.
+
+# A nucleus word from Z and A, without validation (presets and table reads).
+#must_use
+fn _tm_nuc(z, a): i64 {
+    return z | (a << 32);
+}
+
+# A nucleus with atomic number z and mass number a. Err(TM_ERR_INVALID_ATOMIC_NUMBER) when
+# z < 1; Err(TM_ERR_INVALID_MASS_NUMBER) when a < z. Rust's u32 bounds both from above:
+# beyond 2^32 − 1 they are the same errors. Mirrors `Nucleus::new`.
+#must_use
+fn nucleus_new(z, a): Result {
+    if (z < 1 || z > 0xFFFFFFFF) { return Err(TM_ERR_INVALID_ATOMIC_NUMBER); }
+    if (a < z || a > 0xFFFFFFFF) { return Err(TM_ERR_INVALID_MASS_NUMBER); }
+    return Ok(_tm_nuc(z, a));
+}
+
+# Atomic number Z (protons). Mirrors `Nucleus::z`.
+#must_use
+fn nucleus_z(n): i64 { return n & 0xFFFFFFFF; }
+
+# Mass number A (nucleons). Mirrors `Nucleus::a`.
+#must_use
+fn nucleus_a(n): i64 { return n >> 32; }
+
+# Neutron number N = A − Z. Mirrors `Nucleus::n`.
+#must_use
+fn nucleus_n(n): i64 { return nucleus_a(n) - nucleus_z(n); }
+
+# Hydrogen-1 (the proton). Mirrors `Nucleus::hydrogen_1`.
+#must_use
+fn nucleus_hydrogen_1(): i64 { return _tm_nuc(1, 1); }
+
+# Helium-4 (the alpha particle). Mirrors `Nucleus::helium_4`.
+#must_use
+fn nucleus_helium_4(): i64 { return _tm_nuc(2, 4); }
+
+# Carbon-12. Mirrors `Nucleus::carbon_12`.
+#must_use
+fn nucleus_carbon_12(): i64 { return _tm_nuc(6, 12); }
+
+# Iron-56. Mirrors `Nucleus::iron_56`.
+#must_use
+fn nucleus_iron_56(): i64 { return _tm_nuc(26, 56); }
+
+# Uranium-235. Mirrors `Nucleus::uranium_235`.
+#must_use
+fn nucleus_uranium_235(): i64 { return _tm_nuc(92, 235); }
+
+# Uranium-238. Mirrors `Nucleus::uranium_238`.
+#must_use
+fn nucleus_uranium_238(): i64 { return _tm_nuc(92, 238); }
+
+# 1 if `n` is a nuclear magic number: 2, 8, 20, 28, 50, 82, 126. Mirrors `is_magic_number`.
+#must_use
+fn is_magic_number(n): i64 {
+    if (n == 2 || n == 8 || n == 20 || n == 28 || n == 50 || n == 82 || n == 126) { return 1; }
+    return 0;
+}
+
+# ── semi-empirical mass formula ─────────────────────────────────────────────────────
+
+# The pairing term δ: +a_p/√A even-even, −a_p/√A odd-odd, 0 odd A (rust pairing_term).
+#must_use
+fn _tm_pairing_term(z, a): f64 {
+    var n = a - z;
+    var af: f64 = f64_from(a);
+    var denom: f64 = f64_sqrt(af);
+    if (denom == 0.0) { return 0.0; }
+    if ((z & 1) == 0 && (n & 1) == 0) {
+        var p: f64 = _TM_SEMF_A_P / denom;
+        return p;
+    }
+    if ((z & 1) == 1 && (n & 1) == 1) {
+        var neg: f64 = -_TM_SEMF_A_P;
+        var m: f64 = neg / denom;
+        return m;
+    }
+    return 0.0;
+}
+
+# Binding energy B(Z, A) in MeV, Bethe–Weizsäcker with the AME2020-fitted coefficients:
+# a_v A − a_s A^(2/3) − a_c Z(Z − 1)/A^(1/3) − a_a (A − 2Z)²/A + δ. 0 for a single nucleon.
+# Mirrors `Nucleus::binding_energy`.
+#must_use
+fn nucleus_binding_energy(n): f64 {
+    var a = nucleus_a(n);
+    var z = nucleus_z(n);
+    if (a == 1) { return 0.0; }
+    var af: f64 = f64_from(a);
+    var zf: f64 = f64_from(z);
+    var c: f64 = ganita_f64_cbrt(af);
+    var a23: f64 = c * c;
+    var volume: f64 = _TM_SEMF_A_V * af;
+    var surface: f64 = _TM_SEMF_A_S * a23;
+    var coulomb: f64 = ((_TM_SEMF_A_C * zf) * (zf - 1.0)) / c;
+    var d: f64 = af - (2.0 * zf);
+    var asym: f64 = (_TM_SEMF_A_A * (d * d)) / af;
+    var delta: f64 = _tm_pairing_term(z, a);
+    var b: f64 = (((volume - surface) - coulomb) - asym) + delta;
+    return b;
+}
+
+# x^(5/3) as x · cbrt(x)², the oracle's form (rust pow_five_thirds).
+#must_use
+fn _tm_five_thirds(x: f64): f64 {
+    var c: f64 = ganita_f64_cbrt(x);
+    var r: f64 = (x * c) * c;
+    return r;
+}
+
+# Myers–Swiatecki F(count) for one nucleon species, between the magic numbers M around it
+# (rust myers_swiatecki_f).
+#must_use
+fn _tm_ms_f(count): f64 {
+    var k = 0;
+    while (k < 8) {
+        var lo = _TM_MS_MAGIC[k];
+        var hi = _TM_MS_MAGIC[k + 1];
+        if (count <= hi) {
+            var lo_f: f64 = f64_from(lo);
+            var hi_f: f64 = f64_from(hi);
+            var nf: f64 = f64_from(count);
+            var lo53: f64 = _tm_five_thirds(lo_f);
+            var q: f64 = (0.6 * (_tm_five_thirds(hi_f) - lo53)) / (hi_f - lo_f);
+            var r: f64 = (q * (nf - lo_f)) - (0.6 * (_tm_five_thirds(nf) - lo53));
+            return r;
+        }
+        k = k + 1;
+    }
+    return 0.0;
+}
+
+# The Myers–Swiatecki shell term S(N, Z) in MeV, positive where less bound
+# (rust myers_swiatecki_shell_term).
+#must_use
+fn _tm_ms_shell_term(z, n): f64 {
+    var af: f64 = f64_from(z + n);
+    var c: f64 = ganita_f64_cbrt(af / 2.0);
+    var half: f64 = c * c;
+    var ca: f64 = ganita_f64_cbrt(af);
+    var inner: f64 = ((_tm_ms_f(n) + _tm_ms_f(z)) / half) - (_TM_MS_SHELL_SMALL_C * ca);
+    var s: f64 = _TM_MS_SHELL_C * inner;
+    return s;
+}
+
+# Binding energy with the Myers–Swiatecki shell correction, B − S(N, Z), MeV; 0 for a single
+# nucleon. Mirrors `Nucleus::binding_energy_shell_corrected`.
+#must_use
+fn nucleus_binding_energy_shell_corrected(n): f64 {
+    if (nucleus_a(n) == 1) { return 0.0; }
+    var b: f64 = nucleus_binding_energy(n);
+    var s: f64 = _tm_ms_shell_term(nucleus_z(n), nucleus_n(n));
+    var r: f64 = b - s;
+    return r;
+}
+
+# Binding energy per nucleon B/A, MeV. Mirrors `Nucleus::binding_energy_per_nucleon`.
+#must_use
+fn nucleus_binding_energy_per_nucleon(n): f64 {
+    var b: f64 = nucleus_binding_energy(n);
+    var r: f64 = b / f64_from(nucleus_a(n));
+    return r;
+}
+
+# Mass defect in MeV/c², which is the binding energy itself. Mirrors `Nucleus::mass_defect`.
+#must_use
+fn nucleus_mass_defect(n): f64 {
+    var b: f64 = nucleus_binding_energy(n);
+    return b;
+}
+
+# Nuclear mass M = Z m_p + N m_n − B, MeV/c². Mirrors `Nucleus::nuclear_mass`.
+#must_use
+fn nucleus_nuclear_mass(n): f64 {
+    var zf: f64 = f64_from(nucleus_z(n));
+    var nf: f64 = f64_from(nucleus_n(n));
+    var b: f64 = nucleus_binding_energy(n);
+    var m: f64 = ((zf * TM_PROTON_MASS_MEV) + (nf * TM_NEUTRON_MASS_MEV)) - b;
+    return m;
+}
+
+# Atomic mass in u, M_atom = M_nucleus + Z m_e − B_e(Z), with the electron binding
+# B_e = 14.4381 Z^2.39 + 1.55468e-6 Z^5.35 eV (Lunney, Pearson & Thibault 2003, eq. A4).
+# Mirrors `Nucleus::atomic_mass_amu`.
+#must_use
+fn nucleus_atomic_mass_amu(n): f64 {
+    var zf: f64 = f64_from(nucleus_z(n));
+    var p1: f64 = ganita_f64_pow(zf, 2.39);
+    var p2: f64 = ganita_f64_pow(zf, 5.35);
+    var eb: f64 = ((14.4381 * p1) + (0.00000155468 * p2)) * 0.000001;
+    var m: f64 = nucleus_nuclear_mass(n);
+    var r: f64 = ((m + (zf * TM_ELECTRON_MASS_MEV)) - eb) / TM_AMU_MEV;
+    return r;
+}
+
+# Nuclear mass in u. Mirrors `Nucleus::nuclear_mass_amu`.
+#must_use
+fn nucleus_nuclear_mass_amu(n): f64 {
+    var m: f64 = nucleus_nuclear_mass(n);
+    var r: f64 = m / TM_AMU_MEV;
+    return r;
+}
+
+# Nuclear radius R = r₀ A^(1/3), fm. Mirrors `Nucleus::nuclear_radius`.
+#must_use
+fn nucleus_nuclear_radius(n): f64 {
+    var c: f64 = ganita_f64_cbrt(f64_from(nucleus_a(n)));
+    var r: f64 = TM_R0_FM * c;
+    return r;
+}
+
+# 1 if Z or N is magic. Mirrors `Nucleus::is_magic`.
+#must_use
+fn nucleus_is_magic(n): i64 {
+    if (is_magic_number(nucleus_z(n)) == 1 || is_magic_number(nucleus_n(n)) == 1) { return 1; }
+    return 0;
+}
+
+# 1 if Z and N are both magic. Mirrors `Nucleus::is_doubly_magic`.
+#must_use
+fn nucleus_is_doubly_magic(n): i64 {
+    if (is_magic_number(nucleus_z(n)) == 1 && is_magic_number(nucleus_n(n)) == 1) { return 1; }
+    return 0;
+}
+
+# ── tabulated data ──────────────────────────────────────────────────────────────────
+
+# The AME2020 row of nucleus n, or -1.
+#must_use
+fn _tm_ame_row(n): i64 {
+    var z = nucleus_z(n);
+    var a = nucleus_a(n);
+    var k = 0;
+    while (k < TM_AME2020_COUNT) {
+        if (TM_AME2020_Z[k] == z && TM_AME2020_A[k] == a) { return k; }
+        k = k + 1;
+    }
+    return 0 - 1;
+}
+
+# The AME2020 mass excess in keV: Some(f64), or None when the nuclide isn't tabulated.
+# Mirrors `Nucleus::experimental_mass_excess_kev`.
+#must_use
+fn nucleus_experimental_mass_excess_kev(n): Option {
+    var k = _tm_ame_row(n);
+    if (k < 0) { return None(); }
+    var me: f64 = TM_AME2020_MASS_EXCESS_KEV[k];
+    return Some(me);
+}
+
+# The AME2020 atomic mass in u, A + excess / (931494.10242 keV): Some(f64), or None.
+# Mirrors `Nucleus::experimental_atomic_mass_amu`.
+#must_use
+fn nucleus_experimental_atomic_mass_amu(n): Option {
+    var k = _tm_ame_row(n);
+    if (k < 0) { return None(); }
+    var me: f64 = TM_AME2020_MASS_EXCESS_KEV[k];
+    var m: f64 = f64_from(nucleus_a(n)) + (me / _TM_AME2020_U_KEV);
+    return Some(m);
+}
+
+# The RMS charge radius in fm (Angeli & Marinova 2013): Some(f64), or None. Mirrors
+# `Nucleus::charge_radius_fm`.
+#must_use
+fn nucleus_charge_radius_fm(n): Option {
+    var z = nucleus_z(n);
+    var a = nucleus_a(n);
+    var k = 0;
+    while (k < TM_CHARGE_RADII_COUNT) {
+        if (TM_CHARGE_RADII_Z[k] == z && TM_CHARGE_RADII_A[k] == a) {
+            var r: f64 = TM_CHARGE_RADII_FM[k];
+            return Some(r);
+        }
+        k = k + 1;
+    }
+    return None();
+}
+
+# Nuclear electromagnetic moments (Stone 2019 / 2021). Mirrors `NuclearMoments`.
+struct TmNuclearMoments {
+    magnetic_dipole_mu_n: f64;
+    electric_quadrupole_barn: f64;
+}
+
+# Writes the nucleus's magnetic dipole (μ_N) and electric quadrupole (barn) moments to *out
+# and returns 1, or returns 0 when the nuclide isn't tabulated. A 16-byte struct can't ride
+# a value-form Option, so this mirrors `Nucleus::nuclear_moments` through an out-pointer.
+#must_use
+fn nucleus_nuclear_moments(n, out: *TmNuclearMoments): i64 {
+    var z = nucleus_z(n);
+    var a = nucleus_a(n);
+    var k = 0;
+    while (k < TM_NUCLEAR_MOMENTS_COUNT) {
+        if (TM_NUCLEAR_MOMENTS_Z[k] == z && TM_NUCLEAR_MOMENTS_A[k] == a) {
+            var mu: f64 = TM_NUCLEAR_MOMENTS_MU_N[k];
+            var q: f64 = TM_NUCLEAR_MOMENTS_Q_BARN[k];
+            out.magnetic_dipole_mu_n = mu;
+            out.electric_quadrupole_barn = q;
+            return 1;
+        }
+        k = k + 1;
+    }
+    return 0;
+}
+
+# ── superallowed 0+ → 0+ beta decay ─────────────────────────────────────────────────
+
+# A superallowed transition: parent and daughter nucleus words and the measured ft, s.
+# Mirrors `SuperallowedDecay`.
+struct TmSuperallowedDecay {
+    parent: i64;
+    daughter: i64;
+    ft_seconds: f64;
+}
+
+impl TmSuperallowedDecay {
+    # The corrected Ft = ft(1 + δ'_R)(1 + δ_NS − δ_C), s, of this parent → daughter pair
+    # (Hardy & Towner 2020, Table XVI): Some(f64), or None when the pair isn't tabulated.
+    # Mirrors `SuperallowedDecay::corrected_ft_seconds`.
+    #must_use
+    fn corrected_ft_seconds(self): Option {
+        var k = 0;
+        while (k < TM_SUPERALLOWED_COUNT) {
+            var p = _tm_nuc(TM_SUPERALLOWED_PARENT_Z[k], TM_SUPERALLOWED_PARENT_A[k]);
+            var d = _tm_nuc(TM_SUPERALLOWED_DAUGHTER_Z[k], TM_SUPERALLOWED_DAUGHTER_A[k]);
+            if (p == self.parent && d == self.daughter) {
+                var big: f64 = TM_SUPERALLOWED_CORRECTED_FT_SECONDS[k];
+                return Some(big);
+            }
+            k = k + 1;
+        }
+        return None();
+    }
+}
+
+# How many superallowed transitions are tabulated. With superallowed_ft_value(k) this mirrors
+# the Vec `superallowed_ft_values` returns.
+#must_use
+fn superallowed_ft_value_count(): i64 { return TM_SUPERALLOWED_COUNT; }
+
+# The k-th tabulated superallowed transition, in Hardy & Towner's order; k must be in range.
+#must_use
+fn superallowed_ft_value(k): TmSuperallowedDecay {
+    var d: TmSuperallowedDecay;
+    d.parent = _tm_nuc(TM_SUPERALLOWED_PARENT_Z[k], TM_SUPERALLOWED_PARENT_A[k]);
+    d.daughter = _tm_nuc(TM_SUPERALLOWED_DAUGHTER_Z[k], TM_SUPERALLOWED_DAUGHTER_A[k]);
+    d.ft_seconds = TM_SUPERALLOWED_FT_SECONDS[k];
+    return d;
+}
+
+# The world-average corrected Ft and its total uncertainty, s: (3072.24, 1.85) (Hardy &
+# Towner 2020, eq. 22), as a pair `var ft, unc = superallowed_average_ft();`. Mirrors
+# `superallowed_average_ft`.
+#must_use
+fn superallowed_average_ft() {
+    var ft: f64 = TM_SUPERALLOWED_AVERAGE_FT_SECONDS;
+    var unc: f64 = TM_SUPERALLOWED_AVERAGE_FT_UNCERTAINTY;
+    return (ft, unc);
+}

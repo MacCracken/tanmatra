@@ -6,7 +6,8 @@ Port plan §3 (a per-milestone gate) and M7 (the release gate). Usage, from the 
 For each ported module it lists rust-old/src/<module>.rs's public items before
 `#[cfg(test)]` and checks that src/ defines the Cyrius name the porting rules give:
 - free `pub fn f`                    -> `fn f(`
-- `impl Enum { pub fn m }`           -> `fn snake(Enum)_m(`        (quark_mass_mev)
+- `impl Value { pub fn m }`          -> `fn snake(Value)_m(`       (quark_mass_mev, nucleus_binding_energy)
+  where Value is an enum or a type the port packs into a word (Nucleus, ShellLevel)
 - `impl Struct { pub fn m }`         -> `fn m(` inside `impl Tm<Struct> {`
 - `impl Add for Struct`              -> `fn add(` inside `impl Tm<Struct> {` (the `+` operator)
 - `pub const X` (constants.rs)       -> `const TM_X =`
@@ -19,18 +20,22 @@ from pathlib import Path
 
 root = Path(sys.argv[1]).resolve()
 
-# The ported modules, with the Rust types whose methods become free functions (enums) or
-# impl methods (structs).
+# The ported modules, with the Rust types whose methods become free functions ("values":
+# enums and word-packed types) or impl methods ("structs").
 MODULES = {
-    "error": {"enums": {}, "structs": {}},
-    "constants": {"enums": {}, "structs": {}},
-    "particle": {"enums": {"Quark", "Lepton", "Boson", "FundamentalForce"}, "structs": {}},
-    "relativity": {"enums": {}, "structs": {"FourMomentum"}},
+    "error": {"values": set(), "structs": set()},
+    "constants": {"values": set(), "structs": set()},
+    "particle": {"values": {"Quark", "Lepton", "Boson", "FundamentalForce"}, "structs": set()},
+    "relativity": {"values": set(), "structs": {"FourMomentum"}},
+    "nucleus": {"values": {"Nucleus", "ShellLevel"}, "structs": {"SuperallowedDecay"}},
 }
 
 # Rust item -> why it has no direct Cyrius name.
 EXCEPTIONS = {
     "FundamentalForce::mediator": "a slice: fundamental_force_mediator_count + fundamental_force_mediator(f, k)",
+    "shell_model_levels": "a slice: shell_model_level_count + shell_model_level(k)",
+    "superallowed_ft_values": "a Vec: superallowed_ft_value_count + superallowed_ft_value(k)",
+    "corrected_ft_value": "deprecated in 1.3.0, not carried over (port plan §1)",
 }
 
 
@@ -95,7 +100,7 @@ for module, kinds in MODULES.items():
             ok = re.search(rf"\bTM_ERR_{snake(name).upper()} =", cyr) is not None
         elif ty in kinds["structs"]:
             ok = name in impl_methods(ty)
-        elif ty in kinds["enums"]:
+        elif ty in kinds["values"]:
             ok = re.search(rf"^fn {snake(ty)}_{name}\(", cyr, re.M) is not None
         else:
             ok = re.search(rf"^fn {name}\(", cyr, re.M) is not None

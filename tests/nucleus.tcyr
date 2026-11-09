@@ -1,0 +1,677 @@
+# nucleus.tcyr — the reference-value tests of rust-old/src/nucleus.rs, ported one for one
+# (each test_group is the Rust test's name). Not carried over (port plan §1): the four serde
+# round-trip tests serde_roundtrip, serde_roundtrip_shell_level,
+# serde_roundtrip_nuclear_moments and serde_roundtrip_superallowed_decay; and the
+# corrected_ft_value half of corrected_ft_value_returns_average (deprecated in 1.3.0). That
+# test's other assert, on superallowed_average_ft, is ported as
+# _t_corrected_ft_value_returns_average_superallowed_part. The golden corpus separately
+# checks every function bit for bit on the M2 grid (tests/parity.tcyr).
+
+include "tests/ulp.cyr"
+include "src/error.cyr"
+include "src/numerics.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
+
+alloc_init();
+
+# 1 if |a - b| < eps.
+#must_use
+fn near(a: f64, b: f64, eps: f64): i64 {
+    if (f64_abs(a - b) < eps) { return 1; }
+    return 0;
+}
+
+# Nucleus::new(z, a).unwrap(): the nucleus word, aborting on Err.
+#must_use
+fn _new_nucleus(z, a): i64 {
+    var t, v = nucleus_new(z, a);
+    return result_unwrap(t, v);
+}
+
+fn _t_fe56_binding_energy_per_nucleon() {
+    test_group("fe56_binding_energy_per_nucleon");
+    var fe56 = nucleus_iron_56();
+    var bea: f64 = nucleus_binding_energy_per_nucleon(fe56);
+    assert(bea > 8.6, "Fe-56 B/A too low");
+    assert(bea < 9.0, "Fe-56 B/A too high");
+}
+
+fn _t_he4_binding_energy_positive() {
+    test_group("he4_binding_energy_positive");
+    var he4 = nucleus_helium_4();
+    var be: f64 = nucleus_binding_energy(he4);
+    assert(be > 15.0, "He-4 BE too low");
+    assert(be < 35.0, "He-4 BE within expected range");
+}
+
+fn _t_hydrogen_has_zero_binding_energy() {
+    test_group("hydrogen_has_zero_binding_energy");
+    var h1 = nucleus_hydrogen_1();
+    var be: f64 = nucleus_binding_energy(h1);
+    assert(f64_abs(be) < 0.0000000001, "H-1 BE 0");
+}
+
+fn _t_nuclear_radius_fe56() {
+    test_group("nuclear_radius_fe56");
+    var fe56 = nucleus_iron_56();
+    var r: f64 = nucleus_nuclear_radius(fe56);
+    assert(near(r, 4.59, 0.1), "Fe-56 radius ~4.59 fm");
+}
+
+fn _t_magic_numbers() {
+    test_group("magic_numbers");
+    assert_eq(is_magic_number(2), 1, "2 magic");
+    assert_eq(is_magic_number(8), 1, "8 magic");
+    assert_eq(is_magic_number(20), 1, "20 magic");
+    assert_eq(is_magic_number(28), 1, "28 magic");
+    assert_eq(is_magic_number(50), 1, "50 magic");
+    assert_eq(is_magic_number(82), 1, "82 magic");
+    assert_eq(is_magic_number(126), 1, "126 magic");
+    assert_eq(is_magic_number(3), 0, "3 not magic");
+    assert_eq(is_magic_number(100), 0, "100 not magic");
+}
+
+fn _t_doubly_magic_he4() {
+    test_group("doubly_magic_he4");
+    var he4 = nucleus_helium_4();
+    assert_eq(nucleus_is_doubly_magic(he4), 1, "He-4 Z=2 N=2 doubly magic");
+}
+
+fn _t_invalid_z_zero() {
+    test_group("invalid_z_zero");
+    assert_eq(is_err_result(nucleus_new(0, 1)), 1, "Z = 0 is Err");
+}
+
+fn _t_invalid_a_less_than_z() {
+    test_group("invalid_a_less_than_z");
+    assert_eq(is_err_result(nucleus_new(10, 5)), 1, "A < Z is Err");
+}
+
+fn _t_mass_defect_equals_binding_energy() {
+    test_group("mass_defect_equals_binding_energy");
+    var c12 = nucleus_carbon_12();
+    var md: f64 = nucleus_mass_defect(c12);
+    var be: f64 = nucleus_binding_energy(c12);
+    assert(f64_abs(md - be) < 0.0000000001, "mass defect = BE");
+}
+
+fn _t_binding_energy_increases_with_a_midrange() {
+    test_group("binding_energy_increases_with_a_midrange");
+    var c12 = nucleus_carbon_12();
+    var fe56 = nucleus_iron_56();
+    var b_c: f64 = nucleus_binding_energy(c12);
+    var b_fe: f64 = nucleus_binding_energy(fe56);
+    assert(b_fe > b_c, "BE(Fe-56) > BE(C-12)");
+}
+
+fn _t_bea_peaks_around_iron() {
+    test_group("bea_peaks_around_iron");
+    var o16 = _new_nucleus(8, 16);
+    var fe56 = nucleus_iron_56();
+    var u238 = nucleus_uranium_238();
+    var bea_o: f64 = nucleus_binding_energy_per_nucleon(o16);
+    var bea_fe: f64 = nucleus_binding_energy_per_nucleon(fe56);
+    var bea_u: f64 = nucleus_binding_energy_per_nucleon(u238);
+    assert(bea_fe > bea_o, "Fe-56 B/A should exceed O-16 B/A");
+    assert(bea_fe > bea_u, "Fe-56 B/A should exceed U-238 B/A");
+}
+
+fn _t_nuclear_mass_reasonable() {
+    test_group("nuclear_mass_reasonable");
+    var fe56 = nucleus_iron_56();
+    var mass: f64 = nucleus_nuclear_mass(fe56);
+    assert(mass > 52000.0, "Fe-56 mass too low");
+    assert(mass < 52500.0, "Fe-56 mass too high");
+}
+
+# The magic numbers the shell model's cumulative filling must reach, in order.
+var _MAGIC: u16[7] = { 2, 8, 20, 28, 50, 82, 126 };
+
+fn _t_shell_model_reproduces_magic_numbers() {
+    test_group("shell_model_reproduces_magic_numbers");
+    var cumulative = 0;
+    var magic_idx = 0;
+    var cnt = shell_model_level_count();
+    var k = 0;
+    while (k < cnt) {
+        var lv = shell_model_level(k);
+        cumulative = cumulative + shell_level_two_j(lv) + 1;
+        if (magic_idx < 7) {
+            if (cumulative == _MAGIC[magic_idx]) { magic_idx = magic_idx + 1; }
+        }
+        k = k + 1;
+    }
+    assert_eq(magic_idx, 7, "not all magic numbers found in shell model");
+}
+
+fn _t_shell_level_labels() {
+    test_group("shell_level_labels");
+    var level = shell_level_new(1, 3, 7);
+    var lab = shell_level_label(level);
+    assert_eq(str_eq_cstr(lab, "1f7/2"), 1, "label 1f7/2");
+    assert_eq(shell_level_degeneracy(level), 8, "degeneracy 8");
+}
+
+fn _t_o16_spin_parity_0_plus() {
+    test_group("o16_spin_parity_0_plus");
+    var two_j, parity = ground_state_spin_parity(_new_nucleus(8, 16));
+    assert_eq(two_j, 0, "O-16 should have J=0");
+    assert_eq(parity, 1, "O-16 should have positive parity");
+}
+
+fn _t_fe56_spin_parity_0_plus() {
+    test_group("fe56_spin_parity_0_plus");
+    var two_j, parity = ground_state_spin_parity(nucleus_iron_56());
+    assert_eq(two_j, 0, "Fe-56 J=0");
+    assert_eq(parity, 1, "Fe-56 positive parity");
+}
+
+fn _t_o17_spin_parity() {
+    test_group("o17_spin_parity");
+    var two_j, parity = ground_state_spin_parity(_new_nucleus(8, 17));
+    assert_eq(two_j, 5, "O-17 should have 2J=5 (J=5/2)");
+    assert_eq(parity, 1, "O-17 should have positive parity (l=2)");
+}
+
+fn _t_shell_occupation_he4() {
+    test_group("shell_occupation_he4");
+    var lvs[256];
+    var occ[256];
+    var cnt = shell_occupation(2, &lvs, &occ, 32);
+    assert_eq(cnt, 1, "one level occupied");
+    assert_eq(load64(&occ), 2, "1s1/2 fully filled");
+}
+
+fn _t_shell_closure_functions() {
+    test_group("shell_closure_functions");
+    assert_eq(shell_closure_below(10), 8, "closure below 10 = 8");
+    assert_eq(shell_closure_below(28), 28, "closure below 28 = 28");
+    assert_eq(shell_closure_below(1), 0, "closure below 1 = 0");
+    var t20, v20 = next_shell_closure(20);
+    assert(is_some(t20) == 1 && v20 == 28, "next closure after 20 = Some(28)");
+    var t82, v82 = next_shell_closure(82);
+    assert(is_some(t82) == 1 && v82 == 126, "next closure after 82 = Some(126)");
+    assert_eq(is_none(next_shell_closure(200)), 1, "next closure after 200 = None");
+}
+
+fn _t_shell_corrected_more_bound_at_magic() {
+    test_group("shell_corrected_more_bound_at_magic");
+    var o16 = _new_nucleus(8, 16);
+    var sc: f64 = nucleus_binding_energy_shell_corrected(o16);
+    var be: f64 = nucleus_binding_energy(o16);
+    assert(sc > be, "Shell correction should increase BE for doubly-magic O-16");
+}
+
+fn _t_shell_corrected_doubly_magic_ca40() {
+    test_group("shell_corrected_doubly_magic_ca40");
+    var ca40 = _new_nucleus(20, 40);
+    var sc: f64 = nucleus_binding_energy_shell_corrected(ca40);
+    var be: f64 = nucleus_binding_energy(ca40);
+    assert(sc > be, "Shell correction should increase BE for doubly-magic Ca-40");
+}
+
+fn _t_shell_correction_reasonable_magnitude() {
+    test_group("shell_correction_reasonable_magnitude");
+    var fe56 = nucleus_iron_56();
+    var sc: f64 = nucleus_binding_energy_shell_corrected(fe56);
+    var be: f64 = nucleus_binding_energy(fe56);
+    var diff: f64 = f64_abs(sc - be);
+    assert(diff < 10.0, "Shell correction too large");
+}
+
+fn _t_atomic_mass_amu_fe56() {
+    test_group("atomic_mass_amu_fe56");
+    var fe56 = nucleus_iron_56();
+    var amu: f64 = nucleus_atomic_mass_amu(fe56);
+    assert(amu > 55.0 && amu < 57.0, "Fe-56 atomic mass ~55.9 u");
+}
+
+fn _t_is_magic_not_doubly() {
+    test_group("is_magic_not_doubly");
+    var o17 = _new_nucleus(8, 17);
+    assert_eq(nucleus_is_magic(o17), 1, "O-17 magic (Z=8)");
+    assert_eq(nucleus_is_doubly_magic(o17), 0, "O-17 not doubly magic (N=9)");
+}
+
+fn _t_shell_level_degeneracy() {
+    test_group("shell_level_degeneracy");
+    var level = shell_level_new(1, 0, 1);
+    assert_eq(shell_level_degeneracy(level), 2, "1s1/2 degeneracy 2");
+    var j: f64 = shell_level_j(level);
+    assert(f64_abs(j - 0.5) < 0.0000000001, "j = 1/2");
+}
+
+fn _t_shell_level_label_g_orbital() {
+    test_group("shell_level_label_g_orbital");
+    var level = shell_level_new(1, 4, 9);
+    var lab = shell_level_label(level);
+    assert_eq(str_eq_cstr(lab, "1g9/2"), 1, "label 1g9/2");
+}
+
+fn _t_odd_odd_spin_parity() {
+    test_group("odd_odd_spin_parity");
+    var two_j, parity = ground_state_spin_parity(_new_nucleus(7, 14));
+    assert(two_j > 0, "Odd-odd should have nonzero spin");
+}
+
+fn _t_shell_closure_below_zero() {
+    test_group("shell_closure_below_zero");
+    assert_eq(shell_closure_below(0), 0, "closure below 0 = 0");
+}
+
+fn _t_carbon_presets() {
+    test_group("carbon_presets");
+    var c12 = nucleus_carbon_12();
+    assert_eq(nucleus_z(c12), 6, "Z = 6");
+    assert_eq(nucleus_a(c12), 12, "A = 12");
+    assert_eq(nucleus_n(c12), 6, "N = 6");
+}
+
+fn _t_ame2020_c12_mass_excess_zero() {
+    test_group("ame2020_c12_mass_excess_zero");
+    var t, v = nucleus_experimental_mass_excess_kev(nucleus_carbon_12());
+    assert_eq(is_some(t), 1, "C-12 tabulated");
+    var me: f64 = v;
+    assert(f64_abs(me) < 0.0000000001, "C-12 mass excess should be 0 by definition");
+}
+
+fn _t_ame2020_h1_mass_excess() {
+    test_group("ame2020_h1_mass_excess");
+    var t, v = nucleus_experimental_mass_excess_kev(nucleus_hydrogen_1());
+    assert_eq(is_some(t), 1, "H-1 tabulated");
+    var me: f64 = v;
+    assert(near(me, 7288.971, 0.01), "H-1 mass excess 7288.971 keV");
+}
+
+fn _t_ame2020_fe56_mass_excess_negative() {
+    test_group("ame2020_fe56_mass_excess_negative");
+    var t, v = nucleus_experimental_mass_excess_kev(nucleus_iron_56());
+    assert_eq(is_some(t), 1, "Fe-56 tabulated");
+    var me: f64 = v;
+    assert(me < 0.0, "Fe-56 mass excess should be negative");
+    assert(near(me, -60607.163, 0.000001), "Fe-56 mass excess -60607.163 keV");
+}
+
+fn _t_ame2020_unknown_nuclide_returns_none() {
+    test_group("ame2020_unknown_nuclide_returns_none");
+    var og = _new_nucleus(118, 294);
+    assert_eq(is_none(nucleus_experimental_mass_excess_kev(og)), 1, "Og-294 not tabulated");
+}
+
+fn _t_ame2020_atomic_mass_h1() {
+    test_group("ame2020_atomic_mass_h1");
+    var t, v = nucleus_experimental_atomic_mass_amu(nucleus_hydrogen_1());
+    assert_eq(is_some(t), 1, "H-1 tabulated");
+    var mass: f64 = v;
+    assert(near(mass, 1.007825, 0.0001), "H-1 atomic mass 1.007825 u");
+}
+
+fn _t_ame2020_atomic_mass_c12_exactly_12() {
+    test_group("ame2020_atomic_mass_c12_exactly_12");
+    var t, v = nucleus_experimental_atomic_mass_amu(nucleus_carbon_12());
+    assert_eq(is_some(t), 1, "C-12 tabulated");
+    var mass: f64 = v;
+    assert(near(mass, 12.0, 0.000001), "C-12 atomic mass should be exactly 12");
+}
+
+fn _t_ame2020_atomic_mass_fe56() {
+    test_group("ame2020_atomic_mass_fe56");
+    var t, v = nucleus_experimental_atomic_mass_amu(nucleus_iron_56());
+    assert_eq(is_some(t), 1, "Fe-56 tabulated");
+    var mass: f64 = v;
+    assert(near(mass, 55.9349, 0.001), "Fe-56 atomic mass ~55.9349 u");
+}
+
+fn _t_ame2020_atomic_mass_u238() {
+    test_group("ame2020_atomic_mass_u238");
+    var t, v = nucleus_experimental_atomic_mass_amu(nucleus_uranium_238());
+    assert_eq(is_some(t), 1, "U-238 tabulated");
+    var mass: f64 = v;
+    assert(near(mass, 238.0508, 0.001), "U-238 atomic mass ~238.0508 u");
+}
+
+fn _t_ame2020_all_entries_valid() {
+    test_group("ame2020_all_entries_valid");
+    var k = 0;
+    while (k < TM_AME2020_COUNT) {
+        var z = TM_AME2020_Z[k];
+        var a = TM_AME2020_A[k];
+        assert(z > 0, "Z must be > 0");
+        assert(a >= z, "A must be >= Z");
+        k = k + 1;
+    }
+}
+
+fn _t_charge_radius_h1() {
+    test_group("charge_radius_h1");
+    var t, v = nucleus_charge_radius_fm(nucleus_hydrogen_1());
+    assert_eq(is_some(t), 1, "H-1 tabulated");
+    var r: f64 = v;
+    assert(near(r, 0.8783, 0.001), "H-1 charge radius 0.8783 fm");
+}
+
+fn _t_charge_radius_pb208() {
+    test_group("charge_radius_pb208");
+    var t, v = nucleus_charge_radius_fm(_new_nucleus(82, 208));
+    assert_eq(is_some(t), 1, "Pb-208 tabulated");
+    var r: f64 = v;
+    assert(near(r, 5.5012, 0.001), "Pb-208 charge radius 5.5012 fm");
+}
+
+fn _t_charge_radius_increases_with_a() {
+    test_group("charge_radius_increases_with_a");
+    var th, vh = nucleus_charge_radius_fm(nucleus_helium_4());
+    var tp, vp = nucleus_charge_radius_fm(_new_nucleus(82, 208));
+    assert_eq(is_some(tp), 1, "Pb-208 tabulated");
+    assert_eq(is_some(th), 1, "He-4 tabulated");
+    var r_pb: f64 = vp;
+    var r_he: f64 = vh;
+    assert(r_pb > r_he, "Pb-208 radius should be larger than He-4");
+}
+
+fn _t_charge_radius_unknown_returns_none() {
+    test_group("charge_radius_unknown_returns_none");
+    var og = _new_nucleus(118, 294);
+    assert_eq(is_none(nucleus_charge_radius_fm(og)), 1, "Og-294 not tabulated");
+}
+
+fn _t_charge_radius_ca_isotopes() {
+    test_group("charge_radius_ca_isotopes");
+    var t40, v40 = nucleus_charge_radius_fm(_new_nucleus(20, 40));
+    var t48, v48 = nucleus_charge_radius_fm(_new_nucleus(20, 48));
+    assert_eq(is_some(t40), 1, "Ca-40 tabulated");
+    assert_eq(is_some(t48), 1, "Ca-48 tabulated");
+    var r40: f64 = v40;
+    var r48: f64 = v48;
+    assert(f64_abs(r40 - r48) < 0.01, "Ca-40 and Ca-48 radii should be very similar");
+}
+
+fn _t_nuclear_moments_h1_proton() {
+    test_group("nuclear_moments_h1_proton");
+    var m: TmNuclearMoments;
+    assert_eq(nucleus_nuclear_moments(nucleus_hydrogen_1(), &m), 1, "H-1 tabulated");
+    var mu: f64 = m.magnetic_dipole_mu_n;
+    var q: f64 = m.electric_quadrupole_barn;
+    assert(near(mu, 2.792847, 0.001), "proton mu 2.792847 mu_N");
+    assert(f64_abs(q) < 0.0000000001, "proton Q should be 0");
+}
+
+fn _t_nuclear_moments_deuteron() {
+    test_group("nuclear_moments_deuteron");
+    var m: TmNuclearMoments;
+    assert_eq(nucleus_nuclear_moments(_new_nucleus(1, 2), &m), 1, "H-2 tabulated");
+    var mu: f64 = m.magnetic_dipole_mu_n;
+    var q: f64 = m.electric_quadrupole_barn;
+    assert(near(mu, 0.857438, 0.001), "deuteron mu 0.857438 mu_N");
+    assert(near(q, 0.002860, 0.0001), "deuteron Q 0.002860 b");
+}
+
+fn _t_nuclear_moments_he3_negative_mu() {
+    test_group("nuclear_moments_he3_negative_mu");
+    var m: TmNuclearMoments;
+    assert_eq(nucleus_nuclear_moments(_new_nucleus(2, 3), &m), 1, "He-3 tabulated");
+    var mu: f64 = m.magnetic_dipole_mu_n;
+    assert(mu < 0.0, "He-3 should have negative magnetic moment");
+}
+
+fn _t_nuclear_moments_unknown_returns_none() {
+    test_group("nuclear_moments_unknown_returns_none");
+    var m: TmNuclearMoments;
+    var og = _new_nucleus(118, 294);
+    assert_eq(nucleus_nuclear_moments(og, &m), 0, "Og-294 not tabulated");
+}
+
+fn _t_superallowed_ft_values_count() {
+    test_group("superallowed_ft_values_count");
+    assert_eq(superallowed_ft_value_count(), 9, "should have 9 superallowed transitions");
+}
+
+fn _t_superallowed_ft_values_range() {
+    test_group("superallowed_ft_values_range");
+    var cnt = superallowed_ft_value_count();
+    var k = 0;
+    while (k < cnt) {
+        var d = superallowed_ft_value(k);
+        var ft: f64 = d.ft_seconds;
+        assert(ft > 3030.0 && ft < 3080.0, "ft out of range");
+        k = k + 1;
+    }
+}
+
+fn _t_superallowed_parent_daughter_consistency() {
+    test_group("superallowed_parent_daughter_consistency");
+    var cnt = superallowed_ft_value_count();
+    var k = 0;
+    while (k < cnt) {
+        var d = superallowed_ft_value(k);
+        assert_eq(nucleus_a(d.parent), nucleus_a(d.daughter), "Parent A != daughter A");
+        assert_eq(nucleus_z(d.parent), nucleus_z(d.daughter) + 1, "Parent Z should be daughter Z + 1");
+        k = k + 1;
+    }
+}
+
+# The index of the first superallowed transition whose parent has mass number a, or -1:
+# rust `superallowed_ft_values().iter().find(|d| d.parent.a() == a)`.
+#must_use
+fn _superallowed_find(a): i64 {
+    var cnt = superallowed_ft_value_count();
+    var k = 0;
+    while (k < cnt) {
+        var d = superallowed_ft_value(k);
+        if (nucleus_a(d.parent) == a) { return k; }
+        k = k + 1;
+    }
+    return 0 - 1;
+}
+
+fn _t_superallowed_corrected_ft_per_transition() {
+    test_group("superallowed_corrected_ft_per_transition");
+    var eps: f64 = 0.000000001;
+    var k14 = _superallowed_find(14);
+    assert(k14 >= 0, "O-14 transition found");
+    if (k14 >= 0) {
+        var o14: TmSuperallowedDecay = superallowed_ft_value(k14);
+        var ft: f64 = o14.ft_seconds;
+        assert(near(ft, 3042.2, eps), "O-14 ft 3042.2 s");
+        var t14, v14 = o14.corrected_ft_seconds();
+        assert_eq(is_some(t14), 1, "O-14 corrected Ft tabulated");
+        var big14: f64 = v14;
+        assert(near(big14, 3070.2, eps), "O-14 Ft 3070.2 s");
+    }
+    var k62 = _superallowed_find(62);
+    assert(k62 >= 0, "Ga-62 transition found");
+    if (k62 >= 0) {
+        var ga62: TmSuperallowedDecay = superallowed_ft_value(k62);
+        var t62, v62 = ga62.corrected_ft_seconds();
+        assert_eq(is_some(t62), 1, "Ga-62 corrected Ft tabulated");
+        var big62: f64 = v62;
+        assert(near(big62, 3072.4, eps), "Ga-62 Ft 3072.4 s");
+    }
+}
+
+fn _t_semf_close_to_ame2020() {
+    test_group("semf_close_to_ame2020");
+    var b_fe: f64 = nucleus_binding_energy(_new_nucleus(26, 56));
+    assert(near(b_fe, 492.2600, 12.0), "Fe-56 B within 12 MeV of AME2020");
+    var b_pb: f64 = nucleus_binding_energy(_new_nucleus(82, 208));
+    assert(near(b_pb, 1636.4301, 12.0), "Pb-208 B within 12 MeV of AME2020");
+    var b_sn: f64 = nucleus_binding_energy(_new_nucleus(50, 120));
+    assert(near(b_sn, 1020.5448, 12.0), "Sn-120 B within 12 MeV of AME2020");
+}
+
+# 1 if the shell-corrected binding energy of (z, a) is closer to b_exp than the liquid-drop one.
+#must_use
+fn _shell_improves(z, a, b_exp: f64): i64 {
+    var nuc = _new_nucleus(z, a);
+    var b: f64 = nucleus_binding_energy(nuc);
+    var bs: f64 = nucleus_binding_energy_shell_corrected(nuc);
+    var err_ldm: f64 = f64_abs(b - b_exp);
+    var err_shell: f64 = f64_abs(bs - b_exp);
+    if (err_shell < err_ldm) { return 1; }
+    return 0;
+}
+
+fn _t_shell_correction_improves_doubly_magic() {
+    test_group("shell_correction_improves_doubly_magic");
+    assert_eq(_shell_improves(28, 56, 483.9956), 1, "Ni-56 shell correction improves B");
+    assert_eq(_shell_improves(50, 132, 1102.8432), 1, "Sn-132 shell correction improves B");
+    assert_eq(_shell_improves(82, 208, 1636.4301), 1, "Pb-208 shell correction improves B");
+}
+
+fn _t_shell_term_sign_at_magic_and_midshell() {
+    test_group("shell_term_sign_at_magic_and_midshell");
+    var s_pb: f64 = _tm_ms_shell_term(82, 126);
+    var s_er: f64 = _tm_ms_shell_term(68, 98);
+    assert(s_pb < 0.0, "doubly magic Pb-208: extra binding");
+    assert(s_er > 0.0, "mid-shell Er-166: less binding");
+}
+
+fn _t_atomic_mass_includes_electrons() {
+    test_group("atomic_mass_includes_electrons");
+    var fe = nucleus_iron_56();
+    var atomic: f64 = nucleus_atomic_mass_amu(fe);
+    var nuclear: f64 = nucleus_nuclear_mass_amu(fe);
+    var diff: f64 = atomic - nuclear;
+    assert(near(diff, 0.0142257, 0.0000001), "26 electrons minus their binding, u");
+}
+
+fn _t_odd_odd_spin_is_integer() {
+    test_group("odd_odd_spin_is_integer");
+    var z = 1;
+    while (z <= 99) {
+        var a = 2 * z;
+        while (a <= 2 * z + 60) {
+            if (z % 2 == 1 && (a - z) % 2 == 1) {
+                var two_j, parity = ground_state_spin_parity(_new_nucleus(z, a));
+                assert_eq(two_j % 2, 0, "odd-odd gave half-integer spin");
+            }
+            a = a + 1;
+        }
+        z = z + 1;
+    }
+}
+
+# 1 if ground_state_spin_parity(Nucleus::new(z, a)) is (two_j, parity).
+#must_use
+fn _spin_parity_is(z, a, two_j, parity): i64 {
+    var got_j, got_p = ground_state_spin_parity(_new_nucleus(z, a));
+    if (got_j == two_j && got_p == parity) { return 1; }
+    return 0;
+}
+
+fn _t_spin_parity_reference_nuclei() {
+    test_group("spin_parity_reference_nuclei");
+    var minus = 0 - 1;
+    assert_eq(_spin_parity_is(7, 14, 2, 1), 1, "N-14 1+");
+    assert_eq(_spin_parity_is(5, 10, 6, 1), 1, "B-10 3+");
+    assert_eq(_spin_parity_is(19, 40, 8, minus), 1, "K-40 4-");
+    assert_eq(_spin_parity_is(17, 38, 4, minus), 1, "Cl-38 2-");
+    assert_eq(_spin_parity_is(82, 207, 1, minus), 1, "Pb-207 1/2-");
+    assert_eq(_spin_parity_is(83, 209, 9, minus), 1, "Bi-209 9/2-");
+    assert_eq(_spin_parity_is(8, 17, 5, 1), 1, "O-17 5/2+");
+    assert_eq(_spin_parity_is(20, 41, 7, minus), 1, "Ca-41 7/2-");
+}
+
+fn _t_spin_zero_or_half_has_no_quadrupole() {
+    test_group("spin_zero_or_half_has_no_quadrupole");
+    var k = 0;
+    while (k < TM_NUCLEAR_MOMENTS_COUNT) {
+        var z = TM_NUCLEAR_MOMENTS_Z[k];
+        var a = TM_NUCLEAR_MOMENTS_A[k];
+        var two_j = 2;
+        if (z == 9 && a == 19) { two_j = 1; }
+        if (z == 1 && a == 1) { two_j = 1; }
+        if (z == 2 && a == 3) { two_j = 1; }
+        if (z == 6 && a == 13) { two_j = 1; }
+        if (z == 15 && a == 31) { two_j = 1; }
+        if (z == 82 && a == 207) { two_j = 1; }
+        if (two_j <= 1) {
+            var q: f64 = TM_NUCLEAR_MOMENTS_Q_BARN[k];
+            assert(f64_abs(q) < 0.000000000000001, "spin <= 1/2 but Q != 0");
+        }
+        k = k + 1;
+    }
+}
+
+fn _t_corrected_ft_value_returns_average_superallowed_part() {
+    test_group("corrected_ft_value_returns_average (superallowed_average_ft assert)");
+    var ft, unc = superallowed_average_ft();
+    var f: f64 = ft;
+    var u: f64 = unc;
+    assert(f == 3072.24, "average Ft 3072.24 s");
+    assert(u == 1.85, "uncertainty 1.85 s");
+}
+
+# Runs every test and returns the failure count.
+fn main(): i64 {
+    _t_fe56_binding_energy_per_nucleon();
+    _t_he4_binding_energy_positive();
+    _t_hydrogen_has_zero_binding_energy();
+    _t_nuclear_radius_fe56();
+    _t_magic_numbers();
+    _t_doubly_magic_he4();
+    _t_invalid_z_zero();
+    _t_invalid_a_less_than_z();
+    _t_mass_defect_equals_binding_energy();
+    _t_binding_energy_increases_with_a_midrange();
+    _t_bea_peaks_around_iron();
+    _t_nuclear_mass_reasonable();
+    _t_shell_model_reproduces_magic_numbers();
+    _t_shell_level_labels();
+    _t_o16_spin_parity_0_plus();
+    _t_fe56_spin_parity_0_plus();
+    _t_o17_spin_parity();
+    _t_shell_occupation_he4();
+    _t_shell_closure_functions();
+    _t_shell_corrected_more_bound_at_magic();
+    _t_shell_corrected_doubly_magic_ca40();
+    _t_shell_correction_reasonable_magnitude();
+    _t_atomic_mass_amu_fe56();
+    _t_is_magic_not_doubly();
+    _t_shell_level_degeneracy();
+    _t_shell_level_label_g_orbital();
+    _t_odd_odd_spin_parity();
+    _t_shell_closure_below_zero();
+    _t_carbon_presets();
+    _t_ame2020_c12_mass_excess_zero();
+    _t_ame2020_h1_mass_excess();
+    _t_ame2020_fe56_mass_excess_negative();
+    _t_ame2020_unknown_nuclide_returns_none();
+    _t_ame2020_atomic_mass_h1();
+    _t_ame2020_atomic_mass_c12_exactly_12();
+    _t_ame2020_atomic_mass_fe56();
+    _t_ame2020_atomic_mass_u238();
+    _t_ame2020_all_entries_valid();
+    _t_charge_radius_h1();
+    _t_charge_radius_pb208();
+    _t_charge_radius_increases_with_a();
+    _t_charge_radius_unknown_returns_none();
+    _t_charge_radius_ca_isotopes();
+    _t_nuclear_moments_h1_proton();
+    _t_nuclear_moments_deuteron();
+    _t_nuclear_moments_he3_negative_mu();
+    _t_nuclear_moments_unknown_returns_none();
+    _t_superallowed_ft_values_count();
+    _t_superallowed_ft_values_range();
+    _t_superallowed_parent_daughter_consistency();
+    _t_superallowed_corrected_ft_per_transition();
+    _t_corrected_ft_value_returns_average_superallowed_part();
+    _t_semf_close_to_ame2020();
+    _t_shell_correction_improves_doubly_magic();
+    _t_shell_term_sign_at_magic_and_midshell();
+    _t_atomic_mass_includes_electrons();
+    _t_odd_odd_spin_is_integer();
+    _t_spin_parity_reference_nuclei();
+    _t_spin_zero_or_half_has_no_quadrupole();
+    return assert_summary();
+}
+
+var exit_code = main();
+if (exit_code > 0) { exit_code = 1; }
+sys_exit_group(exit_code);

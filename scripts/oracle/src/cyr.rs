@@ -118,6 +118,15 @@ pub fn doc_comment_after(src: &str, anchor: &str, item: &str) -> Result<String, 
     Ok(out)
 }
 
+/// `line` as a `#` comment, with no trailing space when it is empty (lint-clean).
+pub fn comment_line(line: &str) -> String {
+    if line.is_empty() {
+        "#".to_string()
+    } else {
+        format!("# {line}")
+    }
+}
+
 /// The fixed header of every generated `.cyr` file.
 pub fn header(title: &str, provenance: &str, notes: &[&str]) -> String {
     let mut out = String::new();
@@ -169,7 +178,7 @@ pub fn table(name: &str, doc: &str, elem: &Elem, labels: &[String]) -> Result<St
     }
     let mut out = String::new();
     for line in doc.lines() {
-        let _ = writeln!(out, "# {line}");
+        let _ = writeln!(out, "{}", comment_line(line));
     }
     let _ = writeln!(out, "var {name}: {ty}[{}] = {{", vals.len());
     for (v, label) in vals.iter().zip(labels) {

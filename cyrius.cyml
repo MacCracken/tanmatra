@@ -15,8 +15,9 @@ output = "build/tanmatra"
 #   math     — f64_sin / f64_cos on every target; exp / ln / atan on aarch64
 #   ganita   — ganita_f64_cbrt / pow / sinh / tan / hypot (ganita 1.2.15 in the 6.7.18 bundle)
 #   overflow — the saturating `+|` / `-|` / `*|` operators (AtomicInstant)
+#   tagged / result — the value-form Option and Result
 [deps]
-stdlib = ["syscalls", "string", "alloc", "str", "fmt", "io", "vec", "math", "ganita", "overflow"]
+stdlib = ["syscalls", "string", "alloc", "str", "fmt", "io", "vec", "math", "ganita", "overflow", "tagged", "result"]
 
 # Test / bench / fuzz compiles only.
 [test]
@@ -39,4 +40,7 @@ modules = [
     "src/particle_data.cyr",
     "src/particle.cyr",
     "src/relativity.cyr",
+    "src/nucleus_data.cyr",
+    "src/nucleus.cyr",
+    "src/shell_model.cyr",
 ]

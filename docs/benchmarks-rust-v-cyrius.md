@@ -37,3 +37,20 @@ bit-identical to Rust. Candidates if a consumer needs the speed, each to be re-m
 claiming it:
 - `#inline` on `_tm_in_range` and `_tm_sq_lo`;
 - the particle accessors reading the table directly after one range check.
+
+## M2a Nuclear structure (2026-11-08)
+
+All four are criterion benches in the Rust suite. The Cyrius bodies build the same nucleus lists outside the timed
+loop.
+
+| Bench | Body | Rust | Cyrius | Cyrius / Rust |
+|---|---|---|---|---|
+| `nucleus/binding_energy_1000` | SEMF over Z = 1..100, A = Z..min(3Z, Z + 9) (984 nuclei) | 17.7 µs | 135.0 µs | 7.6× |
+| `nucleus/binding_energy_shell_corrected_1000` | the same plus the Myers–Swiatecki term, A = Z..Z + 9 (1000) | 133.5 µs | 1.083 ms | 8.1× |
+| `nucleus/ground_state_spin_parity_100` | odd Z = 1..99 at A = 2Z + 1 and 2Z | 0.955 µs | 13.6 µs | 14× |
+| `nucleus/shell_occupation_126` | occupations for 1..126 nucleons | 13.5 µs (allocates a `Vec` per call) | 31.3 µs (caller buffers) | 2.3× |
+
+**One optimization, measured.** `ground_state_spin_parity` first took 29.2 µs (30×): its level walk built a packed
+level word through two calls for every level passed. It now reads only the 2j column and builds the word once, for
+the level found, giving 13.6 µs. All 14,160 J^π golden rows are still exact.
+

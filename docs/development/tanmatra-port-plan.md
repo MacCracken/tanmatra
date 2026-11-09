@@ -336,7 +336,12 @@ gets something wrong, repair the output here and file the defect upstream (step 
      - Most tables have a public accessor, so they can be enumerated through the API: the
        lookups by (Z, A) and by Z, and the `Vec`-returning lists.
      - Three have none: the proton/neutron level orders, the leap-second table and the USNO
-       segments. Each needs a decision at its milestone, and none may be re-typed.
+       segments. Nor do the model coefficients (SEMF, Myers–Swiatecki, AME2020's u→keV).
+       **Decided in M2 (2026-11-08):** they are extracted mechanically by
+       `scripts/oracle/src/rust_src.rs` (literal `const` items only, with checked lengths) and
+       then **proven**: the emitter recomputes the oracle's output from each value over the whole
+       grid and requires identical bits. A 1-ulp change to one coefficient fails the proof. M5's
+       leap-second table and USNO segments follow the same path. Nothing is re-typed.
    - Class-A golden rows (§4) pin every generated constant and table cell bit for bit.
 7. ✅ **Parity harness. Done 2026-11-08.**
    - **`tests/parity.tcyr`** replays every module listed in `tests/golden/modules.txt`. The
@@ -540,6 +545,11 @@ compare. To work on the bits, take them through a helper with an untyped paramet
 | `FourMomentum` (4 × f64, Copy, `impl Add`) | **`struct TmFourMomentum`** with typed f64 fields and an `impl TmFourMomentum` block (M1). Constructors are `TmFourMomentum_new` / `_at_rest` / `_from_mass_and_momentum`, methods are called `p.invariant_mass()`, and `fn add(self, rhs)` is the `+` operator. Build it in a local and return the local, because `return S{…}` is refused |
 | `AtomicInstant { seconds: i64, nanos: u32 }` | value struct `{ seconds: i64; nanos: u32; }` with a normalizing constructor |
 | `#[non_exhaustive] enum` (DecayMode, OrbitalType, TimeScale, FrequencyStandard, …) | `enum` with explicit, append-only numeric values. Property functions use `match` with an `_ =>` arm, because `match` warns on a non-exhaustive enum. Case values may be any const expression |
+| `ShellLevel { n_shell, l, two_j }` (Copy) | a packed word `n_shell \| (l << 21) \| (two_j << 42)` with `shell_level_*` accessors, `degeneracy`, `j` and `label` (a `Str`). `shell_model_levels()` is `shell_model_level_count()` + `shell_model_level(k)`. `shell_occupation` fills caller buffers (32 entries suffice) and returns the count (M2) |
+| `NuclearMoments` from `Option<NuclearMoments>` | `struct TmNuclearMoments` written through an out-pointer: `nucleus_nuclear_moments(n, &out)` returns 1/0. A 16-byte struct can't ride a value-form `Option` (M2) |
+| `SuperallowedDecay` | `struct TmSuperallowedDecay { parent; daughter; ft_seconds: f64 }` with `impl` `corrected_ft_seconds() → Option`. `superallowed_ft_values()` is `superallowed_ft_value_count()` + `superallowed_ft_value(k)` (M2) |
+| `Option<f64>` / `Option<u32>` returns | the value-form `Option` (`lib/tagged.cyr`): `var t, v = f(..); is_some(t)`, with the f64 bound by `var x: f64 = v;` (M2) |
+| `(u32, i32)` / `(f64, f64)` returns | a multi-value `return (a, b);`, read as `var a, b = f(..);` (M2: `ground_state_spin_parity`, `superallowed_average_ft`) |
 | `ElectronAffinity::{Bound(f64), Unbound, Unknown}` | `enum ElectronAffinity: stack { Bound(ev); Unbound(); Unknown(); }`, which allocates nothing (*probed*). Bind the payload with `var e: f64 = ev;`. A user enum can't be a function's return type, so leave the function's return unannotated. A plain enum without `: stack` that carries a payload allocates |
 | `Result<T, TanmatraError>` | value-form `Result` with **`?`** propagation (*probed*), plus a `TanmatraError` code enum. There is only one payload word, so detail strings go through an `err_out` pointer (the prakash pattern). Never return a `Result` through `callptr`: its payload is lost |
 | Identity structs carrying strings or vecs (`Isotope`, `NuclearReaction`, `ShellLevel`, `SuperallowedDecay`, `ThermalCrossSection`, `FissionYield`) | heap structs with typed fields, read as `p.field` through a `*T`. **Avoid `#derive(accessors)` getters on f64 fields.** They are untyped, so `P_x(p) + P_y(p)` is an integer add |
@@ -619,7 +629,7 @@ compare. To work on the bits, take them through a helper with an untyped paramet
 |---|---|---|---|---|---|
 | M0 Initialize | ✅ done 2026-11-08 | 18,453; 10,617 ok, 0 failed, 1 accepted (ADR 0007), the rest pending until ported | — | — | Steps 0–8 done; the generators grow per milestone by design. Parity is green on x86_64 ELF, x86_64 PE and aarch64, with libm class C bounded at 2 ulp ([port-parity.md](port-parity.md)). Filed upstream: the `cyrius port` scaffold issue and the ganita pow issue. Next: M1, which starts by adding `_tm_hypot` and the dispatchers |
 | M1 Foundation | ✅ done 2026-11-08 | particle 102 + relativity 6,768 + constants 34: **all bit-identical (0 ulp)** on x86_64 ELF, x86_64 PE and aarch64 | 45 Rust tests ported (24 particle, 21 relativity; 5 serde ones don't port), plus 1 Cyrius-only: 114 assertions | 3 (`lorentz_gamma_1000` 2.4× Rust; `invariant_mass_1000` 6.8×; `particle/properties_all` 19×) | `numerics.cyr` (`_tm_hypot`), `error.cyr`, `particle.cyr`, `relativity.cyr`; `[lib]` and `dist/tanmatra.cyr`; surface parity 76/76. Probe: `Nucleus` becomes a packed word (cyrius issue filed) |
-| M2 Nuclear | ☐ | | | | |
+| M2 Nuclear | ◐ **M2a done 2026-11-08** (nucleus and shell model); M2b next (decay_data, decay, Bateman) | nucleus 74,297: **all 0 ulp**, including SEMF, the shell correction and J^π over all 14,160 (Z, A) | nucleus.tcyr: the 63 Rust tests ported (see state.md) | 4 (`binding_energy_1000` 7.6×, `binding_energy_shell_corrected_1000` 8.1×, `ground_state_spin_parity_100` 14×, `shell_occupation_126` 2.3×) | `nucleus_data.cyr` generated, with the private coefficients and level orders extracted and proven; `nucleus.cyr`, `shell_model.cyr`; surface parity 37/37; `atomic_mass_amu` K = 2 by the port-parity rule |
 | M5 Timekeeping | ☐ | | | | |
 | M3 Atomic | ☐ | | | | |
 | M4 Reactions & scattering | ☐ | | | | |

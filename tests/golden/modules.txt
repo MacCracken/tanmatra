@@ -1,5 +1,6 @@
 # tanmatra golden corpus: one module per line; tests/parity.tcyr replays each
 constants
 libm
+nucleus
 particle
 relativity

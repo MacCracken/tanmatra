@@ -181,7 +181,10 @@ Never raise K_F after seeing the port's results. A row that fails K_F is a defec
 
 | Function | Milestone | S (method) | Class-C calls on its path | K_F |
 |---|---|---|---|---|
-| — none yet. The first are expected in M2 (the Myers–Swiatecki shell term) and M3 | | | | |
+| `Nucleus::atomic_mass_amu` | M2 | **0**: the two `pow` results (Z^2.39 and Z^5.35) nudged ±1 ulp on all 2,053 golden rows, with `nuclear_mass` taken from the golden corpus. The electron binding is about 10⁻⁶ of the mass, so a 1-ulp change never moves the output | 2 | **2** |
+
+The Myers–Swiatecki shell term turned out to be class B, not C. It uses only cbrt (correctly rounded on both
+sides) and arithmetic, and its 14,160 rows are bit-identical.
 
 ## Re-measuring
 
