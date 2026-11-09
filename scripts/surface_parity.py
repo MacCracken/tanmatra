@@ -7,7 +7,7 @@ For each ported module it lists rust-old/src/<module>.rs's public items before
 `#[cfg(test)]` and checks that src/ defines the Cyrius name the porting rules give:
 - free `pub fn f`                    -> `fn f(`
 - `impl Value { pub fn m }`          -> `fn snake(Value)_m(`       (quark_mass_mev, nucleus_binding_energy)
-  where Value is an enum or a type the port packs into a word (Nucleus, ShellLevel)
+  where Value is an enum or a type the port packs into a word (Nucleus)
 - `impl Struct { pub fn m }`         -> `fn m(` inside `impl Tm<Struct> {`
 - `impl Add for Struct`              -> `fn add(` inside `impl Tm<Struct> {` (the `+` operator)
 - `pub const X` (constants.rs)       -> `const TM_X =`
@@ -27,7 +27,7 @@ MODULES = {
     "constants": {"values": set(), "structs": set()},
     "particle": {"values": {"Quark", "Lepton", "Boson", "FundamentalForce"}, "structs": set()},
     "relativity": {"values": set(), "structs": {"FourMomentum"}},
-    "nucleus": {"values": {"Nucleus", "ShellLevel"}, "structs": {"SuperallowedDecay"}},
+    "nucleus": {"values": {"Nucleus"}, "structs": {"ShellLevel", "SuperallowedDecay"}},
     "decay": {"values": set(), "structs": set()},
     "timekeeping": {"values": {"FrequencyStandard"}, "structs": {"AtomicInstant"}},
     "atomic": {"values": {"OrbitalType"}, "structs": {"QuantumNumbers"}},

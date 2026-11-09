@@ -141,7 +141,7 @@ fn _t_shell_model_reproduces_magic_numbers() {
     var k = 0;
     while (k < cnt) {
         var lv = shell_model_level(k);
-        cumulative = cumulative + shell_level_two_j(lv) + 1;
+        cumulative = cumulative + lv.two_j + 1;
         if (magic_idx < 7) {
             if (cumulative == _MAGIC[magic_idx]) { magic_idx = magic_idx + 1; }
         }
@@ -152,10 +152,10 @@ fn _t_shell_model_reproduces_magic_numbers() {
 
 fn _t_shell_level_labels() {
     test_group("shell_level_labels");
-    var level = shell_level_new(1, 3, 7);
-    var lab = shell_level_label(level);
+    var level = TmShellLevel_new(1, 3, 7);
+    var lab = level.label();
     assert_eq(str_eq_cstr(lab, "1f7/2"), 1, "label 1f7/2");
-    assert_eq(shell_level_degeneracy(level), 8, "degeneracy 8");
+    assert_eq(level.degeneracy(), 8, "degeneracy 8");
 }
 
 fn _t_o16_spin_parity_0_plus() {
@@ -181,7 +181,7 @@ fn _t_o17_spin_parity() {
 
 fn _t_shell_occupation_he4() {
     test_group("shell_occupation_he4");
-    var lvs[256];
+    var lvs: TmShellLevel[32];
     var occ[256];
     var cnt = shell_occupation(2, &lvs, &occ, 32);
     assert_eq(cnt, 1, "one level occupied");
@@ -241,16 +241,16 @@ fn _t_is_magic_not_doubly() {
 
 fn _t_shell_level_degeneracy() {
     test_group("shell_level_degeneracy");
-    var level = shell_level_new(1, 0, 1);
-    assert_eq(shell_level_degeneracy(level), 2, "1s1/2 degeneracy 2");
-    var j: f64 = shell_level_j(level);
+    var level = TmShellLevel_new(1, 0, 1);
+    assert_eq(level.degeneracy(), 2, "1s1/2 degeneracy 2");
+    var j: f64 = level.j();
     assert(f64_abs(j - 0.5) < 0.0000000001, "j = 1/2");
 }
 
 fn _t_shell_level_label_g_orbital() {
     test_group("shell_level_label_g_orbital");
-    var level = shell_level_new(1, 4, 9);
-    var lab = shell_level_label(level);
+    var level = TmShellLevel_new(1, 4, 9);
+    var lab = level.label();
     assert_eq(str_eq_cstr(lab, "1g9/2"), 1, "label 1g9/2");
 }
 

@@ -144,7 +144,7 @@ fn bench_ground_state_spin_parity_100() {
 # nucleus/shell_occupation_126: occupations for 1..126 nucleons. Rust allocates a Vec per call;
 # the Cyrius API fills caller buffers, so this times the fill alone.
 fn bench_shell_occupation_126() {
-    var lvs[256];
+    var lvs: TmShellLevel[32];
     var occ[256];
     var n = 1;
     while (n <= 126) {

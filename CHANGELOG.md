@@ -173,6 +173,12 @@ The Rust library and its behavior are unchanged, and `VERSION` stays 1.3.0 until
 - **Generator.** `rust_src.rs` reads `(integer, Enum::Variant)` tables, a pure lookup function's match arms, and per-entry citation comments; a const now ends at its first `;` outside a comment.
 - **`src/error.cyr`**'s header no longer promises an `err_out` detail pointer (decided against in M2).
 
+### Port — `ShellLevel` as a struct (2026-11-08)
+- **`src/shell_model.cyr`**: `ShellLevel` is `struct TmShellLevel { n_shell; l; two_j; }` with `impl` `new`, `degeneracy`, `j` and `label`, in place of M2's 21-bit packed word and its `shell_level_*` functions. Rust's fields are public u32s, so a hand-built level past 2²¹ is valid there, and the word silently gave it the wrong label, j and degeneracy (11 of the new golden rows failed against it). `shell_model_level(k)` returns the struct by value, and `shell_occupation` fills a caller `TmShellLevel[32]`.
+- **Golden.** `nucleus.tsv` gains 5 hand-built probes (15 rows) with fields at 2²¹, 2³⁰ and u32::MAX: 74,312 rows. Everything passes on x86_64 ELF, x86_64 PE and aarch64: 165,287 ok, 0 failed, 1 accepted.
+- **Benches.** `ground_state_spin_parity_100` 13.6 → 11.5 µs (the walk uses table indices, no level values); `shell_occupation_126` 31.3 → 11.6 µs, now 0.86× Rust.
+- **Tests and harness.** The nucleus tests, parity dispatchers and bench use the struct; their level buffers are typed `TmShellLevel[32]` (768 bytes): the old 256-byte buffers held 32 words but would hold only 10 structs. Surface parity moves `ShellLevel` to the struct rules: 37/37.
+
 ## [1.3.0] — 2026-09-16
 
 Repairs every finding of the 2026-09-16 math and data audit

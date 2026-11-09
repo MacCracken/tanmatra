@@ -54,6 +54,10 @@ loop.
 level word through two calls for every level passed. It now reads only the 2j column and builds the word once, for
 the level found, giving 13.6 µs. All 14,160 J^π golden rows are still exact.
 
+**After M3, with `ShellLevel` a struct.** The J^π walk returns the level's index into the order tables and builds no
+level value at all: 11.5 µs (12×). `shell_occupation` writes each level's three fields straight from the table instead
+of packing a word through calls: 11.6 µs, against Rust's 13.5 µs (0.86×). The golden rows are unchanged.
+
 ## M2b Decay (2026-11-08)
 
 | Bench | Body | Rust | Cyrius | Cyrius / Rust |

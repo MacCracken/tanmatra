@@ -242,12 +242,20 @@ pub fn emit() -> Module {
         .iter()
         .map(|&(n_shell, l, two_j)| ShellLevel { n_shell, l, two_j })
         .collect();
+    // Hand-built levels: l past 'i', and fields past 2^21 up to u32::MAX (2j stops one short:
+    // Rust's `two_j + 1` would overflow).
     probes.extend(
-        [(1, 7, 15), (2, 9, 17), (3, 0, 1)].map(|(n_shell, l, two_j)| ShellLevel {
-            n_shell,
-            l,
-            two_j,
-        }),
+        [
+            (1, 7, 15),
+            (2, 9, 17),
+            (3, 0, 1),
+            (1 << 21, 3, 7),
+            (1, (1 << 21) + 2, 1),
+            (1, 2, (1 << 21) + 1),
+            (1 << 30, 6, (1 << 31) + 1),
+            (u32::MAX, u32::MAX, u32::MAX - 1),
+        ]
+        .map(|(n_shell, l, two_j)| ShellLevel { n_shell, l, two_j }),
     );
     for lv in &probes {
         let ins = level_toks(lv);

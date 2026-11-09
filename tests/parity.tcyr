@@ -466,10 +466,10 @@ fn _par_nucleus(fp, fl): i64 {
         _par_got_seq(cnt);
         var k = 0;
         while (k < cnt) {
-            var lv = shell_model_level(k);
-            _par_got_i(shell_level_n_shell(lv));
-            _par_got_i(shell_level_l(lv));
-            _par_got_i(shell_level_two_j(lv));
+            var slv = shell_model_level(k);
+            _par_got_i(slv.n_shell);
+            _par_got_i(slv.l);
+            _par_got_i(slv.two_j);
             k = k + 1;
         }
         return 1;
@@ -483,16 +483,17 @@ fn _par_nucleus(fp, fl): i64 {
         return 1;
     }
     if (_par_eq(fp, fl, "shell_occupation") == 1) {
-        var lvs[256];
+        var lvs: TmShellLevel[32];
         var occ[256];
         var cnt = shell_occupation(x, &lvs, &occ, 32);
         _par_got_seq(cnt);
+        var base: *TmShellLevel = &lvs;
         var k = 0;
         while (k < cnt) {
-            var lv = load64(&lvs + k * 8);
-            _par_got_i(shell_level_n_shell(lv));
-            _par_got_i(shell_level_l(lv));
-            _par_got_i(shell_level_two_j(lv));
+            var olv: *TmShellLevel = base + k;
+            _par_got_i(olv.n_shell);
+            _par_got_i(olv.l);
+            _par_got_i(olv.two_j);
             _par_got_i(load64(&occ + k * 8));
             k = k + 1;
         }
@@ -506,11 +507,11 @@ fn _par_nucleus(fp, fl): i64 {
         return 1;
     }
     if (_par_in_n == 3) {
-        var lv = shell_level_new(x, y, _par_in(2));
-        if (_par_eq(fp, fl, "ShellLevel::degeneracy") == 1) { _par_got_i(shell_level_degeneracy(lv)); return 1; }
-        if (_par_eq(fp, fl, "ShellLevel::j") == 1) { _par_got_f(shell_level_j(lv)); return 1; }
+        var plv = TmShellLevel_new(x, y, _par_in(2));
+        if (_par_eq(fp, fl, "ShellLevel::degeneracy") == 1) { _par_got_i(plv.degeneracy()); return 1; }
+        if (_par_eq(fp, fl, "ShellLevel::j") == 1) { _par_got_f(plv.j()); return 1; }
         if (_par_eq(fp, fl, "ShellLevel::label") == 1) {
-            var lab = shell_level_label(lv);
+            var lab = plv.label();
             _par_got_s(str_data(lab), str_len(lab));
             return 1;
         }

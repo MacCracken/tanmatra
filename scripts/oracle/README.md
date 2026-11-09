@@ -42,7 +42,7 @@ python3 -I scripts/oracle/probe_tables.py .                                     
 | `particle` | M1 | 102 | `src/m_particle.rs` | `src/particle_data.cyr` (`src/t_particle.rs`) |
 | `relativity` | M1 | 6,768 | `src/m_relativity.rs` | — (no tables) |
 | `libm` | M0 step 8 | 11,549 | `src/m_libm.rs` | — |
-| `nucleus` (with the shell model) | M2 | 74,297 | `src/m_nucleus.rs` | `src/nucleus_data.cyr` (`src/t_nucleus.rs`, with the private-value proofs) |
+| `nucleus` (with the shell model) | M2 | 74,312 | `src/m_nucleus.rs` | `src/nucleus_data.cyr` (`src/t_nucleus.rs`, with the private-value proofs) |
 | `decay` | M2 | 8,511 | `src/m_decay.rs` | `src/decay_data.cyr` (`src/t_decay.rs`) |
 | `timekeeping` | M5 | 20,703 | `src/m_timekeeping.rs` | `src/timekeeping_data.cyr` (`src/t_timekeeping.rs`: the leap table derived from `leap_seconds_at`, the USNO segments extracted, both proven) |
 | `atomic` | M3 | 43,309 | `src/m_atomic.rs` | `src/atomic_data.cyr` (`src/t_atomic.rs`: the filling order and Bethe logarithms extracted, the 20 NIST exceptions derived from `electron_configuration`, all proven) |
