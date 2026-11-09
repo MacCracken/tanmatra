@@ -5,8 +5,8 @@
 
 ## Version
 
-**2.0.1** (`VERSION`), 2026-11-09: the chrono bridge and prakash 2.15.2. 2.0.0 (2026-11-08) was the first Cyrius
-release. The Rust crate's last release, 1.3.0, stays frozen as the oracle in `rust-old/`. `cyrius.cyml` reads the
+**2.0.1** (`VERSION`), 2026-11-09: the chrono bridge and prakash 2.15.2, two pieces of work that just missed 2.0.0
+and finish it. 2.0.0 (2026-11-08) was the first Cyrius release. The Rust crate's last release, 1.3.0, stays frozen as the oracle in `rust-old/`. `cyrius.cyml` reads the
 version through `version = "${file:VERSION}"`, so `dist/tanmatra.cyr` and `dist/tanmatra-optics.cyr` say v2.0.1. The
 tag and the release are the maintainer's.
 

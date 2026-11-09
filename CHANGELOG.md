@@ -9,9 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.0.1] — 2026-11-09
 
-The chrono bridge, the first post-2.0.0 item (port plan §6), and prakash 2.15.2 for the optics profile. No API is
-removed or changed, and no golden value moves: the corpus grows by the bridge's 6,588 rows to 191,583, all within
-their class on x86_64 ELF, PE and aarch64.
+Two pieces of work that just missed 2.0.0, and finish it:
+- **the chrono bridge**, which the plan had already unblocked for the first bridge release (port plan §6);
+- **prakash 2.15.2**, which fixes the three bundle warnings that 2.0.0 accepted for the optics profile.
+
+No API is removed or changed, and no golden value moves. The corpus grows by the bridge's 6,588 rows to 191,583, all
+within their class on x86_64 ELF, PE and aarch64.
 
 ### Added
 - **The chrono bridge, the first bridge** (port plan §6), in the new `src/bridge.cyr`: `utc_date_to_tai_offset`,
