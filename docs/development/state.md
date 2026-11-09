@@ -15,8 +15,9 @@ Plan of record: [`tanmatra-port-plan.md`](tanmatra-port-plan.md).
 
 | Milestone | Status |
 |---|---|
-| M0 Initialize | ◐ steps 0–4 done 2026-11-08: Rust oracle frozen green; `cyrius port` scaffold; CLAUDE.md, roadmap and docs repaired; manifest configured; ganita 1.2.15 confirmed. **Step 5 built**: the golden generator `scripts/oracle/` writes `tests/golden/` (constants, particle, relativity, libm: 18,453 rows), deterministic, `--check`ed and independently validated. **Step 6 built**: the same tool generates `src/constants.cyr` (34 `TM_` consts) and `src/particle_data.cyr` (enums plus baked columns), all 129 values verified through the Cyrius compiler. **Step 7 done**: `tests/parity.tcyr` with `tests/ulp.cyr` replays the corpus: 4,574 rows ok, 0 failed, 6,044 measured (class C, no bound yet), 7,835 pending (not ported). **Next: step 8**: per-target ulp baselines and the class-C bounds |
-| M1 – M7 | ☐ not started |
+| M0 Initialize | ✅ **done 2026-11-08.** Steps 0–4: Rust oracle frozen green; `cyrius port` scaffold; CLAUDE.md, roadmap and docs repaired; manifest configured; ganita 1.2.15 confirmed. **Step 5 built**: the golden generator `scripts/oracle/` writes `tests/golden/` (constants, particle, relativity, libm: 18,453 rows), deterministic, `--check`ed and independently validated. **Step 6 built**: the same tool generates `src/constants.cyr` (34 `TM_` consts) and `src/particle_data.cyr` (enums plus baked columns), all 129 values verified through the Cyrius compiler. **Step 7 done**: `tests/parity.tcyr` with `tests/ulp.cyr` replays the corpus: 4,574 rows ok, 0 failed, 6,044 measured (class C, no bound yet), 7,835 pending (not ported). **Step 8 done**: [`port-parity.md`](port-parity.md) has the libm baselines on x86_64 ELF, x86_64 PE and aarch64, with K = 2 ulp for the class-C libm primitives, one ADR-0007 accepted row, and the hypot conditioning finding (the port uses a bit-exact `_tm_hypot`). The harness now reports 10,617 ok, 0 failed, 0 measured, 7,835 pending, 1 accepted on all three targets |
+| M1 Foundation | ☐ **next**: `_tm_hypot`, then error, particle and relativity, with their dispatchers |
+| M2 – M7 | ☐ not started |
 
 ## Toolchain
 
@@ -53,7 +54,7 @@ Plan of record: [`tanmatra-port-plan.md`](tanmatra-port-plan.md).
   |---|---|
   | constants | 34 / 34 bit-identical |
   | libm, class A | sqrt, fabs, floor, trunc and cbrt bit-identical; round and ldexp pending |
-  | libm, class C | sin, cos and tan bit-identical; exp, log, sinh and pow ≤ 1 ulp; hypot ≤ 2 ulp; plus one pow outlier (the ganita issue below) |
+  | libm, class C, bounded at K = 2 ulp | sin, cos and tan bit-identical; exp, log, sinh and pow ≤ 1 ulp; hypot ≤ 2 ulp; one pow row accepted (ADR 0007). Identical on x86_64 ELF and PE; aarch64 has exp bit-identical and fewer 1-ulp rows |
   | particle, relativity | pending |
 
 - **`tests/ulp.cyr`**: float comparison and assert wrappers for the parity harness and the reference tests.
@@ -87,4 +88,5 @@ prakash, kiran and joshua consume the Rust crate. No Cyrius consumer builds agai
 
 ## Next
 
-M0 step 8; see the port plan §2. Each later milestone adds its module's golden emitter first.
+M1 Foundation. It starts with its golden dispatchers and `_tm_hypot` (port-parity.md), then error, particle (on the
+generated `particle_data.cyr`) and relativity. See the port plan §3. Each later milestone adds its module's golden emitter first.

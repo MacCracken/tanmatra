@@ -5,8 +5,15 @@
 //! - Four-momenta from 1 keV to 10 GeV for every mass in [`masses`], along z and along an
 //!   oblique direction, plus massless, spacelike, negative-energy and NaN edges.
 //!
-//! Classes: ±, ×, ÷ and `sqrt` only → B. Anything through `momentum_magnitude`, which is
-//! `libm::hypot`, → C. Constructors that copy their inputs → A.
+//! Classes:
+//! - ±, ×, ÷ and `sqrt` only → B.
+//! - Anything through `momentum_magnitude` (`libm::hypot`) → also B. The port reproduces
+//!   Rust libm's hypot operation for operation (`_tm_hypot`): a prototype matched all 600
+//!   `libm.tsv` hypot rows bit for bit on x86_64 and aarch64. These functions are
+//!   ill-conditioned for p ≫ m: a 1-ulp change in |p| moved `invariant_mass` by over 16 ulp
+//!   on 103 of 515 rows. So no class-C bound could hold them, and an exact primitive is the
+//!   only sound parity (docs/development/port-parity.md).
+//! - Constructors that copy their inputs → A.
 
 use crate::grids::log_grid;
 use crate::tsv::{Class, Module, Tok, f};
@@ -189,21 +196,21 @@ pub fn emit() -> Module {
         m.row("FourMomentum::new", Class::A, &ins, &fm(&made));
         m.row(
             "FourMomentum::momentum_magnitude",
-            Class::C,
+            Class::B,
             &ins,
             &[f(p.momentum_magnitude())],
         );
         m.row(
             "FourMomentum::invariant_mass",
-            Class::C,
+            Class::B,
             &ins,
             &[f(p.invariant_mass())],
         );
-        m.row("FourMomentum::beta", Class::C, &ins, &[f(p.beta())]);
-        m.row("FourMomentum::gamma", Class::C, &ins, &[f(p.gamma())]);
+        m.row("FourMomentum::beta", Class::B, &ins, &[f(p.beta())]);
+        m.row("FourMomentum::gamma", Class::B, &ins, &[f(p.gamma())]);
         m.row(
             "FourMomentum::kinetic_energy",
-            Class::C,
+            Class::B,
             &ins,
             &[f(p.kinetic_energy())],
         );
@@ -218,7 +225,7 @@ pub fn emit() -> Module {
             m.row("FourMomentum::add", Class::B, &ins, &fm(&(*p1 + *p2)));
             m.row(
                 "invariant_mass_two_body",
-                Class::C,
+                Class::B,
                 &ins,
                 &[f(invariant_mass_two_body(p1, p2))],
             );

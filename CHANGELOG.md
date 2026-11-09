@@ -53,6 +53,16 @@ The Rust library and its behavior are unchanged, and `VERSION` stays 1.3.0 until
 - Negative tests (a tampered value, a malformed token, a missing golden file) each fail with exit 1. `cyrius test`, `test --bounds` and `audit` pass with no warnings.
 - Filed upstream: `ganita/docs/development/issues/2026-11-08-pow-minus-one-huge-even-exponent.md`. `ganita_f64_pow(-1, y)` returns +∞ or +0 instead of 1 for |y| > 2^64, because `_gn_pow_pos` lacks fdlibm's |x| == 1 guard. tanmatra is unaffected.
 
+### Port — M0 step 8: baselines and class-C bounds; M0 complete (2026-11-08)
+- **`docs/development/port-parity.md`**: `libm.tsv` baselines on x86_64 ELF, x86_64 PE (wine) and aarch64 (qemu); macOS is unmeasured.
+  - sqrt, fabs, floor, trunc, cbrt, sin, cos and tan are bit-identical to Rust libm on every target.
+  - exp is bit-identical on aarch64 and ≤ 1 ulp on x86_64 (x87). log, sinh and pow are ≤ 1 ulp, and hypot ≤ 2.
+- **The class-C bound for the libm primitives is 2 ulp**, from both sides' documented < 1 ulp. `tests/parity.tcyr` gates them in ulps (`_par_c_bound`). A check with exp's K = 0 failed exactly the 60 x86_64 rows.
+- **ADR 0007** accepts the one `pow(-1, DBL_MAX)` row (ganita's filed defect). The harness lists accepted rows by exact input (`_par_accepted`) and reports them on every run.
+- **Hypot.** `invariant_mass` is ill-conditioned for p ≫ m: a 1-ulp change in |p| moves it by more than 16 ulp on 103 of 515 rows. So the port will reproduce Rust libm's hypot as `_tm_hypot`, and the four-momentum golden rows are reclassified from C to B, a tightening. A prototype matched all 600 hypot rows bit for bit on x86_64 and aarch64.
+- **Rule for tanmatra's own class-C bounds:** K_F = 2 · S · calls + 2, from F's measured sensitivity, set before F's first comparison. If K_F > 64, make the primitive exact.
+- **M0 is complete.** Next is M1.
+
 ## [1.3.0] — 2026-09-16
 
 Repairs every finding of the 2026-09-16 math and data audit

@@ -27,5 +27,6 @@ Decisions about tanmatra — what we chose, the context, and the consequences we
 | [0004](0004-feature-gated-optics.md) | Feature-gated optics integration | Accepted |
 | [0005](0005-semi-empirical-plus-corrections.md) | Semi-empirical formulas with corrections | Accepted (revised) |
 | [0006](0006-cyrius-port-with-rust-oracle.md) | Port to Cyrius, with Rust 1.3.0 frozen as the parity oracle | Accepted |
+| [0007](0007-accept-ganita-pow-minus-one-divergence.md) | Accept ganita's pow(−1, \|y\| > 2^64) divergence until ganita fixes it | Accepted (temporary) |
 
 ADRs 0001–0005 were written for the Rust crate (as `docs/decisions/001`–`005`, renamed to the four-digit convention in 2026-11). Their decisions still hold for the port, except 0003.

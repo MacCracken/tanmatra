@@ -7,7 +7,9 @@
 # - ok: every output matched within its class;
 # - FAILED: an output differs; the first few are printed with the row's note;
 # - measured: class C, with no bound set yet for its function. The ulp distance is
-#   recorded but not gated (port plan §2 step 8 sets the bounds);
+#   recorded but not gated. Bounds are set per function before its comparison
+#   (docs/development/port-parity.md);
+# - accepted: a divergence an ADR accepts, listed by row in _par_accepted;
 # - pending: its function isn't ported yet (no dispatcher entry).
 #
 # Per function it prints the row counts and the ulp histogram, which is the step 8
@@ -213,10 +215,35 @@ fn _par_dispatch(mp, ml, fp, fl): i64 {
     return 0;
 }
 
-# The relative bound for a class-C function, as an f64 word; 0 = none set yet (measured).
-# M0 step 8 fills this from docs/development/port-parity.md, per target.
+# The class-C bound for a function, in ulps; -1 when none is set yet (the rows are measured).
+# The derivation is in docs/development/port-parity.md. Set a function's bound BEFORE its
+# first comparison, from that evidence, and never raise it to make a row pass.
+#
+# The libm primitives get 2 ulp: each side documents < 1 ulp (Cyrius lib/math.cyr, ganita,
+# fdlibm in Rust libm), so two implementations can differ by up to 2. That holds on x86_64
+# ELF, x86_64 PE and aarch64, measured 2026-11-08 (max 1 ulp; hypot 2, which documents no
+# bound on either side).
 #must_use
 fn _par_c_bound(fp, fl): i64 {
+    if (_par_eq(fp, fl, "libm::sin") == 1) { return 2; }
+    if (_par_eq(fp, fl, "libm::cos") == 1) { return 2; }
+    if (_par_eq(fp, fl, "libm::tan") == 1) { return 2; }
+    if (_par_eq(fp, fl, "libm::exp") == 1) { return 2; }
+    if (_par_eq(fp, fl, "libm::log") == 1) { return 2; }
+    if (_par_eq(fp, fl, "libm::sinh") == 1) { return 2; }
+    if (_par_eq(fp, fl, "libm::pow") == 1) { return 2; }
+    if (_par_eq(fp, fl, "libm::hypot") == 1) { return 2; }
+    return 0 - 1;
+}
+
+# 1 if the row (function and raw input field) is a divergence an ADR accepts. Each entry
+# names its ADR. An accepted row is reported on every run and doesn't fail its module.
+#must_use
+fn _par_accepted(fp, fl, ip, il): i64 {
+    # ADR 0007: ganita pow(-1, |y| > 2^64) gives +inf / +0 instead of 1 (filed upstream).
+    if (_par_eq(fp, fl, "libm::pow") == 1 && _par_eq(ip, il, "f:bff0000000000000 f:7fefffffffffffff") == 1) {
+        return 7;
+    }
     return 0;
 }
 
@@ -232,6 +259,7 @@ var _par_fn_ok = 0;
 var _par_fn_fail = 0;
 var _par_fn_meas = 0;
 var _par_fn_pend = 0;
+var _par_fn_acc = 0;
 var _par_fn_h = 0;    # 6 buckets per fn
 var _par_fn_max = 0;
 var _par_fn_n = 0;
@@ -254,6 +282,7 @@ fn _par_fn_slot(fp, fl, cls): i64 {
     store64(_par_fn_fail + at, 0);
     store64(_par_fn_meas + at, 0);
     store64(_par_fn_pend + at, 0);
+    store64(_par_fn_acc + at, 0);
     store64(_par_fn_max + at, 0);
     var b = 0;
     while (b < 6) { store64(_par_fn_h + (_par_fn_n * 6 + b) * 8, 0); b = b + 1; }
@@ -307,9 +336,9 @@ fn _par_compare(slot, cls, fp, fl): i64 {
                 if (d > 2) { result = 0; }
             } elif (cls == 67) {
                 var bound = _par_c_bound(fp, fl);
-                if (bound == 0) {
+                if (bound < 0) {
                     if (result == 1) { result = 2; }
-                } elif (ulp_rel_match(gv, wv, bound) != 1) {
+                } elif (d > bound) {
                     result = 0;
                 }
             } else {
@@ -364,6 +393,8 @@ fn _par_report_fns() {
         if (m > 0) { print(", ", 2); fmt_int(m); print(" measured", 9); }
         var p = load64(_par_fn_pend + at);
         if (p > 0) { print(", ", 2); fmt_int(p); print(" pending", 8); }
+        var acc = load64(_par_fn_acc + at);
+        if (acc > 0) { print(", ", 2); fmt_int(acc); print(" accepted", 9); }
         var hb = k * 6;
         var floats = 0;
         var b = 0;
@@ -394,6 +425,7 @@ var _par_rows_ok = 0;
 var _par_rows_fail = 0;
 var _par_rows_meas = 0;
 var _par_rows_pend = 0;
+var _par_rows_acc = 0;
 
 # The index of the next byte `c` in [p + at, p + end), or `end`.
 #must_use
@@ -467,6 +499,16 @@ fn _par_module(mp, ml): i64 {
                 }
             }
             elif (outcome == 3) { _par_bump(_par_fn_pend, slot); _par_rows_pend = _par_rows_pend + 1; }
+            elif (bad == 0 && _par_accepted(fp, fl, buf + t2 + 1, t3 - t2 - 1) > 0) {
+                _par_bump(_par_fn_acc, slot);
+                _par_rows_acc = _par_rows_acc + 1;
+                print("  accepted (ADR ", 16);
+                fmt_int(_par_accepted(fp, fl, buf + t2 + 1, t3 - t2 - 1));
+                print("): ", 3);
+                print(buf + t4 + 1, eol - t4 - 1);
+                println("");
+                ulp_print_pair(load64(_par_got_v), load64(_par_want_v));
+            }
             else {
                 _par_bump(_par_fn_fail, slot);
                 _par_rows_fail = _par_rows_fail + 1;
@@ -525,6 +567,8 @@ fn _par_alloc(): i64 {
     if (_par_fn_meas == 0) { println("parity: out of memory"); return 1; }
     _par_fn_pend = alloc(768);
     if (_par_fn_pend == 0) { println("parity: out of memory"); return 1; }
+    _par_fn_acc = alloc(768);
+    if (_par_fn_acc == 0) { println("parity: out of memory"); return 1; }
     _par_fn_h = alloc(4608);
     if (_par_fn_h == 0) { println("parity: out of memory"); return 1; }
     _par_fn_max = alloc(768);
@@ -563,7 +607,9 @@ fn main(): i64 {
     fmt_int(_par_rows_meas);
     print(" measured, ", 11);
     fmt_int(_par_rows_pend);
-    println(" pending ===");
+    print(" pending, ", 10);
+    fmt_int(_par_rows_acc);
+    println(" accepted ===");
     return failing;
 }
 

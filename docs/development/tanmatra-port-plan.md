@@ -273,7 +273,7 @@ gets something wrong, repair the output here and file the defect upstream (step 
    - **Independently checked.** `scripts/oracle/validate.py` (Python, no packages):
      - re-parses every row;
      - checks `constants.tsv` against the Rust source literals;
-     - recomputes all 2,962 class-A/B relativity rows with Python floats in Rust's operation
+     - recomputes the 2,962 arithmetic-only class-A/B relativity rows with Python floats in Rust's operation
        order: bit-identical, 0 failures;
      - checks `sqrt` against `math.sqrt` and `cbrt` on perfect cubes.
    - **Coverage so far:**
@@ -376,14 +376,28 @@ gets something wrong, repair the output here and file the defect upstream (step 
        y < −2^64, instead of 1. It is filed as
        `ganita/docs/development/issues/2026-11-08-pow-minus-one-huge-even-exponent.md`, with
        a self-proving repro. tanmatra's own `pow` bases are all positive.
-8. **Baseline measurements.** Before porting any formula, run the golden inputs through each
-   Cyrius function tanmatra uses (§5 table) against Rust `libm`.
-   - Run it **on every CI target**. On x86_64, `f64_exp` and `f64_ln` go through x87, so
-     their bits differ from aarch64.
-   - Record the ulp distributions per target in `docs/development/port-parity.md`. This sets
-     class C (§4) from evidence, not guesswork.
-   - Expected 0 ulp: `f64_sqrt` (IEEE) and `ganita_f64_cbrt` (correctly rounded on both
-     sides). Any non-zero distance there is a defect.
+8. ✅ **Baseline measurements. Done 2026-11-08: [`port-parity.md`](port-parity.md).**
+   - **Targets.** `libm.tsv` was run through every Cyrius counterpart on x86_64 ELF (native),
+     x86_64 PE (wine) and aarch64 (qemu user mode). macOS isn't runnable here and is recorded as
+     unmeasured.
+   - **Bit-identical to Rust libm on every target:** sqrt, fabs, floor, trunc, **cbrt (all
+     2,074 rows)**, sin, cos and tan. **exp** is bit-identical on aarch64; on x86_64 it is
+     1 ulp off on 60 of 710 rows (x87). log, sinh and pow are ≤ 1 ulp, and hypot ≤ 2 ulp.
+     Windows PE matches x86_64 ELF row for row.
+   - **Class-C bound for the libm primitives: K = 2 ulp** on every measured target. Each side
+     documents < 1 ulp, so two implementations can be 2 apart. Every observation is within it.
+     A gating check with exp's K = 0 failed exactly x86_64's 60 rows.
+   - **One accepted divergence:** `pow(-1, DBL_MAX)`, ganita's |x| == 1 defect. It is filed
+     upstream and accepted by
+     [ADR 0007](../adr/0007-accept-ganita-pow-minus-one-divergence.md).
+   - **Conditioning finding.** `invariant_mass` is ill-conditioned in |p| when p ≫ m: a 1-ulp
+     change in hypot moves it by more than 16 ulp on 103 of 515 rows. So **the port
+     reproduces Rust libm's hypot as `_tm_hypot`**, and the four-momentum functions become
+     class B. A prototype, given in port-parity.md, matched all 600 hypot rows bit for bit on
+     x86_64 and aarch64.
+   - **Rule for tanmatra's own class-C bounds.** K_F = 2 · S · (class-C calls on its path) + 2,
+     where S is F's measured sensitivity, set before F's first comparison. If K_F > 64, make
+     the primitive exact instead.
 
 **Gate:**
 - `cyrius build` and `cyrius bench` pass. `bench` proves the step-2 manifest fix.
@@ -419,7 +433,7 @@ Each milestone ends with the same gates:
 
 | Milestone | Modules | Key work | Golden grid (minimum) |
 |---|---|---|---|
-| **M1 Foundation** | error, constants, particle, relativity | Generated CODATA 2022 `const`s. `TanmatraError` → a code enum plus an `err_out` detail. `FourMomentum` as an inline **struct value** with four typed f64 fields and a `FourMomentum_add` overload for `+` (Rust implements only `Add`). Enum properties (`Quark`, `Lepton`, `Boson`, `FundamentalForce`) read the generated `particle_data.cyr` columns, with a bounds check on the enum value. Probe the `Nucleus` value struct inside a `Result` (§5) | every enum variant; β ∈ {0, ±0.5, ±(1−1e-12), ±1, ±1.5}; four-momenta from 1 keV to 10 GeV |
+| **M1 Foundation** | error, constants, particle, relativity | Generated CODATA 2022 `const`s. `TanmatraError` → a code enum plus an `err_out` detail. `FourMomentum` as an inline **struct value** with four typed f64 fields and a `FourMomentum_add` overload for `+` (Rust implements only `Add`). `momentum_magnitude` on a bit-exact **`_tm_hypot`** (port-parity.md; it moves the `libm::hypot` dispatch and class A with it). Enum properties (`Quark`, `Lepton`, `Boson`, `FundamentalForce`) read the generated `particle_data.cyr` columns, with a bounds check on the enum value. Probe the `Nucleus` value struct inside a `Result` (§5) | every enum variant; β ∈ {0, ±0.5, ±(1−1e-12), ±1, ±1.5}; four-momenta from 1 keV to 10 GeV |
 | **M2 Nuclear** | nucleus_data, nucleus, shell_model, decay_data, decay | Generated AME2020, radii, moments, superallowed and 114-isotope **baked column tables**. SEMF + Myers–Swiatecki (`ganita_f64_cbrt`). Mayer–Jensen and empirical p/n orders; Brennan–Bernstein coupling. `decay_chain` with the IT ground-state rule. **Bateman scaling-and-squaring matrix exponential**, with `ldexp` as a multiply by `f64_exp2(k)` | all (Z, A) with 1 ≤ Z ≤ 118, Z ≤ A ≤ 3Z (binding, shell-corrected, J^π); all isotopes; the U-238, U-235 and Th-232 chains; Bateman with equal λ, the 9-member long-lived chain, and the U-238 series at 1 y, 10³ y and 4.463e9 y |
 | **M3 Atomic** | atomic_data, atomic_config, atomic_hydrogenic, atomic_qed | Generated IE (118) and EA (118, 3-state) tables; `ElectronAffinity` as a `: stack` enum. Configurations with the 20 NIST exceptions. Rydberg and reduced-mass lines. Dirac and first-order fine structure. Radial functions (Laguerre coefficients and factorial-ratio normalization) for n ≤ 60. Exact radial dipole integrals → Einstein A/B. Lamb shift with Bethe logarithms, VP, hyperfine, g-factors, Breit. Write the `powi` sites in Rust's evaluation order (§5) | Z = 1..118 (configs, IE, EA); n1 < n2 ≤ 12, Z ∈ {1, 2, 3, 26, 92}; R_nl for all n ≤ 10, l < n, at 50 radii; A-values for every allowed n_u ≤ 10 → n_l; all (n, l, j) with n ≤ 4 |
 | **M4 Reactions & scattering** | reaction_data, reaction, scattering | ENDF/B-VIII.0 thermal cross sections, resonance integrals and yields (generated). `NuclearReaction` layout with an optional projectile, neutron counts and a lepton vec. Presets. Rutherford (`ganita_f64_tan`), Mott (p·β), Born, the form factor (series branch), Klein–Nishina (series branch), Maximon pair production (both branches). The 7-argument `breit_wigner_cross_section` and `born_screened_coulomb_with_masses` keep their Rust signatures | all presets; energies on both sides of each branch point (KN γ = 1e-2, form factor qR = 0.5, pair k = 4); θ ∈ {1e-3, 0.1, π/2, π} |
@@ -439,8 +453,8 @@ Every golden row carries one tolerance class:
 | Class | Tolerance | Applies to |
 |---|---|---|
 | **A — exact** | bit-identical, or equal integers/strings | constants and table cells; configurations; J^π; decay chains; leap seconds; `AtomicInstant`; magic numbers; enum properties |
-| **B — arithmetic** | ≤ 2 ulp, **expected 0** | formulas using only + − × ÷ √ and `ganita_f64_cbrt`: SEMF, Rutherford, Klein–Nishina (series branch), relativity, Q-value arithmetic. Both sides round each operation correctly and neither contracts to FMA. A non-zero distance means the operation order differs from Rust, so check that first |
-| **C — transcendental** | relative error ≤ the per-target bound measured in M0 step 8 (expected ~1e-14) | anything through exp/ln/pow/sin/cos/tan/sinh/hypot: shell term, Dirac, Lamb shift, Mott, pair production, form factor, radial functions |
+| **B — arithmetic** | ≤ 2 ulp, **expected 0** | formulas using only + − × ÷ √, `ganita_f64_cbrt` and `_tm_hypot`: SEMF, Rutherford, Klein–Nishina (series branch), relativity including the four-momentum functions, Q-value arithmetic. Both sides round each operation correctly and neither contracts to FMA. A non-zero distance means the operation order differs from Rust, so check that first |
+| **C — transcendental** | ulp distance ≤ K. For the libm primitives K = 2; for each tanmatra function, K is derived by the [port-parity rule](port-parity.md#rule-for-the-class-c-bounds-of-tanmatras-own-functions) before its first comparison | anything through exp/ln/pow/sin/cos/tan/sinh: shell term, Dirac, Lamb shift, Mott, pair production, form factor, radial functions |
 | **D — iterative** | relative ≤ 1e-12 | Bateman matrix exponential, radial dipole integrals, numerically integrated references |
 
 Rules:
@@ -480,7 +494,8 @@ every core f64 method it uses.
 | `exp` (9), `log` (6) | `f64_exp`, `f64_ln` | builtins, needing `math` on aarch64 | ≤ 1 ulp; x87 on x86_64, so the bits are **not** the same across targets; class C per target |
 | `cbrt` (7) | `ganita_f64_cbrt` | ganita 1.2.15 | correctly rounded, as is `libm` 0.2.16's CORE-MATH `cbrt` → bit-identical; class B |
 | `pow` (5) | `ganita_f64_pow` | ganita (fdlibm `e_pow`) | ≤ 1 ulp, exact for representable integer powers; class C. Keep `x^(5/3)` as `x·cbrt(x)²`, as in Rust |
-| `sinh` (1), `tan` (1), `hypot` (2) | `ganita_f64_sinh`, `ganita_f64_tan`, `ganita_f64_hypot` | ganita | class C. `tan` no longer needs a local sin/cos (ganita 1.2.11) |
+| `sinh` (1), `tan` (1) | `ganita_f64_sinh`, `ganita_f64_tan` | ganita | class C. `tan` no longer needs a local sin/cos (ganita 1.2.11) |
+| `hypot` (2: `momentum_magnitude`) | private `_tm_hypot`: Rust libm's (musl) algorithm, operation for operation | tanmatra (M1) | **bit-identical** (prototype 600/600 on x86_64 and aarch64; [port-parity.md](port-parity.md)). Not `ganita_f64_hypot`, which is ≤ 2 ulp from libm, too far for the ill-conditioned four-momentum functions |
 | `round` (2: `timekeeping.rs:523`, `:600`) | local `tm_round_half_away` | tanmatra | ⚠ `f64_round` rounds **ties to even** (2.5 → 2, −2.5 → −2; *probed*). `libm::round` rounds ties away from zero. A precedent exists: abaco `src/dsp.cyr` `f64_round_half_away` |
 | `ldexp` (2: Bateman scaling) | multiply by `f64_exp2(k)` | builtin | exact for integer k in the normal range; there is no ldexp/scalbn in the stdlib |
 | `f64::powi` (`atomic.rs:782`, `:832`, `:1107`) | explicit products in LLVM's square-and-multiply order: `x*x`, `x*(x*x)`, `(x*x)*(x*x)` | — | bit-identical to Rust. `((x*x)*x)*x` is **not** |
@@ -490,6 +505,10 @@ every core f64 method it uses.
 
 Some functions are absent from the 6.7.18 stdlib: fma, expm1, log1p, log10, copysign, fmod
 and isnan. tanmatra uses none of them; test for NaN with `x != x`.
+
+**Bit patterns.** A bare copy `var u = x;` of an f64 is itself f64-typed (since 6.6.11), so `u < v` is a *float*
+compare. To work on the bits, take them through a helper with an untyped parameter and an `: i64` return:
+`fn _tm_bits(x): i64 { return x; }`. The first hypot prototype missed `hypot(±inf, NaN)` on exactly this.
 
 **Typing rule.** Bind every call result to a `: f64` local before using it in an operator.
 - The ganita functions return an untyped `i64`.
@@ -582,7 +601,7 @@ and isnan. tanmatra uses none of them; test for NaN with `x != x`.
 
 | Milestone | Status | Golden rows | Reference tests | Benches | Notes |
 |---|---|---|---|---|---|
-| M0 Initialize | ◐ steps 0–4 and 7 done; steps 5–6 built | 18,453 (M1 modules + `libm`); 4,574 ok, 0 failed | — | — | 2026-11-08: the oracle is frozen green; the scaffold is in place and repaired; all gates pass. `scripts/oracle/` generates the golden corpus and the M1 data modules. `tests/parity.tcyr` replays the corpus: constants and the class-A libm functions are bit-identical. It found a ganita pow defect, filed upstream. Next: step 8 (per-target baselines and class-C bounds) |
+| M0 Initialize | ✅ done 2026-11-08 | 18,453; 10,617 ok, 0 failed, 1 accepted (ADR 0007), the rest pending until ported | — | — | Steps 0–8 done; the generators grow per milestone by design. Parity is green on x86_64 ELF, x86_64 PE and aarch64, with libm class C bounded at 2 ulp ([port-parity.md](port-parity.md)). Filed upstream: the `cyrius port` scaffold issue and the ganita pow issue. Next: M1, which starts by adding `_tm_hypot` and the dispatchers |
 | M1 Foundation | ☐ | | | | |
 | M2 Nuclear | ☐ | | | | |
 | M5 Timekeeping | ☐ | | | | |

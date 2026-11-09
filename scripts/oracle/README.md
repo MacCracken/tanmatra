@@ -102,15 +102,17 @@ fn <TAB> class <TAB> inputs <TAB> outputs <TAB> note
 |---|---|
 | **A** exact | the bits are identical. Any NaN matches any NaN, because NaN payloads and signs differ between implementations |
 | **B** arithmetic | the ulp distance is ≤ 2, measured on the ordered-integer line, where +0 and −0 are the same point. **Expected 0**: a non-zero distance means the operation order differs from Rust |
-| **C** transcendental | \|got − want\| ≤ tol · \|want\|, where tol is per function and per target, measured in M0 step 8 from `libm.tsv` and recorded in `docs/development/port-parity.md` |
+| **C** transcendental | the ulp distance is ≤ K, a bound per function (`_par_c_bound` in `tests/parity.tcyr`). K is derived and recorded in `docs/development/port-parity.md` before the function's first comparison. A function with no K yet is *measured*: its histogram is reported but not gated |
 | **D** iterative | \|got − want\| ≤ 1e-12 · \|want\| |
 
 In classes B, C and D:
 - NaN matches only NaN, and ±∞ match only the same infinity;
-- a zero `want` needs a zero `got`, of either sign.
+- a zero `want` needs a zero `got`, of either sign (class D; in B and C, +0 and −0 are one point
+  on the ulp line).
 
-A tolerance is never widened to make a row pass (port plan §4). A divergence accepted by
-an ADR in `docs/adr/` is listed by row name in the harness.
+A tolerance is never widened to make a row pass (port plan §4). A divergence accepted by an
+ADR in `docs/adr/` is listed by its exact function and input field in `_par_accepted`. It is
+reported as `accepted (ADR n)` on every run.
 
 ## Generated Cyrius sources
 
@@ -160,7 +162,8 @@ bit for bit with the golden rows. It fails on any mismatch and on any compiler w
 needs only Python 3, with no packages.
 - **Format:** every row parses: five fields, a known class, well-formed tokens.
 - **Constants:** `constants.tsv` matches the literals in `rust-old/src/constants.rs`.
-- **Relativity:** every class-A or class-B row is recomputed with Python floats in Rust's
+- **Relativity:** the 2,962 class-A/B rows of the free functions and the arithmetic-only
+  `FourMomentum` constructors and `add` are recomputed with Python floats in Rust's
   operation order, and must be bit-identical. Python floats are IEEE doubles.
 - **libm:** `sqrt` matches the correctly rounded `math.sqrt`, and `cbrt` is exact on perfect
   cubes.

@@ -114,6 +114,8 @@ compiles that `test` and `build` drive, never from `cyrius lint`. Each one is a 
   - Bind every call result to a `: f64` local before using it in an operator.
   - Never put hex in a `const`: it is an integer.
   - Never write `(0 - x)` on an f64: use `-x`.
+  - A bare copy `var u = x;` of an f64 is f64-typed, so its `<` is a float compare. Take bits
+    through `fn _tm_bits(x): i64 { return x; }`.
   - Use the canonical `ganita_f64_*` names, not the deprecated short aliases.
 - **Tables and constants are generated, never typed by hand.** `scripts/oracle/` writes
   `src/constants.cyr` and `src/*_data.cyr` from the oracle's API. Regenerate them; never
@@ -133,7 +135,8 @@ compiles that `test` and `build` drive, never from `cyrius lint`. Each one is a 
 - **Do not modify `rust-old/`** — it is the parity oracle. Tools that drive it (golden and table generators) live in `scripts/oracle/` and depend on it by path
 - Do not modify `lib/` files (vendored stdlib / dep symlinks)
 - Do not hardcode toolchain versions in CI YAML — `cyrius = "X.Y.Z"` in `cyrius.cyml` is the source of truth
-- Do not widen a parity tolerance class to make a row pass
+- Do not widen a parity tolerance class to make a row pass. Class-C bounds are set by the
+  rule in `docs/development/port-parity.md` before a function's first comparison
 - Do not add unnecessary dependencies
 - Do not break backward compatibility without a major version bump
 - Do not skip benchmarks before claiming performance improvements
