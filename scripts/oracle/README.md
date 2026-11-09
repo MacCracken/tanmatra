@@ -1,14 +1,20 @@
-# scripts/oracle: the golden corpus generator
+# scripts/oracle: what the port derives from the Rust oracle
 
-`golden` runs the frozen Rust tanmatra 1.3.0 in [`rust-old/`](../../rust-old/) and writes
-`tests/golden/<module>.tsv`: one row per call, with every float as its IEEE-754 bit
-pattern. The Cyrius parity harness (`tests/parity.tcyr`, port plan §2 step 7) replays
-every row against the port and checks it within its tolerance class.
+`oracle` runs the frozen Rust tanmatra 1.3.0 in [`rust-old/`](../../rust-old/) and writes
+two kinds of output:
+- **The golden corpus, `tests/golden/<module>.tsv`** (port plan §2 step 5). It has one row
+  per call, with every float as its IEEE-754 bit pattern. The Cyrius parity harness
+  (`tests/parity.tcyr`, step 7) replays every row against the port and checks it within its
+  tolerance class.
+- **The generated Cyrius data modules, `src/constants.cyr` and `src/<module>_data.cyr`**
+  (step 6). These are the constants and tables the port reads, so no physics value is ever
+  typed by hand.
 
 ```sh
-cargo run --release --locked --manifest-path scripts/oracle/Cargo.toml             # write tests/golden/
+cargo run --release --locked --manifest-path scripts/oracle/Cargo.toml             # write both
 cargo run --release --locked --manifest-path scripts/oracle/Cargo.toml -- --check  # verify; exit 1 on any difference
-python3 -I scripts/oracle/validate.py .                                            # independent re-check (below)
+python3 -I scripts/oracle/validate.py .                                            # independent re-check of the corpus
+python3 -I scripts/oracle/probe_tables.py .                                        # generated .cyr through the Cyrius compiler
 ```
 
 ## Rules
@@ -22,22 +28,22 @@ python3 -I scripts/oracle/validate.py .                                         
   hash-map order.
 - **The corpus is regenerated only from Rust 1.3.0.** A wrong oracle value is fixed in
   Rust: bump to 1.3.x, then regenerate. It is never patched in a `.tsv`.
-- **Modules arrive with their milestone.** Each port milestone starts by adding its
-  emitter (`src/m_<module>.rs`) with the golden grid from the port plan §3, and registering
-  it in `modules()` in `src/main.rs`.
-- **`--check` flags any `.tsv` without an emitter as stale.**
+- **Modules arrive with their milestone.** Each port milestone starts by adding its golden
+  emitter (`src/m_<module>.rs`, with the grid from the port plan §3) and its data-module
+  emitter (`src/t_<module>.rs`), and registering them in `src/main.rs`.
+- **`--check` flags any `.tsv` in `tests/golden/` without an emitter as stale.**
 
-| Module | Milestone | Rows | Emitter |
-|---|---|---|---|
-| `constants` | M1 | 34 | `src/m_constants.rs` |
-| `particle` | M1 | 102 | `src/m_particle.rs` |
-| `relativity` | M1 | 6,768 | `src/m_relativity.rs` |
-| `libm` | M0 step 8 | 11,549 | `src/m_libm.rs` |
-| nucleus, shell model, decay | M2 | — | — |
-| timekeeping | M5 | — | — |
-| atomic | M3 | — | — |
-| reaction, scattering | M4 | — | — |
-| optics | M6 | — | — |
+| Module | Milestone | Golden rows | Golden emitter | Generated Cyrius |
+|---|---|---|---|---|
+| `constants` | M1 | 34 | `src/m_constants.rs` | `src/constants.cyr` (`src/t_constants.rs`) |
+| `particle` | M1 | 102 | `src/m_particle.rs` | `src/particle_data.cyr` (`src/t_particle.rs`) |
+| `relativity` | M1 | 6,768 | `src/m_relativity.rs` | — (no tables) |
+| `libm` | M0 step 8 | 11,549 | `src/m_libm.rs` | — |
+| nucleus, shell model, decay | M2 | — | — | `nucleus_data.cyr`, `decay_data.cyr` |
+| timekeeping | M5 | — | — | leap-second and frequency tables |
+| atomic | M3 | — | — | `atomic_data.cyr` |
+| reaction, scattering | M4 | — | — | `reaction_data.cyr` |
+| optics | M6 | — | — | — |
 
 ## Format 1
 
@@ -102,6 +108,48 @@ In classes B, C and D:
 
 A tolerance is never widened to make a row pass (port plan §4). A divergence accepted by
 an ADR in `docs/adr/` is listed by row name in the harness.
+
+## Generated Cyrius sources
+
+Values always come from the oracle's public API. The Rust source is read only for its `///`
+doc comments, which carry the data citations (CODATA 2022, PDG 2024, ...) into the Cyrius
+file. A table with no public accessor gets its emitter when its milestone designs the
+Cyrius layout. That covers the proton/neutron level orders, the leap-second table and the
+USNO segments: they are reached through the functions that use them, and they are never
+re-typed.
+
+### Emission rules
+
+These were probed on Cyrius 6.7.18, and the generator enforces them.
+- **f64s are decimal literals written positionally.** They use the shortest digits that
+  round-trip, and each is checked to parse back to the oracle's bits; the lexer has no
+  exponent notation. Decimal literals have been correctly rounded since 6.6.10.
+- **Hex is never put in a `const`.** There it is an integer, and `CONST * x` does integer
+  arithmetic.
+- **±∞ are `(1.0 / 0.0)` and `-(1.0 / 0.0)`.** A NaN in a table is a generator error,
+  because Cyrius refuses a compile-time NaN: its bits depend on the target.
+- **Tables are baked column arrays.** Each is `var TM_<X>_<FIELD>: f64|u8|bool[N] = { .. };`,
+  one element per line with a label comment. It lives in the image, needs no
+  initialization, and is immune to `alloc_reset`.
+- **The output is `cyrius fmt`- and `cyrius lint`-clean as generated.**
+
+### Names
+
+A bundle is concatenated into its consumers, so every generated global is prefixed:
+
+| Oracle / golden token | Generated Cyrius |
+|---|---|
+| `const` row `s:ELECTRON_MASS_MEV` | `const TM_ELECTRON_MASS_MEV` |
+| enum `Quark` | `enum TmQuark`, plus `const TM_QUARK_COUNT` |
+| `e:Quark.Up`, `e:Boson.WPlus` | `TM_QUARK_UP`, `TM_BOSON_W_PLUS`: `TM_` + snake(enum) + `_` + snake(variant). Values follow the Rust declaration order |
+| `Quark::mass_mev` (tabulated) | `TM_QUARK_MASS_MEV[q]` |
+| `FundamentalForce::mediator` (a slice) | `TM_FUNDAMENTAL_FORCE_MEDIATORS[START[f] .. START[f] + COUNT[f]]` |
+
+### `probe_tables.py`
+
+`probe_tables.py` compiles a program that prints every generated constant and table cell.
+It builds in `build/oracle-probe/` with the project's manifest, then compares each value
+bit for bit with the golden rows. It fails on any mismatch and on any compiler warning.
 
 ## `validate.py`
 

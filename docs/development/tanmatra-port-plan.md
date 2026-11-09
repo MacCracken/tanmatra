@@ -93,7 +93,7 @@ the mechanics underneath them:
 |---|---|---|---|---|
 | `error.rs` | 36 | — | 2 | `src/error.cyr` |
 | `constants.rs` | 134 | (constants) | — | `src/constants.cyr` |
-| `particle.rs` | 294 | 18 | 28 | `src/particle.cyr` |
+| `particle.rs` | 294 | 18 | 28 | `src/particle_data.cyr` (generated), `src/particle.cyr` |
 | `relativity.rs` | 232 | 17 | 22 | `src/relativity.cyr` |
 | `nucleus.rs` | 940 | 37 | 63 | `src/nucleus_data.cyr`, `src/nucleus.cyr`, `src/shell_model.cyr` |
 | `decay.rs` | 570 | 9 | 27 | `src/decay_data.cyr`, `src/decay.cyr` |
@@ -246,7 +246,7 @@ gets something wrong, repair the output here and file the defect upstream (step 
    - `math` is required for `f64_sin` and `f64_cos` on every target, and for
      exp/ln/atan on aarch64.
    - `overflow` provides the saturating `+|`, `-|` and `*|` operators.
-   - `[lib]` order: error → constants → particle → relativity → nucleus_data → nucleus →
+   - `[lib]` order: error → constants → particle_data → particle → relativity → nucleus_data → nucleus →
      shell_model → decay_data → decay → atomic_data → atomic_config → atomic_hydrogenic →
      atomic_qed → reaction_data → reaction → scattering → timekeeping.
    - `[lib] modules = []` is invalid, so `[lib]` gets its first entry, `src/error.cyr`, in M1.
@@ -286,27 +286,57 @@ gets something wrong, repair the output here and file the defect upstream (step 
      model and decay; M5 timekeeping; M3 atomic; M4 reaction and scattering; M6 optics), each
      with its §3 grid. The corpus is 2.8 MB so far.
    - It is the parity oracle and is regenerated only from Rust 1.3.0.
-6. **Table and constant generator in `scripts/oracle/`**, in the same crate as step 5. It
-   reads the values through the oracle's public API, or from the primary source files the
-   audit names, and never by parsing Rust source. Tables are generated, never re-typed: the
-   audit found 17 of 32 AME rows and about 30 of 118 EA rows hand-transcribed wrong.
-   - **Data modules** (`src/*_data.cyr`) are written as **baked typed column arrays**. Each
-     array holds one field of the table, with a trailing comment giving the decimal value:
-     ```
-     var AME_Z: u16[32] = { 1, … };
-     var AME_MASS_EXCESS_KEV: f64[32] = { 0x…, … };  # 7288.971064, …
-     ```
+6. ◐ **Table and constant generator in `scripts/oracle/`. Built 2026-11-08, in the same
+   crate and binary as step 5; data modules grow per milestone.** Rules and names are in
+   [`scripts/oracle/README.md`](../../scripts/oracle/README.md). Tables are generated, never
+   re-typed: the audit found 17 of 32 AME rows and about 30 of 118 EA rows hand-transcribed
+   wrong.
+   - **Sources.** Values come from the oracle's public API. Primary data files are not
+     re-parsed: the audit already verified the oracle against them, and the golden corpus
+     pins the port to the oracle. The Rust source is read only for `///` doc comments, which
+     carry the citations into the Cyrius file.
+   - **Generated so far:**
+     - **`src/constants.cyr`:** all 34 CODATA 2022 constants as `const TM_<NAME>`.
+     - **`src/particle_data.cyr`:**
+       - the enums `TmQuark`, `TmLepton`, `TmBoson` and `TmFundamentalForce`, with values in
+         Rust declaration order;
+       - every tabulated property as a column indexed by enum value, e.g.
+         `TM_QUARK_MASS_MEV[TM_QUARK_UP]`;
+       - `FundamentalForce::mediator` flattened into start, count and member tables.
+       - Properties that compute ħ over a tabulated value stay computed, in class B.
+   - **Literals.**
+     - f64s are decimal literals written positionally, using the shortest round-trip
+       digits. Each one is checked in Rust to parse back to the oracle's bits.
+     - The lexer has **no exponent notation**: `1.5e-3` is a parse error.
+     - Decimal literals have been correctly rounded since 6.6.10. For example,
+       `0.0000000000000000001602176634` gives `0x3c07a4da290c1653`, the bits of Python's
+       `1.602176634e-19` (*probed*).
+     - **Never put a hex pattern in a `const`.** It is an integer, and `CONST * x` then does
+       integer arithmetic with only a warning (*probed*: the result was
+       `0x4000000000000000`). A full-width hex pattern in a typed `f64` slot keeps its bits
+       with no warning (*probed*), but the tables use decimals for review.
+     - ±∞ are written `(1.0 / 0.0)`. NaN can't be a compile-time f64, so a NaN in a table
+       is a generator error.
+   - **Layout.** Data modules are **baked typed column arrays**, one per field
+     (`var TM_<X>_<FIELD>: f64|u8|bool[N] = { .. };`), one element per line with a label
+     comment.
      - Baked arrays are in the image, need no initialization, and are immune to
        `alloc_reset` (6.6.16).
      - Arrays of structs are refused, so a table becomes parallel columns.
-     - Hex bit patterns are exact inside a typed `f64` slot (*probed*).
-   - **`src/constants.cyr`** is generated from CODATA 2022 `allascii.txt` as decimal `const`s
-     written out in full, e.g. `const ELEMENTARY_CHARGE_C = 0.0000000000000000001602176634;`.
-     - The lexer has **no exponent notation**: `1.5e-3` is a parse error.
-     - Decimal literals have been correctly rounded since 6.6.10. That literal gives
-       `0x3c07a4da290c1653`, bit-identical to Python's `1.602176634e-19` (*probed*).
-     - **Never put a hex pattern in a `const`.** It is an integer, and `CONST * x` then does
-       integer arithmetic with only a warning (*probed*: the result was `0x4000000000000000`).
+   - **Verified.**
+     - The generated files pass `cyrius fmt --check` and `cyrius lint` as written.
+     - `scripts/oracle/probe_tables.py` compiles every constant and table cell through the
+       Cyrius compiler and compares it bit for bit with the golden rows: 129 values,
+       0 failures, 0 warnings. A tampered value fails.
+     - `--check` covers the generated `.cyr` files as well as the corpus.
+   - **The remaining data modules are generated at the start of their milestone.** Each
+     one's column layout is part of that module's Cyrius design: `nucleus_data` and
+     `decay_data` in M2, the timekeeping tables in M5, `atomic_data` in M3, `reaction_data`
+     in M4.
+     - Most tables have a public accessor, so they can be enumerated through the API: the
+       lookups by (Z, A) and by Z, and the `Vec`-returning lists.
+     - Three have none: the proton/neutron level orders, the leap-second table and the USNO
+       segments. Each needs a decision at its milestone, and none may be re-typed.
    - Class-A golden rows (§4) pin every generated constant and table cell bit for bit.
 7. **Parity harness.**
    - `tests/parity.tcyr` loads `tests/golden/*.tsv` and checks each row within its class. It
@@ -359,7 +389,7 @@ Each milestone ends with the same gates:
 
 | Milestone | Modules | Key work | Golden grid (minimum) |
 |---|---|---|---|
-| **M1 Foundation** | error, constants, particle, relativity | Generated CODATA 2022 `const`s. `TanmatraError` → a code enum plus an `err_out` detail. `FourMomentum` as an inline **struct value** with four typed f64 fields and a `FourMomentum_add` overload for `+` (Rust implements only `Add`). Enum methods (`Quark`, `Lepton`, `Boson`, `FundamentalForce`) as `match` tables. Probe the `Nucleus` value struct inside a `Result` (§5) | every enum variant; β ∈ {0, ±0.5, ±(1−1e-12), ±1, ±1.5}; four-momenta from 1 keV to 10 GeV |
+| **M1 Foundation** | error, constants, particle, relativity | Generated CODATA 2022 `const`s. `TanmatraError` → a code enum plus an `err_out` detail. `FourMomentum` as an inline **struct value** with four typed f64 fields and a `FourMomentum_add` overload for `+` (Rust implements only `Add`). Enum properties (`Quark`, `Lepton`, `Boson`, `FundamentalForce`) read the generated `particle_data.cyr` columns, with a bounds check on the enum value. Probe the `Nucleus` value struct inside a `Result` (§5) | every enum variant; β ∈ {0, ±0.5, ±(1−1e-12), ±1, ±1.5}; four-momenta from 1 keV to 10 GeV |
 | **M2 Nuclear** | nucleus_data, nucleus, shell_model, decay_data, decay | Generated AME2020, radii, moments, superallowed and 114-isotope **baked column tables**. SEMF + Myers–Swiatecki (`ganita_f64_cbrt`). Mayer–Jensen and empirical p/n orders; Brennan–Bernstein coupling. `decay_chain` with the IT ground-state rule. **Bateman scaling-and-squaring matrix exponential**, with `ldexp` as a multiply by `f64_exp2(k)` | all (Z, A) with 1 ≤ Z ≤ 118, Z ≤ A ≤ 3Z (binding, shell-corrected, J^π); all isotopes; the U-238, U-235 and Th-232 chains; Bateman with equal λ, the 9-member long-lived chain, and the U-238 series at 1 y, 10³ y and 4.463e9 y |
 | **M3 Atomic** | atomic_data, atomic_config, atomic_hydrogenic, atomic_qed | Generated IE (118) and EA (118, 3-state) tables; `ElectronAffinity` as a `: stack` enum. Configurations with the 20 NIST exceptions. Rydberg and reduced-mass lines. Dirac and first-order fine structure. Radial functions (Laguerre coefficients and factorial-ratio normalization) for n ≤ 60. Exact radial dipole integrals → Einstein A/B. Lamb shift with Bethe logarithms, VP, hyperfine, g-factors, Breit. Write the `powi` sites in Rust's evaluation order (§5) | Z = 1..118 (configs, IE, EA); n1 < n2 ≤ 12, Z ∈ {1, 2, 3, 26, 92}; R_nl for all n ≤ 10, l < n, at 50 radii; A-values for every allowed n_u ≤ 10 → n_l; all (n, l, j) with n ≤ 4 |
 | **M4 Reactions & scattering** | reaction_data, reaction, scattering | ENDF/B-VIII.0 thermal cross sections, resonance integrals and yields (generated). `NuclearReaction` layout with an optional projectile, neutron counts and a lepton vec. Presets. Rutherford (`ganita_f64_tan`), Mott (p·β), Born, the form factor (series branch), Klein–Nishina (series branch), Maximon pair production (both branches). The 7-argument `breit_wigner_cross_section` and `born_screened_coulomb_with_masses` keep their Rust signatures | all presets; energies on both sides of each branch point (KN γ = 1e-2, form factor qR = 0.5, pair k = 4); θ ∈ {1e-3, 0.1, π/2, π} |
@@ -450,11 +480,19 @@ and isnan. tanmatra uses none of them; test for NaN with `x != x`.
 | Identity structs carrying strings or vecs (`Isotope`, `NuclearReaction`, `ShellLevel`, `SuperallowedDecay`, `ThermalCrossSection`, `FissionYield`) | heap structs with typed fields, read as `p.field` through a `*T`. **Avoid `#derive(accessors)` getters on f64 fields.** They are untyped, so `P_x(p) + P_y(p)` is an integer add |
 | `Vec<T>` returns (configurations, shell occupation, series, yields, chains, Bateman populations) | `lib/vec.cyr` of pointers, or f64 buffers with an explicit length. Hot APIs take a caller buffer |
 | `known_isotopes()` (allocates 114 structs per call) and every data table | baked typed column arrays from M0 step 6, with indexed accessors. There is no lazy initialization and no `alloc_reset` hazard |
-| constants | generated decimal `const`s (M0 step 6). **No hex in a `const`** |
+| constants | generated decimal `const TM_<NAME>`s (M0 step 6). **No hex in a `const`** |
 | `String` names and labels | `Str` via `str_builder` |
 
 ### Cyrius rules that shape tanmatra's code
 
+- **Names.** A bundle is concatenated into its consumers, so every public global carries the
+  `TM_` prefix:
+  - constants, as `TM_ELECTRON_MASS_MEV`;
+  - enum members, as `TM_QUARK_UP`, inside `enum TmQuark`;
+  - table columns, as `TM_QUARK_MASS_MEV`.
+
+  The golden token `e:Quark.WPlus` maps to `TM_QUARK_`… by the rule `TM_` + snake(enum) +
+  `_` + snake(variant) (`scripts/oracle/README.md`). Private helpers use `_tm_`.
 - **Arguments.** Arguments past the sixth are passed on the stack, so the two 7-argument
   functions keep their signatures. Named and default arguments (6.7.7) keep call sites
   readable.
@@ -514,7 +552,7 @@ and isnan. tanmatra uses none of them; test for NaN with `x != x`.
 
 | Milestone | Status | Golden rows | Reference tests | Benches | Notes |
 |---|---|---|---|---|---|
-| M0 Initialize | ◐ steps 0–4 done; step 5 built | 18,453 (M1 modules + `libm`) | — | — | 2026-11-08: the oracle is frozen green; the scaffold is in place and repaired; manifest and ganita 1.2.15 checked; all scaffold gates pass. The golden generator is in `scripts/oracle/`, deterministic and independently validated. Next: step 6 (tables and constants), step 7 (parity harness), step 8 (baselines from `libm.tsv`) |
+| M0 Initialize | ◐ steps 0–4 done; steps 5–6 built | 18,453 (M1 modules + `libm`) | — | — | 2026-11-08: the oracle is frozen green; the scaffold is in place and repaired; manifest and ganita 1.2.15 checked; all gates pass. `scripts/oracle/` generates the golden corpus and the M1 data modules (`constants.cyr`, `particle_data.cyr`), all verified through the Cyrius compiler. Next: step 7 (parity harness), step 8 (baselines from `libm.tsv`) |
 | M1 Foundation | ☐ | | | | |
 | M2 Nuclear | ☐ | | | | |
 | M5 Timekeeping | ☐ | | | | |

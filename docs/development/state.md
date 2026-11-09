@@ -15,7 +15,7 @@ Plan of record: [`tanmatra-port-plan.md`](tanmatra-port-plan.md).
 
 | Milestone | Status |
 |---|---|
-| M0 Initialize | ◐ steps 0–4 done 2026-11-08: Rust oracle frozen green; `cyrius port` scaffold; CLAUDE.md, roadmap and docs repaired; manifest configured; ganita 1.2.15 confirmed. **Step 5 built**: the golden generator `scripts/oracle/` writes `tests/golden/` (constants, particle, relativity, libm: 18,453 rows), deterministic, `--check`ed and independently validated. **Next: steps 6–8**: the table and constant generator, the parity harness with `tests/ulp.cyr`, per-target ulp baselines |
+| M0 Initialize | ◐ steps 0–4 done 2026-11-08: Rust oracle frozen green; `cyrius port` scaffold; CLAUDE.md, roadmap and docs repaired; manifest configured; ganita 1.2.15 confirmed. **Step 5 built**: the golden generator `scripts/oracle/` writes `tests/golden/` (constants, particle, relativity, libm: 18,453 rows), deterministic, `--check`ed and independently validated. **Step 6 built**: the same tool generates `src/constants.cyr` (34 `TM_` consts) and `src/particle_data.cyr` (enums plus baked columns), all 129 values verified through the Cyrius compiler. **Next: steps 7–8**: the parity harness with `tests/ulp.cyr`, per-target ulp baselines |
 | M1 – M7 | ☐ not started |
 
 ## Toolchain
@@ -28,7 +28,8 @@ Plan of record: [`tanmatra-port-plan.md`](tanmatra-port-plan.md).
 
 - **Rust reference:** 11,419 lines at `rust-old/`, frozen; do not edit. `rust-old/docs/` keeps the Rust testing guide and
   architecture overview; `rust-old/.github/` and `rust-old/scripts/` keep the Rust CI and the cargo scripts.
-- **Cyrius port:** the scaffold only, with a `src/main.cyr` stub. `[lib]` gets its first module (`src/error.cyr`) in M1.
+- **Cyrius port:** the scaffold's `src/main.cyr` stub, plus two generated modules: `src/constants.cyr` and `src/particle_data.cyr`
+  (`scripts/oracle/`; never edit them by hand). `[lib]` gets its first modules in M1.
 
 ## Tests
 
@@ -72,4 +73,4 @@ prakash, kiran and joshua consume the Rust crate. No Cyrius consumer builds agai
 
 ## Next
 
-M0 steps 6–8; see the port plan §2. Each later milestone adds its module's golden emitter first.
+M0 steps 7–8; see the port plan §2. Each later milestone adds its module's golden emitter first.

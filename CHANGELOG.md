@@ -35,6 +35,15 @@ The Rust library and its behavior are unchanged, and `VERSION` stays 1.3.0 until
   - 18,453 rows in total.
 - **`scripts/oracle/validate.py`** independently re-checks the corpus without the Rust code. It verifies the constants against the source literals, recomputes the 2,962 class-A/B relativity rows bit for bit in Python, and checks sqrt and cbrt.
 
+### Port — M0 step 6: generated constants and tables (2026-11-08)
+- **`scripts/oracle/`** also generates the port's data modules from the oracle's API; the binary is now `oracle`, and `--check` covers them. The rules and names are in `scripts/oracle/README.md`.
+  - f64s are positional decimal literals, checked to round-trip; there is no hex in a `const`, and ∞ is `(1.0 / 0.0)`.
+  - Tables are baked column arrays.
+  - Globals carry the `TM_` prefix.
+- **`src/constants.cyr`**: all 34 CODATA 2022 constants as `const TM_<NAME>`, carrying the Rust doc citations.
+- **`src/particle_data.cyr`**: `TmQuark`, `TmLepton`, `TmBoson` and `TmFundamentalForce`, plus every tabulated PDG 2024 property as a column indexed by enum value; mediators are flattened into start, count and member tables.
+- **`scripts/oracle/probe_tables.py`** compiles all 129 generated values through the Cyrius compiler and checks them bit for bit against the golden rows: 0 failures, 0 warnings.
+
 ## [1.3.0] — 2026-09-16
 
 Repairs every finding of the 2026-09-16 math and data audit

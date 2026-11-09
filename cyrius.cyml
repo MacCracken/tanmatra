@@ -24,7 +24,7 @@ stdlib = ["assert", "bench"]
 
 # [lib] arrives in M1 with its first module (an empty `modules = []` is invalid for distlib).
 # Dependency order, per the port plan §2 step 3:
-#   error → constants → particle → relativity → nucleus_data → nucleus → shell_model →
+#   error → constants → particle_data → particle → relativity → nucleus_data → nucleus → shell_model →
 #   decay_data → decay → atomic_data → atomic_config → atomic_hydrogenic → atomic_qed →
 #   reaction_data → reaction → scattering → timekeeping
 # [lib.optics], [features] optics and the optional [deps.prakash] (tag 2.15.1) arrive in M6.

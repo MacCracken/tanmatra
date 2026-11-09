@@ -6,7 +6,7 @@
 use crate::tsv::{Class, Module, Tok, b, e, f, i};
 use tanmatra::particle::{Boson, FundamentalForce, Lepton, Quark};
 
-const QUARKS: [Quark; 6] = [
+pub const QUARKS: [Quark; 6] = [
     Quark::Up,
     Quark::Down,
     Quark::Charm,
@@ -15,7 +15,7 @@ const QUARKS: [Quark; 6] = [
     Quark::Bottom,
 ];
 
-const LEPTONS: [Lepton; 6] = [
+pub const LEPTONS: [Lepton; 6] = [
     Lepton::Electron,
     Lepton::ElectronNeutrino,
     Lepton::Muon,
@@ -24,7 +24,7 @@ const LEPTONS: [Lepton; 6] = [
     Lepton::TauNeutrino,
 ];
 
-const BOSONS: [Boson; 6] = [
+pub const BOSONS: [Boson; 6] = [
     Boson::Photon,
     Boson::Gluon,
     Boson::WPlus,
@@ -33,7 +33,7 @@ const BOSONS: [Boson; 6] = [
     Boson::Higgs,
 ];
 
-const FORCES: [FundamentalForce; 4] = [
+pub const FORCES: [FundamentalForce; 4] = [
     FundamentalForce::Strong,
     FundamentalForce::Electromagnetic,
     FundamentalForce::Weak,

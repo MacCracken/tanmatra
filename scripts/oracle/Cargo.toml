@@ -17,7 +17,7 @@ tanmatra = { path = "../../rust-old", features = ["optics"] }
 libm = "=0.2.16"
 
 [[bin]]
-name = "golden"
+name = "oracle"
 path = "src/main.rs"
 
 [profile.release]

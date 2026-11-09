@@ -38,6 +38,7 @@ cyrius bench                                  # run tests/*.bcyr
 cargo test --manifest-path rust-old/Cargo.toml --all-features   # the Rust oracle, read-only
 cargo run --release --locked --manifest-path scripts/oracle/Cargo.toml -- --check   # golden corpus up to date
 python3 -I scripts/oracle/validate.py .                         # independent check of the corpus
+python3 -I scripts/oracle/probe_tables.py .                     # generated .cyr through the compiler
 ```
 
 ## Development Process
@@ -114,8 +115,11 @@ compiles that `test` and `build` drive, never from `cyrius lint`. Each one is a 
   - Never put hex in a `const`: it is an integer.
   - Never write `(0 - x)` on an f64: use `-x`.
   - Use the canonical `ganita_f64_*` names, not the deprecated short aliases.
-- **Tables and constants are generated, never typed by hand.** The generators live in
-  `scripts/oracle/`.
+- **Tables and constants are generated, never typed by hand.** `scripts/oracle/` writes
+  `src/constants.cyr` and `src/*_data.cyr` from the oracle's API. Regenerate them; never
+  edit them.
+- **Every public global carries the `TM_` prefix** (constants, enum members, tables); private
+  helpers use `_tm_`. A bundle shares one namespace with its consumers.
 - Build with `cyrius build`, not raw `cat file | cc5` — the manifest auto-resolves deps.
 - Source files only need project includes — stdlib auto-resolves from `cyrius.cyml`.
 - `var buf[N]` = N **bytes**, not N entries.
