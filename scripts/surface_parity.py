@@ -12,8 +12,9 @@ For each ported module it lists rust-old/src/<module>.rs's public items before
 - `impl Add for Struct`              -> `fn add(` inside `impl Tm<Struct> {` (the `+` operator)
 - `pub const X` (constants.rs)       -> `const TM_X =`
 - `TanmatraError::Variant`           -> `TM_ERR_<SNAKE>` in enum TmError
-Anything else needs an entry in EXCEPTIONS with its reason. Exits 1 on any item missing.
-Extend MODULES as each milestone lands.
+Anything else needs an entry in EXCEPTIONS with its reason. Every file under rust-old/src must be in
+MODULES, DEFERRED_MODULES or NOT_APPLICABLE_MODULES (the full diff, port plan M7). Exits 1 on any item
+missing or any file unaccounted.
 """
 import re, sys
 from pathlib import Path
@@ -34,6 +35,16 @@ MODULES = {
     "reaction": {"values": set(), "structs": {"NuclearReaction"}},
     "scattering": {"values": set(), "structs": set()},
     "optics": {"values": set(), "structs": {"SpectralLine"}},
+}
+
+# Whole Rust files the port does not carry, with why; their public items are counted, not checked.
+DEFERRED_MODULES = {
+    "bridge": "deferred: waits on its consumers (bijli, kimiya) being in Cyrius (port plan §1)",
+    "integration/soorat": "deferred: waits on soorat (port plan §1)",
+}
+NOT_APPLICABLE_MODULES = {
+    "lib": "n/a: module declarations and the prelude's re-exports; Cyrius has one flat namespace",
+    "integration/mod": "n/a: the `soorat` module declaration",
 }
 
 # Rust item -> why it has no direct Cyrius name.
@@ -123,5 +134,14 @@ for module, kinds in MODULES.items():
             missing += 1
             print(f"MISSING  {module}: {label}")
     print(f"{module:<12} {found}/{len(items)} Rust public items have a Cyrius counterpart")
+# Every file under rust-old/src must be ported, deferred or not applicable.
+known = set(MODULES) | set(DEFERRED_MODULES) | set(NOT_APPLICABLE_MODULES)
+for path in sorted((root / "rust-old/src").rglob("*.rs")):
+    mod = str(path.relative_to(root / "rust-old/src"))[:-3]
+    if mod not in known:
+        missing += 1
+        print(f"UNKNOWN  rust-old/src/{mod}.rs is not ported, deferred or marked not applicable")
+for mod, why in {**DEFERRED_MODULES, **NOT_APPLICABLE_MODULES}.items():
+    print(f"{mod:<12} {len(rust_items(mod))} Rust public items, not ported: {why}")
 print(f"surface parity: {missing} missing")
 sys.exit(1 if missing else 0)

@@ -7,7 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The Rust library and its behavior are unchanged, and `VERSION` stays 1.3.0 until the Cyrius port ships as 2.0.0.
+## [2.0.0] — 2026-11-08
+
+**tanmatra is a Cyrius library.** 2.0.0 ports the Rust crate 1.3.0, frozen in `rust-old/` as the parity oracle, to
+Cyrius 6.7.18. Every module is ported except the bridges and the soorat integration, which wait on their consumers
+(port plan §6).
+
+### Breaking
+- **The language.** The Rust crate is not the 2.0.0 API; it stays at 1.3.0 on crates.io. The Cyrius API follows Rust's names and behavior, with the mapping in the port plan §5:
+  - free functions keep their names, an enum's or packed value's methods are `snake(type)_method`, structs are `Tm<Name>` with an `impl`, and globals carry `TM_`;
+  - fallible functions return a value-form `Result` with `TM_ERR_*` codes;
+  - `Vec` returns fill caller arrays.
+- **Not carried over:**
+  - serde, except for the five exchange types, whose JSON M7 deferred until a Cyrius consumer needs it;
+  - the APIs deprecated in 1.3.0 (`corrected_ft_value`, `FrequencyStandard::quality_factor`);
+  - the `std`, `logging` and `full` features. `optics` remains, as `[features] optics` and the `[lib.optics]` profile.
+
+### Verified
+- **184,995 golden rows** from the oracle (`tests/golden/`) pass on x86_64 ELF, x86_64 PE and aarch64, in their tolerance classes.
+  - Almost all are bit-identical: every exact and arithmetic row, every reaction and scattering row (through bit-exact ports of Rust libm's sin, cos, log, hypot, round and ldexp), and every Einstein A outside one transition.
+  - One row is accepted under ADR 0007 (ganita `pow(-1, DBL_MAX)`).
+  - The measured class-C bounds and the per-target histograms are in `docs/development/port-parity.md`.
+- **The Rust tests.** All 498 Rust tests (476 unit, 20 integration, 2 doc) are accounted for in `docs/development/rust-test-ledger.md`, gated by `scripts/rust_test_ledger.py --check`: 420 ported, 1 partly, 25 not applicable (serde, deprecated), 52 deferred (bridge, soorat, exchange-type JSON).
+- **Surface parity:** 254/254 Rust public items have their Cyrius name, and every `rust-old/src` file is ported, deferred or not applicable (`scripts/surface_parity.py`).
+
+The milestone entries below record the port in the order it was done.
+
+### Port — M7 Release 2.0.0 (2026-11-08)
+- **The Rust-test ledger** (`scripts/rust_test_ledger.py`, which writes `docs/development/rust-test-ledger.md`; `--check` fails on drift or an unaccounted test).
+- **`tests/integration.tcyr`** ports the 16 non-serde tests of `rust-old/tests/integration.rs` and the two doc tests (51 assertions).
+- **Surface parity** is the full diff: every file under `rust-old/src` is ported, deferred (bridge, soorat) or not applicable (`lib.rs`'s declarations and prelude), and an unknown file fails it.
+- **JSON for the exchange types** stays deferred, as M7 allows: no Cyrius project depends on tanmatra yet, and cyrius issue `2026-11-07-derive-serialize-key-scan-reads-past-nul` is still open.
+- **VERSION 2.0.0**; the README describes the Cyrius library; CI runs the ledger check.
 
 ### Changed
 - **tests**: 8 assertions updated for lints new in clippy 1.99 (`assert_is_empty`, `manual_midpoint`), so the Rust oracle is clean on rustc 1.99.1 before the Cyrius port freezes it.
@@ -185,7 +216,7 @@ The Rust library and its behavior are unchanged, and `VERSION` stays 1.3.0 until
 - **Tests.** `tests/optics.tcyr` ports the 4 Rust tests (8 assertions); the serde round-trip is not carried over.
 - **Benches.** `tests/optics.bcyr`: `balmer_spd_401` 68.1 µs vs Rust's 12.4 µs, and `spectral_series_lyman_10` 14.1 µs vs 7.32 µs (Rust timed with Instant).
 - **CI** resolves with `--features optics` and checks the lockfile both ways. Surface parity is 4/4 for optics.
-- ⚠ **Known warnings.** prakash 2.15.1's bundle adds three compile warnings to the two optics test files, and tanmatra's code adds none. Two are raw-bit compares that prakash documents as intended (`lib/prakash.cyr:9213–9214`); the third is an unreachable `num_fft` from hisab, which the bundle doesn't include.
+- ⚠ **Known warnings, accepted until prakash fixes them.** prakash 2.15.1's bundle adds three compile warnings to the two optics test files, and tanmatra's code adds none. Two are raw-bit compares that prakash documents as intended (`lib/prakash.cyr:9213–9214`); the third is an unreachable `num_fft` from hisab, which the bundle doesn't include. Filed upstream as `prakash/docs/development/issues/2026-11-08-bundle-consumer-compile-warnings.md`, with two checked warning-free forms of the compare and the options for `num_fft`.
 
 ### Port — M4 Reactions & scattering (2026-11-08)
 - **Exact sin, cos and log** (`src/numerics.cyr`): `_tm_sin`, `_tm_cos` and `_tm_log` transcribe Rust libm 0.2.16's sin, cos, k_sin, k_cos, rem_pio2 and log operation for operation; arguments past 2²⁰·π/2 use the stdlib's Payne–Hanek reduction. The port-parity rule required this. By perturbation, 12 of the 16 transcendental M4 functions came out past K = 64: the Mott factor at β → 1, the form factor near its zeros, Klein–Nishina's closed form above γ = 1e-2, ξ = 1 + (≈ −1) at large A. `f64_ln` is x87 on x86_64 and a different fdlibm form on aarch64, and `f64_sin` skips Rust's |x| ≤ 9π/4 reductions. A 680,010-input sweep matches Rust libm on every input on x86_64 ELF, x86_64 PE and aarch64; the cost is about 30% over the builtins. `libm.tsv`'s sin, cos and log rows move to the new primitives at class A, and are exact on every target.

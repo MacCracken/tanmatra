@@ -10,11 +10,12 @@
 
 **tanmatra** (Sanskrit: subtle element) — Atomic and subatomic physics for AGNOS
 
-- **Type**: Flat library (Cyrius); a Rust → Cyrius port in progress
+- **Type**: Flat library (Cyrius), ported from the Rust crate 1.3.0 in 2.0.0
 - **License**: GPL-3.0-only
 - **Language**: Cyrius. The toolchain is pinned in `cyrius.cyml` `[package].cyrius`
 - **Version**: `VERSION` at the project root is the source of truth. Don't inline the number here
-- **Rust oracle**: tanmatra 1.3.0, frozen at `rust-old/`. It is the parity reference until the port completes
+- **Rust oracle**: tanmatra 1.3.0, frozen at `rust-old/`. It stays the parity reference until the deferred bridges
+  and integrations are ported or dropped (port plan §6)
 - **Plan of record**: [`docs/development/tanmatra-port-plan.md`](docs/development/tanmatra-port-plan.md)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md) · [First-Party Documentation](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-documentation.md)
 

@@ -7,7 +7,8 @@
 #
 # ⚠ prakash 2.15.1's bundle carries three compile warnings of its own (lib/prakash.cyr:9213 and
 # :9214, which prakash documents as intended raw-bit compares, and the unreachable hisab
-# `num_fft`). They are the only warnings in this compile; tanmatra's code adds none.
+# `num_fft`). They are the only warnings in this compile; tanmatra's code adds none. Accepted
+# until prakash fixes them; filed as prakash/docs/development/issues/2026-11-08-bundle-consumer-compile-warnings.md.
 
 include "tests/ulp.cyr"
 include "src/error.cyr"

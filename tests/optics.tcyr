@@ -4,7 +4,7 @@
 # The golden corpus separately checks every function against the oracle (tests/optics_parity.tcyr).
 #
 # Needs prakash: `cyrius deps --features optics`. prakash 2.15.1's bundle adds three compile
-# warnings of its own (see tests/optics_parity.tcyr).
+# warnings of its own, accepted until prakash fixes them (see tests/optics_parity.tcyr).
 
 include "tests/ulp.cyr"
 include "src/error.cyr"

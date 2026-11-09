@@ -1,0 +1,250 @@
+# integration.tcyr — rust-old/tests/integration.rs, the cross-module tests, ported one for one in
+# order (each test_group is the Rust test's name), plus the two Rust doc tests (the lib.rs quick
+# start and AtomicInstant's example). Not carried over (port plan §1): the four serde round-trips
+# serde_roundtrip_nucleus, serde_roundtrip_quark, serde_roundtrip_decay_mode and
+# serde_roundtrip_quantum_numbers. docs/development/rust-test-ledger.md accounts for every Rust test.
+
+include "tests/ulp.cyr"
+include "src/error.cyr"
+include "src/numerics.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
+include "src/decay_data.cyr"
+include "src/decay.cyr"
+include "src/atomic_data.cyr"
+include "src/atomic_config.cyr"
+include "src/atomic_hydrogenic.cyr"
+include "src/atomic_qed.cyr"
+include "src/reaction_data.cyr"
+include "src/reaction.cyr"
+include "src/scattering.cyr"
+include "src/timekeeping_data.cyr"
+include "src/timekeeping.cyr"
+
+alloc_init();
+
+# 1 if |a - b| < eps.
+#must_use
+fn near(a: f64, b: f64, eps: f64): i64 {
+    if (f64_abs(a - b) < eps) { return 1; }
+    return 0;
+}
+
+var _cfg: TmOrbitalFilling[20];
+
+# The short configuration of element z as a Str; the Ok is asserted.
+#must_use
+fn _short_config(z) {
+    var t, n = electron_configuration(z, &_cfg, 20);
+    assert_eq(is_ok(t), 1, "electron_configuration Ok");
+    return format_configuration_short(&_cfg, n, z);
+}
+
+fn _t_fe56_binding_energy_per_nucleon() {
+    test_group("fe56_binding_energy_per_nucleon");
+    var bea: f64 = nucleus_binding_energy_per_nucleon(nucleus_iron_56());
+    assert(bea > 8.4 && bea < 9.2, "Fe-56 B/A ~8.8 MeV");
+}
+
+fn _t_he4_binding_energy() {
+    test_group("he4_binding_energy");
+    var b: f64 = nucleus_binding_energy(nucleus_helium_4());
+    assert(b > 15.0 && b < 35.0, "He-4 B ~28.3 MeV (semi-empirical)");
+}
+
+fn _t_hydrogen_h_alpha() {
+    test_group("hydrogen_h_alpha");
+    var t1, v1 = spectral_line_nm(1, 2, 3);
+    assert_eq(is_ok(t1), 1, "spectral_line_nm Ok");
+    var lambda: f64 = v1;
+    assert(near(lambda, 656.1123, 0.001), "H-alpha (infinite mass) 656.112 nm");
+    var t2, v2 = spectral_line_vacuum_nm(1, 1, 2, 3);
+    assert_eq(is_ok(t2), 1, "spectral_line_vacuum_nm Ok");
+    var vacuum: f64 = v2;
+    assert(near(vacuum, 656.4696, 0.001), "H-alpha (reduced mass) 656.470 nm");
+}
+
+fn _t_c14_half_life_5700_years() {
+    test_group("c14_half_life_5700_years");
+    var found = 0;
+    var k = 0;
+    while (k < known_isotope_count()) {
+        var iso = known_isotope(k);
+        if (streq(iso.name, "C-14") == 1) {
+            found = 1;
+            var hl: f64 = iso.half_life_seconds;
+            var years: f64 = hl / ((365.2422 * 24.0) * 3600.0);
+            assert(near(years, 5700.0, 0.000000001), "C-14 half-life 5700 y (NUBASE2020)");
+        }
+        k = k + 1;
+    }
+    assert_eq(found, 1, "C-14 is tabulated");
+}
+
+fn _t_c14_decay_constant_value() {
+    test_group("c14_decay_constant_value");
+    var t_half: f64 = ((5730.0 * 365.25) * 24.0) * 3600.0;
+    var t, v = decay_constant(t_half);
+    assert_eq(is_ok(t), 1, "decay_constant Ok");
+    var lambda: f64 = v;
+    var expected: f64 = 0.000000000003836;
+    var rel_err: f64 = f64_abs(lambda - expected) / expected;
+    assert(rel_err < 0.01, "C-14 lambda ~3.836e-12 /s");
+}
+
+fn _t_alpha_decay_u238_to_th234() {
+    test_group("alpha_decay_u238_to_th234");
+    var t, d = alpha_decay(nucleus_uranium_238());
+    assert_eq(is_ok(t), 1, "alpha_decay Ok");
+    assert_eq(nucleus_z(d), 90, "Thorium Z");
+    assert_eq(nucleus_a(d), 234, "Thorium A");
+}
+
+fn _t_beta_minus_c14_to_n14() {
+    test_group("beta_minus_c14_to_n14");
+    var tn, c14 = nucleus_new(6, 14);
+    assert_eq(is_ok(tn), 1, "C-14 is a nucleus");
+    var t, d = beta_minus_decay(c14);
+    assert_eq(is_ok(t), 1, "beta_minus_decay Ok");
+    assert_eq(nucleus_z(d), 7, "Nitrogen Z");
+    assert_eq(nucleus_a(d), 14, "Nitrogen A");
+}
+
+fn _t_electron_config_iron() {
+    test_group("electron_config_iron");
+    var t, n = electron_configuration(26, &_cfg, 20);
+    assert_eq(is_ok(t), 1, "electron_configuration Ok");
+    var full = format_configuration(&_cfg, n);
+    assert_eq(str_eq_cstr(full, "1s2 2s2 2p6 3s2 3p6 4s2 3d6"), 1, "Fe full configuration");
+}
+
+fn _t_electron_config_iron_short() {
+    test_group("electron_config_iron_short");
+    assert_eq(str_eq_cstr(_short_config(26), "[Ar] 4s2 3d6"), 1, "Fe short configuration");
+}
+
+fn _t_electron_config_chromium_exception() {
+    test_group("electron_config_chromium_exception");
+    assert_eq(str_eq_cstr(_short_config(24), "[Ar] 4s1 3d5"), 1, "Cr is an Aufbau exception");
+}
+
+fn _t_dt_fusion_q_value() {
+    test_group("dt_fusion_q_value");
+    var r = dt_fusion();
+    var q: f64 = r.q_value_mev;
+    assert(near(q, 17.6, 0.1), "D-T Q ~17.6 MeV");
+}
+
+fn _t_proton_mass() {
+    test_group("proton_mass");
+    var m: f64 = TM_PROTON_MASS_MEV;
+    assert(near(m, 938.272, 0.001), "proton mass 938.272 MeV");
+}
+
+fn _t_fine_structure_value() {
+    test_group("fine_structure_value");
+    var expected: f64 = 1.0 / 137.036;
+    var a: f64 = TM_FINE_STRUCTURE;
+    assert(near(a, expected, 0.000001), "alpha ~1/137.036");
+}
+
+fn _t_magic_numbers_recognized() {
+    test_group("magic_numbers_recognized");
+    var magic: i64[7];
+    magic[0] = 2;
+    magic[1] = 8;
+    magic[2] = 20;
+    magic[3] = 28;
+    magic[4] = 50;
+    magic[5] = 82;
+    magic[6] = 126;
+    var k = 0;
+    while (k < 7) {
+        assert_eq(is_magic_number(magic[k]), 1, "a magic number");
+        k = k + 1;
+    }
+}
+
+fn _t_u238_decay_chain_starts_alpha() {
+    test_group("u238_decay_chain_starts_alpha");
+    var nuclei: i64[16];
+    var modes: i64[16];
+    var n = decay_chain(nucleus_uranium_238(), 10, &nuclei, &modes, 16);
+    assert(n > 0, "the chain is not empty");
+    assert_eq(modes[0], TM_DECAY_MODE_ALPHA, "the first decay is alpha");
+}
+
+fn _t_ionization_energies_first_36() {
+    test_group("ionization_energies_first_36");
+    var zs: i64[5];
+    var want: f64[5];
+    zs[0] = 1;
+    want[0] = 13.598;
+    zs[1] = 2;
+    want[1] = 24.587;
+    zs[2] = 10;
+    want[2] = 21.565;
+    zs[3] = 26;
+    want[3] = 7.902;
+    zs[4] = 36;
+    want[4] = 14.0;
+    var k = 0;
+    while (k < 5) {
+        var t, v = ionization_energy_ev(zs[k]);
+        assert_eq(is_ok(t), 1, "ionization_energy_ev Ok");
+        var ie: f64 = v;
+        assert(near(ie, want[k], 0.01), "NIST first ionization energy");
+        k = k + 1;
+    }
+}
+
+# lib.rs's Quick Start doc test.
+fn _t_doc_lib_quick_start() {
+    test_group("doc_lib_quick_start");
+    var bea: f64 = nucleus_binding_energy_per_nucleon(nucleus_iron_56());
+    assert(bea > 8.4 && bea < 9.2, "Fe-56 B/A ~8.8 MeV");
+    var t, v = spectral_line_nm(1, 2, 3);
+    assert_eq(is_ok(t), 1, "spectral_line_nm Ok");
+    var h_alpha: f64 = v;
+    assert(f64_abs(h_alpha - 656.3) < 1.0, "H-alpha ~656 nm");
+    assert_eq(str_eq_cstr(_short_config(26), "[Ar] 4s2 3d6"), 1, "Fe short configuration");
+}
+
+# AtomicInstant's doc test (timekeeping.rs).
+fn _t_doc_atomic_instant() {
+    test_group("doc_atomic_instant");
+    var t = TmAtomicInstant_new(1000000000, 500000000);
+    var s: f64 = t.tai_seconds();
+    assert(s > 999999999.0, "tai_seconds past 999,999,999");
+}
+
+# Runs every test and returns the failure count.
+fn main(): i64 {
+    _t_fe56_binding_energy_per_nucleon();
+    _t_he4_binding_energy();
+    _t_hydrogen_h_alpha();
+    _t_c14_half_life_5700_years();
+    _t_c14_decay_constant_value();
+    _t_alpha_decay_u238_to_th234();
+    _t_beta_minus_c14_to_n14();
+    _t_electron_config_iron();
+    _t_electron_config_iron_short();
+    _t_electron_config_chromium_exception();
+    _t_dt_fusion_q_value();
+    _t_proton_mass();
+    _t_fine_structure_value();
+    _t_magic_numbers_recognized();
+    _t_u238_decay_chain_starts_alpha();
+    _t_ionization_energies_first_36();
+    _t_doc_lib_quick_start();
+    _t_doc_atomic_instant();
+    return assert_summary();
+}
+
+var exit_code = main();
+sys_exit_group(exit_code);
