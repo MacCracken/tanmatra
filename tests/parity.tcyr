@@ -26,6 +26,8 @@ include "src/relativity.cyr"
 include "src/nucleus_data.cyr"
 include "src/nucleus.cyr"
 include "src/shell_model.cyr"
+include "src/decay_data.cyr"
+include "src/decay.cyr"
 
 alloc_init();
 
@@ -272,8 +274,8 @@ fn _par_constants(fp, fl): i64 {
 }
 
 # `libm::` rows: the Cyrius math function each libm call maps to (port plan §5).
-# libm::round needs the port's half-away helper (M5), and libm::ldexp the port's exp2
-# scaling (M2), so both are pending until then.
+# libm::round needs the port's half-away helper (M5), so it is pending until then; libm::ldexp
+# is the port's _tm_ldexp (M2), Rust libm's scalbn operation for operation.
 fn _par_libm(fp, fl): i64 {
     var x: f64 = _par_in(0);
     if (_par_eq(fp, fl, "libm::sqrt") == 1) { var r: f64 = f64_sqrt(x); _par_got_f(r); return 1; }
@@ -287,6 +289,7 @@ fn _par_libm(fp, fl): i64 {
     if (_par_eq(fp, fl, "libm::exp") == 1) { var r: f64 = f64_exp(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::log") == 1) { var r: f64 = f64_ln(x); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::sinh") == 1) { var r: f64 = ganita_f64_sinh(x); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::ldexp") == 1) { var r: f64 = _tm_ldexp(x, _par_in(1)); _par_got_f(r); return 1; }
     var y: f64 = _par_in(1);
     if (_par_eq(fp, fl, "libm::pow") == 1) { var r: f64 = ganita_f64_pow(x, y); _par_got_f(r); return 1; }
     if (_par_eq(fp, fl, "libm::hypot") == 1) { var r: f64 = _tm_hypot(x, y); _par_got_f(r); return 1; }
@@ -566,6 +569,84 @@ fn _par_nucleus(fp, fl): i64 {
     return 0;
 }
 
+# A TmDecayMode value's golden name ("DecayMode.Alpha").
+#must_use
+fn _par_decay_mode_name(m): i64 {
+    if (m == TM_DECAY_MODE_ALPHA) { return "DecayMode.Alpha"; }
+    if (m == TM_DECAY_MODE_BETA_MINUS) { return "DecayMode.BetaMinus"; }
+    if (m == TM_DECAY_MODE_BETA_PLUS) { return "DecayMode.BetaPlus"; }
+    if (m == TM_DECAY_MODE_ELECTRON_CAPTURE) { return "DecayMode.ElectronCapture"; }
+    if (m == TM_DECAY_MODE_GAMMA) { return "DecayMode.Gamma"; }
+    if (m == TM_DECAY_MODE_SPONTANEOUS_FISSION) { return "DecayMode.SpontaneousFission"; }
+    if (m == TM_DECAY_MODE_PROTON_EMISSION) { return "DecayMode.ProtonEmission"; }
+    if (m == TM_DECAY_MODE_NEUTRON_EMISSION) { return "DecayMode.NeutronEmission"; }
+    if (m == TM_DECAY_MODE_ISOMERIC_TRANSITION) { return "DecayMode.IsomericTransition"; }
+    return "DecayMode.?";
+}
+
+# Appends a Result<f64>: the float for Ok, `E:` for Err.
+fn _par_got_res_f(t, v) {
+    if (is_ok(t) == 1) { _par_got_f(v); } else { _par_got_err(v); }
+}
+
+# Appends a Result<Nucleus>: `i:Z i:A` for Ok, `E:` for Err.
+fn _par_got_res_n(t, v) {
+    if (is_ok(t) == 1) { _par_got_nuc(v); } else { _par_got_err(v); }
+}
+
+# `decay` rows: src/decay.cyr.
+fn _par_decay(fp, fl): i64 {
+    if (_par_eq(fp, fl, "known_isotopes") == 1) { _par_got_seq(known_isotope_count()); return 1; }
+    if (_par_eq(fp, fl, "known_isotopes[]") == 1) {
+        var iso = known_isotope(_par_in(0));
+        _par_got_nuc(iso.nucleus);
+        _par_got_s(iso.name, strlen(iso.name));
+        _par_got_f(iso.half_life_seconds);
+        _par_got_e(_par_decay_mode_name(iso.primary_decay));
+        _par_got_i(iso.is_isomer);
+        _par_got_f(iso.excitation_energy_kev);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "bateman_chain") == 1) {
+        var n = _par_in(0);
+        var lam = alloc(n * 8 + 8);
+        var pops = alloc(n * 8 + 8);
+        var k = 0;
+        while (k < n) { store64(lam + k * 8, _par_in(1 + k)); k = k + 1; }
+        var n0: f64 = _par_in(1 + n);
+        var t: f64 = _par_in(2 + n);
+        var got = bateman_chain(lam, n, n0, t, pops);
+        if (got < 0) { return 0 - 1; }
+        _par_got_seq(got);
+        k = 0;
+        while (k < got) { _par_got_f(load64(pops + k * 8)); k = k + 1; }
+        return 1;
+    }
+    var a: f64 = _par_in(0);
+    var b: f64 = _par_in(1);
+    if (_par_eq(fp, fl, "decay_constant") == 1) { var t, v = decay_constant(a); _par_got_res_f(t, v); return 1; }
+    if (_par_eq(fp, fl, "activity_bq") == 1) { var t, v = activity_bq(a, b); _par_got_res_f(t, v); return 1; }
+    if (_par_eq(fp, fl, "remaining_fraction") == 1) { _par_got_f(remaining_fraction(a, b)); return 1; }
+    var nuc = _tm_nuc(_par_in(0), _par_in(1));
+    if (_par_eq(fp, fl, "alpha_decay") == 1) { var t, v = alpha_decay(nuc); _par_got_res_n(t, v); return 1; }
+    if (_par_eq(fp, fl, "beta_minus_decay") == 1) { var t, v = beta_minus_decay(nuc); _par_got_res_n(t, v); return 1; }
+    if (_par_eq(fp, fl, "beta_plus_decay") == 1) { var t, v = beta_plus_decay(nuc); _par_got_res_n(t, v); return 1; }
+    if (_par_eq(fp, fl, "decay_chain") == 1) {
+        var ns[512];
+        var ms[512];
+        var cnt = decay_chain(nuc, _par_in(2), &ns, &ms, 64);
+        _par_got_seq(cnt);
+        var k2 = 0;
+        while (k2 < cnt && k2 < 64) {
+            _par_got_nuc(load64(&ns + k2 * 8));
+            _par_got_e(_par_decay_mode_name(load64(&ms + k2 * 8)));
+            k2 = k2 + 1;
+        }
+        return 1;
+    }
+    return 0;
+}
+
 # Routes a row to its module's dispatcher. 0 (pending) for a module with none yet.
 fn _par_dispatch(mp, ml, fp, fl): i64 {
     _par_got_n = 0;
@@ -574,6 +655,7 @@ fn _par_dispatch(mp, ml, fp, fl): i64 {
     if (_par_eq(mp, ml, "particle") == 1) { return _par_particle(fp, fl); }
     if (_par_eq(mp, ml, "relativity") == 1) { return _par_relativity(fp, fl); }
     if (_par_eq(mp, ml, "nucleus") == 1) { return _par_nucleus(fp, fl); }
+    if (_par_eq(mp, ml, "decay") == 1) { return _par_decay(fp, fl); }
     return 0;
 }
 
@@ -596,6 +678,8 @@ fn _par_c_bound(fp, fl): i64 {
     if (_par_eq(fp, fl, "libm::pow") == 1) { return 2; }
     # M2, by the port-parity rule: S = 0 (pow results nudged ±1 ulp on all 2,053 golden rows), 2 calls.
     if (_par_eq(fp, fl, "Nucleus::atomic_mass_amu") == 1) { return 2; }
+    # M2: the output is the pow result itself, so S = 1 with 1 call: K = 2·1·1 + 2.
+    if (_par_eq(fp, fl, "remaining_fraction") == 1) { return 4; }
     return 0 - 1;
 }
 

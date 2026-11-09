@@ -1,0 +1,371 @@
+# decay.cyr — radioactive decay: decay constants, activity, α/β daughters, decay chains and
+# the Bateman solution of sequential chains (port of rust-old/src/decay.rs).
+#
+# The isotope table and TmDecayMode are generated (decay_data.cyr, NUBASE2020). Errors follow
+# error.cyr: a fallible function returns a value-form Result whose Err payload is a TM_ERR_*
+# code. Rust's error strings only restate the caller's own input (the half-life, Z and A), so
+# no detail travels with the code; tm_error_message(code) gives the fixed text.
+
+# ── decay constant, remaining fraction, activity ────────────────────────────────────
+
+# λ = ln 2 / T½ in s⁻¹. Err(TM_ERR_INVALID_HALF_LIFE) unless T½ is positive and finite.
+# Mirrors `decay_constant`.
+#must_use
+fn decay_constant(half_life: f64): Result {
+    if (half_life <= 0.0 || _tm_is_finite(half_life) == 0) { return Err(TM_ERR_INVALID_HALF_LIFE); }
+    var lambda: f64 = _TM_LN2 / half_life;
+    return Ok(lambda);
+}
+
+# N(t)/N₀ = (1/2)^(t/T½); 0 when T½ isn't positive and finite, or t < 0. Mirrors
+# `remaining_fraction`.
+#must_use
+fn remaining_fraction(half_life: f64, time: f64): f64 {
+    if (half_life <= 0.0 || _tm_is_finite(half_life) == 0 || time < 0.0) { return 0.0; }
+    var r: f64 = ganita_f64_pow(0.5, time / half_life);
+    return r;
+}
+
+# Activity A = λN in Bq. Err(TM_ERR_INVALID_HALF_LIFE) as decay_constant. Mirrors `activity_bq`.
+#must_use
+fn activity_bq(half_life: f64, num_atoms: f64): Result {
+    var t, v = decay_constant(half_life);
+    if (is_err_result(t) == 1) { return Err(v); }
+    var lambda: f64 = v;
+    var a: f64 = lambda * num_atoms;
+    return Ok(a);
+}
+
+# ── daughters ───────────────────────────────────────────────────────────────────────
+
+# α decay (Z, A) → (Z − 2, A − 4). Err(TM_ERR_DECAY_NOT_POSSIBLE) when Z < 3, A < 5, or the
+# daughter would have A < Z. Mirrors `alpha_decay`.
+#must_use
+fn alpha_decay(parent): Result {
+    var z = nucleus_z(parent);
+    var a = nucleus_a(parent);
+    if (z < 3 || a < 5) { return Err(TM_ERR_DECAY_NOT_POSSIBLE); }
+    var t, v = nucleus_new(z - 2, a - 4);
+    if (is_err_result(t) == 1) { return Err(TM_ERR_DECAY_NOT_POSSIBLE); }
+    return Ok(v);
+}
+
+# β⁻ decay (Z, A) → (Z + 1, A). Err(TM_ERR_DECAY_NOT_POSSIBLE) when N = 0. Mirrors
+# `beta_minus_decay`.
+#must_use
+fn beta_minus_decay(parent): Result {
+    if (nucleus_n(parent) == 0) { return Err(TM_ERR_DECAY_NOT_POSSIBLE); }
+    var t, v = nucleus_new(nucleus_z(parent) + 1, nucleus_a(parent));
+    if (is_err_result(t) == 1) { return Err(TM_ERR_DECAY_NOT_POSSIBLE); }
+    return Ok(v);
+}
+
+# β⁺ decay or electron capture (Z, A) → (Z − 1, A). Err(TM_ERR_DECAY_NOT_POSSIBLE) when Z < 2.
+# Mirrors `beta_plus_decay`.
+#must_use
+fn beta_plus_decay(parent): Result {
+    if (nucleus_z(parent) < 2) { return Err(TM_ERR_DECAY_NOT_POSSIBLE); }
+    var t, v = nucleus_new(nucleus_z(parent) - 1, nucleus_a(parent));
+    if (is_err_result(t) == 1) { return Err(TM_ERR_DECAY_NOT_POSSIBLE); }
+    return Ok(v);
+}
+
+# ── the isotope table ───────────────────────────────────────────────────────────────
+
+# A known isotope (NUBASE2020): its nucleus word, its name (a NUL-terminated C string in the
+# static table), half-life (s; +∞ for no observed decay), dominant TmDecayMode, whether it is an
+# isomer (1/0), and its excitation energy (keV). Mirrors `Isotope`.
+struct TmIsotope {
+    nucleus: i64;
+    name: i64;
+    half_life_seconds: f64;
+    primary_decay: i64;
+    is_isomer: i64;
+    excitation_energy_kev: f64;
+}
+
+# How many isotopes are tabulated (114). With known_isotope(k) this mirrors the Vec
+# `known_isotopes` returns, without allocating.
+#must_use
+fn known_isotope_count(): i64 { return TM_ISOTOPE_COUNT; }
+
+# The k-th known isotope, in NUBASE table order; k must be in range.
+#must_use
+fn known_isotope(k): TmIsotope {
+    var iso: TmIsotope;
+    iso.nucleus = _tm_nuc(TM_ISOTOPE_Z[k], TM_ISOTOPE_A[k]);
+    iso.name = &TM_ISOTOPE_NAME_BYTES + TM_ISOTOPE_NAME_OFFSET[k];
+    iso.half_life_seconds = TM_ISOTOPE_HALF_LIFE_SECONDS[k];
+    iso.primary_decay = TM_ISOTOPE_PRIMARY_DECAY[k];
+    iso.is_isomer = 0;
+    if (TM_ISOTOPE_IS_ISOMER[k]) { iso.is_isomer = 1; }
+    iso.excitation_energy_kev = TM_ISOTOPE_EXCITATION_ENERGY_KEV[k];
+    return iso;
+}
+
+# ── decay chains ────────────────────────────────────────────────────────────────────
+
+# Follows the dominant branch from `start` for at most `max_steps` steps. It writes up to `cap`
+# steps (the decaying nucleus word and its TmDecayMode) to nuclei_out[] and modes_out[] (i64
+# arrays) and returns the number of steps. Mirrors the Vec `decay_chain` returns.
+# - Each step uses the first table entry for the current nucleus. After an isomeric transition
+#   (or γ), isomers are skipped, so the chain goes on from, or ends at, the ground state.
+# - It stops at a nuclide with no entry, one with no observed decay (+∞ half-life), fission or
+#   nucleon emission, or a decay that isn't possible.
+#must_use
+fn decay_chain(start, max_steps, nuclei_out, modes_out, cap): i64 {
+    var current = start;
+    var in_ground = 0;
+    var count = 0;
+    var step = 0;
+    while (step < max_steps) {
+        var k = 0;
+        var found = 0 - 1;
+        while (k < TM_ISOTOPE_COUNT && found < 0) {
+            if (_tm_nuc(TM_ISOTOPE_Z[k], TM_ISOTOPE_A[k]) == current) {
+                if (in_ground == 0 || TM_ISOTOPE_IS_ISOMER[k] == false) { found = k; }
+            }
+            k = k + 1;
+        }
+        if (found < 0) { return count; }
+        var hl: f64 = TM_ISOTOPE_HALF_LIFE_SECONDS[found];
+        if (_tm_is_finite(hl) == 0) { return count; }
+        var mode = TM_ISOTOPE_PRIMARY_DECAY[found];
+        var t = 0;
+        var d = 0;
+        if (mode == TM_DECAY_MODE_ALPHA) {
+            t, d = alpha_decay(current);
+        } elif (mode == TM_DECAY_MODE_BETA_MINUS) {
+            t, d = beta_minus_decay(current);
+        } elif (mode == TM_DECAY_MODE_BETA_PLUS || mode == TM_DECAY_MODE_ELECTRON_CAPTURE) {
+            t, d = beta_plus_decay(current);
+        } elif (mode == TM_DECAY_MODE_ISOMERIC_TRANSITION || mode == TM_DECAY_MODE_GAMMA) {
+            if (TM_ISOTOPE_IS_ISOMER[found] == false) { return count; }
+            t, d = Ok(current);
+        } else {
+            return count;
+        }
+        if (is_err_result(t) == 1) { return count; }
+        if (count < cap) {
+            store64(nuclei_out + count * 8, current);
+            store64(modes_out + count * 8, mode);
+        }
+        count = count + 1;
+        in_ground = 0;
+        if (mode == TM_DECAY_MODE_ISOMERIC_TRANSITION || mode == TM_DECAY_MODE_GAMMA) { in_ground = 1; }
+        current = d;
+        step = step + 1;
+    }
+    return count;
+}
+
+# ── Bateman ─────────────────────────────────────────────────────────────────────────
+
+# Element (i, j) of the n×n f64 matrix at m.
+#must_use
+fn _tm_mget(m, n, i, j): f64 {
+    var v: f64 = load64(m + (i * n + j) * 8);
+    return v;
+}
+
+# Sets element (i, j) of the n×n f64 matrix at m.
+fn _tm_mset(m, n, i, j, v: f64) {
+    store64(m + (i * n + j) * 8, v);
+}
+
+# The exact superdiagonal entry of exp(h·B) for the 2×2 block [[−a, a], [0, −b]]:
+# h·a·(e^(−ha) − e^(−hb)) / (hb − ha), through sinh where it would cancel (rust chain_superdiag).
+#must_use
+fn _tm_chain_superdiag(h: f64, a: f64, b: f64): f64 {
+    var ha: f64 = h * a;
+    var hb: f64 = h * b;
+    var d: f64 = 0.5 * (hb - ha);
+    if (f64_abs(d) > 0.5) {
+        var e1: f64 = f64_exp(-ha);
+        var e2: f64 = f64_exp(-hb);
+        var r: f64 = (ha * (e1 - e2)) / (hb - ha);
+        return r;
+    }
+    var sinhc: f64 = 1.0 + ((d * d) / 6.0);
+    if (f64_abs(d) >= 0.00000001) {
+        var sh: f64 = ganita_f64_sinh(d);
+        sinhc = sh / d;
+    }
+    var mid: f64 = f64_exp(-0.5 * (ha + hb));
+    var r2: f64 = (ha * mid) * sinhc;
+    return r2;
+}
+
+# Overwrites the diagonal and first superdiagonal of exp(scale·B) with their exact values
+# (rust fix_diagonals).
+fn _tm_fix_diagonals(e, x, scale: f64, n) {
+    var i = 0;
+    while (i < n) {
+        var xi: f64 = load64(x + i * 8);
+        _tm_mset(e, n, i, i, f64_exp(-scale * xi));
+        if (i + 1 < n) {
+            var xj: f64 = load64(x + (i + 1) * 8);
+            _tm_mset(e, n, i, i + 1, _tm_chain_superdiag(scale, xi, xj));
+        }
+        i = i + 1;
+    }
+}
+
+# (i, j) of the upper-triangular product p·q, Σ_{m=i..j} p_im q_mj, accumulated in Rust's order.
+# It walks p along row i and q down column j by pointer: the same products in the same order,
+# without a call per element.
+#must_use
+fn _tm_upper_dot(p, q, n, i, j): f64 {
+    var acc: f64 = 0.0;
+    var pp = p + (i * n + i) * 8;
+    var qq = q + (i * n + j) * 8;
+    var step = n * 8;
+    var m = i;
+    while (m <= j) {
+        var pv: f64 = load64(pp);
+        var qv: f64 = load64(qq);
+        acc = acc + (pv * qv);
+        pp = pp + 8;
+        qq = qq + step;
+        m = m + 1;
+    }
+    return acc;
+}
+
+# The first row of exp(B) for the chain matrix B (B_ii = −x_i, B_i,i+1 = x_i), written to row[]
+# (rust exp_chain_first_row): scaling and squaring, a 30-term Taylor series, and the diagonals
+# recomputed exactly after every squaring. `work` holds 4 n×n f64 matrices, zeroed.
+fn _tm_exp_chain_first_row(x, n, work, row) {
+    var nn8 = n * n * 8;
+    var a = work;
+    var e = work + nn8;
+    var term = work + 2 * nn8;
+    var next = work + 3 * nn8;
+
+    var max_x: f64 = 0.0;
+    var i = 0;
+    while (i < n) {
+        var v: f64 = load64(x + i * 8);
+        if (v > max_x) { max_x = v; }
+        i = i + 1;
+    }
+    var norm: f64 = 2.0 * max_x;
+    # Rust loops until the scaled norm is ≤ 1/2. For a finite norm that is ≤ 1025 squarings; the
+    # cap only stops a non-finite λt (an overflowed product), where Rust never terminates.
+    var squarings = 0;
+    while (squarings < 2200 && _tm_ldexp(norm, 0 - squarings) > 0.5) { squarings = squarings + 1; }
+    var h: f64 = _tm_ldexp(1.0, 0 - squarings);
+
+    i = 0;
+    while (i < n) {
+        var xi: f64 = load64(x + i * 8);
+        _tm_mset(a, n, i, i, -h * xi);
+        if (i + 1 < n) { _tm_mset(a, n, i, i + 1, h * xi); }
+        _tm_mset(e, n, i, i, 1.0);
+        _tm_mset(term, n, i, i, 1.0);
+        i = i + 1;
+    }
+
+    var k = 1;
+    while (k <= 30) {
+        var kf: f64 = f64_from(k);
+        i = 0;
+        while (i < n) {
+            var j = i;
+            while (j < n) {
+                var acc: f64 = _tm_upper_dot(term, a, n, i, j);
+                _tm_mset(next, n, i, j, acc / kf);
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        var max_term: f64 = 0.0;
+        var p = 0;
+        while (p < n * n) {
+            var tv: f64 = load64(next + p * 8);
+            var av: f64 = f64_abs(tv);
+            if (av > max_term) { max_term = av; }
+            var ev: f64 = load64(e + p * 8);
+            store64(e + p * 8, ev + tv);
+            p = p + 1;
+        }
+        var swap = term;
+        term = next;
+        next = swap;
+        if (max_term < 0.00000000000000000001) { k = 31; } else { k = k + 1; }
+    }
+    _tm_fix_diagonals(e, x, h, n);
+
+    var scale: f64 = h;
+    var s = 0;
+    var sq = next;
+    while (s < squarings) {
+        i = 0;
+        while (i < n) {
+            var j2 = i;
+            while (j2 < n) {
+                _tm_mset(sq, n, i, j2, _tm_upper_dot(e, e, n, i, j2));
+                j2 = j2 + 1;
+            }
+            i = i + 1;
+        }
+        var tmp = e;
+        e = sq;
+        sq = tmp;
+        scale = scale * 2.0;
+        _tm_fix_diagonals(e, x, scale, n);
+        s = s + 1;
+    }
+
+    var c = 0;
+    while (c < n) {
+        var v0: f64 = _tm_mget(e, n, 0, c);
+        if (v0 > 0.0) { store64(row + c * 8, v0); } else { store64(row + c * 8, 0.0); }
+        c = c + 1;
+    }
+}
+
+# Populations N_1..N_n at time t of the chain N_1 → N_2 → … → N_n, with only N_1(0) =
+# initial_atoms (the Bateman solution). It is the first row of exp(B), with B upper bidiagonal,
+# B_ii = −λ_i t and B_i,i+1 = λ_i t, by scaling and squaring with the diagonal and superdiagonal
+# recomputed exactly (Al-Mohy & Higham 2009; McCurdy, Ng & Parlett 1984).
+# - Exact for equal λ, independent of the time unit, accurate for trace daughters.
+# - `decay_constants` is n f64 λ values, s⁻¹: 0 is stable, and a negative or non-finite λ counts
+#   as 0. Writes n populations to out[].
+# - A non-positive or non-finite t returns the initial state.
+# - Returns n, or -1 when the n×n scratch can't be allocated (nothing is written).
+# Mirrors the Vec `bateman_chain` returns. The scratch is fl_alloc'd and freed, so repeated calls
+# don't grow the heap.
+#must_use
+fn bateman_chain(decay_constants, n, initial_atoms: f64, time_seconds: f64, out): i64 {
+    if (n <= 0) { return 0; }
+    var i = 0;
+    while (i < n) { store64(out + i * 8, 0.0); i = i + 1; }
+    if (time_seconds != time_seconds || time_seconds <= 0.0 || _tm_is_finite(time_seconds) == 0) {
+        store64(out, initial_atoms);
+        return n;
+    }
+    var bytes = (4 * n * n + 2 * n) * 8;
+    var work = fl_alloc(bytes);
+    if (work == 0) { return 0 - 1; }
+    memset(work, 0, bytes);
+    var x = work + 4 * n * n * 8;
+    var row = x + n * 8;
+    i = 0;
+    while (i < n) {
+        var l: f64 = load64(decay_constants + i * 8);
+        var xi: f64 = 0.0;
+        if (l > 0.0 && _tm_is_finite(l) == 1) { xi = l * time_seconds; }
+        store64(x + i * 8, xi);
+        i = i + 1;
+    }
+    _tm_exp_chain_first_row(x, n, work, row);
+    i = 0;
+    while (i < n) {
+        var v: f64 = load64(row + i * 8);
+        store64(out + i * 8, initial_atoms * v);
+        i = i + 1;
+    }
+    fl_free(work);
+    return n;
+}

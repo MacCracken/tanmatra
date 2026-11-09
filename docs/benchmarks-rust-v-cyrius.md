@@ -54,3 +54,19 @@ loop.
 level word through two calls for every level passed. It now reads only the 2j column and builds the word once, for
 the level found, giving 13.6 µs. All 14,160 J^π golden rows are still exact.
 
+## M2b Decay (2026-11-08)
+
+| Bench | Body | Rust | Cyrius | Cyrius / Rust |
+|---|---|---|---|---|
+| `decay/decay_chain_10` | the U-238 chain, at most 10 steps | 3.09 µs | 5.17 µs | 1.7× |
+| `decay/bateman_chain_3` | λ = (0.1, 0.05, 0), N₀ = 10⁶, t = 100 s | 1.01 µs | 5.42 µs | 5.4× |
+| `decay/bateman_u238_series_15` | the 15-member U-238 series at 1 y | 38.2 µs | 270.2 µs | 7.1× |
+| `decay/known_isotopes_all` (Rust: `known_isotopes_alloc`) | all 114 isotope records | 2.36 µs (builds a `Vec` with a `String` each) | 1.93 µs (reads the baked table by value) | 0.82× |
+
+The Cyrius U-238 series λ come from `decay_chain` and the isotope table, set up outside the timed loop; the Rust bench
+types the same 14 half-lives inline.
+
+**One optimization, measured.** Bateman's inner product first fetched both operands through a helper call per element:
+574 µs (15×) for the U-238 series, 6.80 µs for `bateman_chain_3`. It now walks the two pointers directly, giving the same
+products in the same order: 270 µs and 5.42 µs. All 28 Bateman golden rows give the same ulp histogram as before.
+

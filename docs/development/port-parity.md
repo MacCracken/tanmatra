@@ -158,6 +158,20 @@ fn _tm_hypot(xa: f64, ya: f64): f64 {
 600/600 bit-identical on x86_64 ELF, x86_64 PE and aarch64. With it, every four-momentum golden row is 0 ulp on all
 three targets, including the 638 ill-conditioned `invariant_mass` rows.
 
+## Class D: Bateman (M2)
+
+`bateman_chain` is a scaling-and-squaring matrix exponential: exp and sinh on the diagonals, then up to about 70
+squarings for the U-238 series at 4.463e9 y. Over its 28 golden rows (183 populations), on 2026-11-08:
+
+| Target | ulp histogram | max |
+|---|---|---|
+| x86_64 ELF and PE | 125 × 0, 29 × 1, 18 × 2, 11 × 3–16 | 9 ulp (about 2e-15 relative) |
+| aarch64 | all 0 | 0 |
+
+The difference is `f64_exp`: x87 on x86_64, and the fdlibm polyfill on aarch64, which is the same algorithm Rust
+libm uses. Class D's relative 1e-12 holds with about three decades to spare. `_tm_ldexp`, the squaring scale, is
+Rust libm's scalbn transcribed, and is bit-identical (306/306 `libm::ldexp` rows, class A, on every target).
+
 ## Rule for the class-C bounds of tanmatra's own functions
 
 Class C stays for formulas built on exp, ln, pow, sin, cos, tan or sinh, such as the shell term, Dirac, the
@@ -182,6 +196,8 @@ Never raise K_F after seeing the port's results. A row that fails K_F is a defec
 | Function | Milestone | S (method) | Class-C calls on its path | K_F |
 |---|---|---|---|---|
 | `Nucleus::atomic_mass_amu` | M2 | **0**: the two `pow` results (Z^2.39 and Z^5.35) nudged ±1 ulp on all 2,053 golden rows, with `nuclear_mass` taken from the golden corpus. The electron binding is about 10⁻⁶ of the mass, so a 1-ulp change never moves the output | 2 | **2** |
+
+| `remaining_fraction` | M2 | **1**: the output is the pow result itself, `pow(0.5, t / T½)` (t / T½ is a correctly rounded division on both sides) | 1 | **4** |
 
 The Myers–Swiatecki shell term turned out to be class B, not C. It uses only cbrt (correctly rounded on both
 sides) and arithmetic, and its 14,160 rows are bit-identical.

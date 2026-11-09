@@ -16,8 +16,9 @@ output = "build/tanmatra"
 #   ganita   — ganita_f64_cbrt / pow / sinh / tan / hypot (ganita 1.2.15 in the 6.7.18 bundle)
 #   overflow — the saturating `+|` / `-|` / `*|` operators (AtomicInstant)
 #   tagged / result — the value-form Option and Result
+#   freelist — fl_alloc / fl_free, so Bateman's scratch is returned, not leaked
 [deps]
-stdlib = ["syscalls", "string", "alloc", "str", "fmt", "io", "vec", "math", "ganita", "overflow", "tagged", "result"]
+stdlib = ["syscalls", "string", "alloc", "str", "fmt", "io", "vec", "math", "ganita", "overflow", "tagged", "result", "freelist"]
 
 # Test / bench / fuzz compiles only.
 [test]
@@ -43,4 +44,6 @@ modules = [
     "src/nucleus_data.cyr",
     "src/nucleus.cyr",
     "src/shell_model.cyr",
+    "src/decay_data.cyr",
+    "src/decay.cyr",
 ]

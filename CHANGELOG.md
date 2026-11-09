@@ -104,6 +104,29 @@ The Rust library and its behavior are unchanged, and `VERSION` stays 1.3.0 until
   - The harness takes up to 256 tokens per row.
   - Surface parity is 113/113.
 
+### Port — M2b Decay; M2 complete (2026-11-08)
+- **`src/decay_data.cyr`** (generated from `known_isotopes()`): `enum TmDecayMode`, and the 114 NUBASE2020 isotopes as baked columns (Z, A, half-life, mode, isomer flag, excitation energy) plus a NUL-terminated name table with offsets.
+- **`src/decay.cyr`:**
+  - `decay_constant`, `activity_bq` (Result, `TM_ERR_INVALID_HALF_LIFE`) and `remaining_fraction`;
+  - `alpha_decay`, `beta_minus_decay` and `beta_plus_decay` (Result, `TM_ERR_DECAY_NOT_POSSIBLE`);
+  - `known_isotope_count` + `known_isotope(k)` (`TmIsotope` by value);
+  - `decay_chain` into caller buffers, with the isomeric-transition ground-state rule;
+  - `bateman_chain`: the scaling-and-squaring matrix exponential, its scratch `fl_alloc`'d and freed.
+- **`src/numerics.cyr`** adds `_tm_ldexp`, Rust libm's scalbn transcribed (bit-identical on all 306 `libm::ldexp` rows, now class A rather than pending), plus `_tm_is_finite` and `_TM_LN2`.
+- **Golden.** `tests/golden/decay.tsv` holds 8,511 rows: every isotope, every half-life function with invalid inputs, the α/β grid, chains from every isotope, and the plan's Bateman cases (equal λ, 9-member, the U-238 series at 1 y / 10³ y / 4.463e9 y, the U-235 and Th-232 series). All pass on x86_64 ELF, x86_64 PE and aarch64:
+  - class A/B: 0 ulp;
+  - `remaining_fraction` (C, K = 4 by the port-parity rule): ≤ 1 ulp;
+  - Bateman (D): ≤ 9 ulp on x86_64 (x87 exp) and **0 on aarch64** (the fdlibm polyfill, Rust libm's algorithm).
+- **Tests.** `tests/decay.tcyr` ports 24 Rust tests (66 assertions); the 3 serde tests are not carried over.
+- **Benches:**
+  - `decay_chain_10`: 5.17 µs vs 3.09 µs;
+  - `bateman_chain_3`: 5.42 µs vs 1.01 µs;
+  - `bateman_u238_series_15`: 270 µs vs 38.2 µs, from 574 µs before the inner product walked pointers;
+  - `known_isotopes_all`: 1.93 µs vs 2.36 µs, faster than Rust's allocating `Vec`.
+- **Decided.** No error detail travels with a `TM_ERR_*` code: Rust's error strings only restate the caller's input.
+- **Tooling.** stdlib adds `freelist`; `[lib]` adds `decay_data` and `decay`; surface parity is 122/122.
+- **M2 is complete.** Next is M5 Timekeeping.
+
 ## [1.3.0] — 2026-09-16
 
 Repairs every finding of the 2026-09-16 math and data audit

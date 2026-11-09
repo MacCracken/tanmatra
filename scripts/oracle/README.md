@@ -43,7 +43,7 @@ python3 -I scripts/oracle/probe_tables.py .                                     
 | `relativity` | M1 | 6,768 | `src/m_relativity.rs` | — (no tables) |
 | `libm` | M0 step 8 | 11,549 | `src/m_libm.rs` | — |
 | `nucleus` (with the shell model) | M2 | 74,297 | `src/m_nucleus.rs` | `src/nucleus_data.cyr` (`src/t_nucleus.rs`, with the private-value proofs) |
-| decay | M2 | — | — | `decay_data.cyr` |
+| `decay` | M2 | 8,511 | `src/m_decay.rs` | `src/decay_data.cyr` (`src/t_decay.rs`) |
 | timekeeping | M5 | — | — | leap-second and frequency tables |
 | atomic | M3 | — | — | `atomic_data.cyr` |
 | reaction, scattering | M4 | — | — | `reaction_data.cyr` |
@@ -92,6 +92,9 @@ fn <TAB> class <TAB> inputs <TAB> outputs <TAB> note
 | `n:` | `Option::None`. `Some(x)` is just `x` |
 | `E:<Variant>` | `Err(TanmatraError::<Variant>)`. Only the variant is compared, not the payload |
 | `v:<len>` | a sequence of `len` elements, whose tokens follow in order. The harness knows each function's element shape |
+
+A function returning a `Vec` too long for one row (`known_isotopes`) gets a row with its length (`v:<len>`) plus one row
+per element under `fn[]` (`known_isotopes[]`), whose input is the index `i:k`.
 
 ### Comparison
 

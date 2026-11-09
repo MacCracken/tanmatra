@@ -1,0 +1,461 @@
+# decay.tcyr — the reference-value tests of rust-old/src/decay.rs, ported one for one
+# (each test_group is the Rust test's name). Not carried over (port plan §1): the three serde
+# round-trip tests serde_roundtrip_decay_mode, serde_roundtrip_isotope and
+# serde_roundtrip_isomeric_transition. The golden corpus separately checks every function bit
+# for bit on the M2 grid (tests/parity.tcyr).
+
+include "tests/ulp.cyr"
+include "src/error.cyr"
+include "src/numerics.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
+include "src/decay_data.cyr"
+include "src/decay.cyr"
+
+alloc_init();
+
+# 1 if |a - b| < eps.
+#must_use
+fn near(a: f64, b: f64, eps: f64): i64 {
+    if (f64_abs(a - b) < eps) { return 1; }
+    return 0;
+}
+
+# Nucleus::new(z, a).unwrap(): the nucleus word, aborting on Err.
+#must_use
+fn _new_nucleus(z, a): i64 {
+    var t, v = nucleus_new(z, a);
+    return result_unwrap(t, v);
+}
+
+# The index of the first known isotope named `name`, or -1:
+# rust `known_isotopes().iter().find(|i| i.name == name)`.
+#must_use
+fn _isotope_find(name): i64 {
+    var cnt = known_isotope_count();
+    var k = 0;
+    while (k < cnt) {
+        var iso: TmIsotope = known_isotope(k);
+        if (streq(iso.name, name) == 1) { return k; }
+        k = k + 1;
+    }
+    return 0 - 1;
+}
+
+# The index of the first of the cnt chain steps in nuclei[] whose nucleus is (z, a), or -1:
+# rust `chain.iter().find(|(n, _)| n.z() == z && n.a() == a)`.
+#must_use
+fn _chain_find(nuclei, cnt, z, a): i64 {
+    var k = 0;
+    while (k < cnt) {
+        var n = load64(nuclei + k * 8);
+        if (nucleus_z(n) == z && nucleus_a(n) == a) { return k; }
+        k = k + 1;
+    }
+    return 0 - 1;
+}
+
+fn _t_c14_half_life() {
+    test_group("c14_half_life");
+    var k = _isotope_find("C-14");
+    assert(k >= 0, "C-14 in known_isotopes");
+    if (k >= 0) {
+        var c14: TmIsotope = known_isotope(k);
+        var hl: f64 = c14.half_life_seconds;
+        var years: f64 = hl / ((365.2422 * 24.0) * 3600.0);
+        assert(f64_abs(years - 5700.0) < 0.000000001, "C-14 half-life 5700 years");
+    }
+}
+
+fn _t_u238_half_life() {
+    test_group("u238_half_life");
+    var k = _isotope_find("U-238");
+    assert(k >= 0, "U-238 in known_isotopes");
+    if (k >= 0) {
+        var u238: TmIsotope = known_isotope(k);
+        var hl: f64 = u238.half_life_seconds;
+        var years: f64 = hl / ((365.2422 * 24.0) * 3600.0);
+        assert(f64_abs(years - 4463000000.0) < 1.0, "U-238 half-life 4.463e9 years");
+    }
+}
+
+fn _t_decay_constant_c14() {
+    test_group("decay_constant_c14");
+    var t_half: f64 = ((5700.0 * 365.2422) * 24.0) * 3600.0;
+    var t, v = decay_constant(t_half);
+    assert_eq(is_ok(t), 1, "C-14 decay constant Ok");
+    var lambda: f64 = v;
+    assert(lambda > 0.0000000000038, "C-14 lambda > 3.8e-12 /s");
+    assert(lambda < 0.0000000000039, "C-14 lambda < 3.9e-12 /s");
+}
+
+fn _t_remaining_fraction_one_half_life() {
+    test_group("remaining_fraction_one_half_life");
+    var frac: f64 = remaining_fraction(100.0, 100.0);
+    assert(f64_abs(frac - 0.5) < 0.0000000001, "one half-life leaves 1/2");
+}
+
+fn _t_remaining_fraction_two_half_lives() {
+    test_group("remaining_fraction_two_half_lives");
+    var frac: f64 = remaining_fraction(100.0, 200.0);
+    assert(f64_abs(frac - 0.25) < 0.0000000001, "two half-lives leave 1/4");
+}
+
+fn _t_activity_bq_basic() {
+    test_group("activity_bq_basic");
+    var t_half: f64 = 1.0;
+    var n: f64 = 1000000.0;
+    var t, v = activity_bq(t_half, n);
+    assert_eq(is_ok(t), 1, "activity Ok");
+    var a: f64 = v;
+    var expected: f64 = _TM_LN2 * 1000000.0;
+    assert(f64_abs(a - expected) < 1.0, "A = ln 2 * 1e6 Bq");
+}
+
+fn _t_u238_alpha_decay_to_th234() {
+    test_group("u238_alpha_decay_to_th234");
+    var u238 = nucleus_uranium_238();
+    var t, daughter = alpha_decay(u238);
+    assert_eq(is_ok(t), 1, "U-238 alpha decay Ok");
+    assert_eq(nucleus_z(daughter), 90, "daughter Z = 90 (Th)");
+    assert_eq(nucleus_a(daughter), 234, "daughter A = 234");
+}
+
+fn _t_beta_minus_increases_z() {
+    test_group("beta_minus_increases_z");
+    var n = _new_nucleus(6, 14);
+    var t, daughter = beta_minus_decay(n);
+    assert_eq(is_ok(t), 1, "C-14 beta- decay Ok");
+    assert_eq(nucleus_z(daughter), 7, "daughter Z = 7 (N-14)");
+    assert_eq(nucleus_a(daughter), 14, "daughter A = 14");
+}
+
+fn _t_alpha_decay_h1_fails() {
+    test_group("alpha_decay_h1_fails");
+    var h1 = nucleus_hydrogen_1();
+    assert_eq(is_err_result(alpha_decay(h1)), 1, "H-1 alpha decay is Err");
+}
+
+fn _t_invalid_half_life() {
+    test_group("invalid_half_life");
+    var zero: f64 = 0.0;
+    var neg: f64 = -1.0;
+    var inf: f64 = _TM_INF;
+    var nan: f64 = _tm_nan();
+    assert_eq(is_err_result(decay_constant(zero)), 1, "T1/2 = 0 is Err");
+    assert_eq(is_err_result(decay_constant(neg)), 1, "T1/2 = -1 is Err");
+    assert_eq(is_err_result(decay_constant(inf)), 1, "T1/2 = +inf is Err");
+    assert_eq(is_err_result(decay_constant(nan)), 1, "T1/2 = NaN is Err");
+}
+
+fn _t_decay_chain_u238() {
+    test_group("decay_chain_u238");
+    var nuclei[512];
+    var modes[512];
+    var u238 = nucleus_uranium_238();
+    var cnt = decay_chain(u238, 5, &nuclei, &modes, 64);
+    assert(cnt != 0, "U-238 chain non-empty");
+    assert_eq(load64(&modes), TM_DECAY_MODE_ALPHA, "first step is alpha");
+    if (cnt > 1) {
+        var second = load64(&nuclei + 8);
+        assert_eq(nucleus_z(second), 90, "second step Z = 90 (Th-234)");
+        assert_eq(nucleus_a(second), 234, "second step A = 234");
+    }
+}
+
+fn _t_full_u238_chain_to_pb206() {
+    test_group("full_u238_chain_to_pb206");
+    var nuclei[512];
+    var modes[512];
+    var u238 = nucleus_uranium_238();
+    var cnt = decay_chain(u238, 20, &nuclei, &modes, 64);
+    assert(cnt >= 14, "U-238 chain should have at least 14 steps");
+    if (cnt > 0) {
+        var last = load64(&nuclei + (cnt - 1) * 8);
+        var mode = load64(&modes + (cnt - 1) * 8);
+        # The daughter as rust's `.ok()`: some = 1 for Some(d), 0 for None (the `_ => None` arm).
+        var some = 0;
+        var t = 0;
+        var d = 0;
+        if (mode == TM_DECAY_MODE_ALPHA) {
+            t, d = alpha_decay(last);
+            some = is_ok(t);
+        } elif (mode == TM_DECAY_MODE_BETA_MINUS) {
+            t, d = beta_minus_decay(last);
+            some = is_ok(t);
+        }
+        if (some == 1) {
+            assert_eq(nucleus_z(d), 82, "Chain should end at Pb (Z=82)");
+            assert_eq(nucleus_a(d), 206, "Chain should end at A=206");
+        }
+    }
+}
+
+fn _t_tc99m_is_isomer() {
+    test_group("tc99m_is_isomer");
+    var k = _isotope_find("Tc-99m");
+    assert(k >= 0, "Tc-99m in known_isotopes");
+    if (k >= 0) {
+        var tc99m: TmIsotope = known_isotope(k);
+        assert_eq(tc99m.is_isomer, 1, "Tc-99m is an isomer");
+        var ex: f64 = tc99m.excitation_energy_kev;
+        assert(ex > 140.0, "Tc-99m excitation > 140 keV");
+        assert_eq(tc99m.primary_decay, TM_DECAY_MODE_ISOMERIC_TRANSITION, "Tc-99m decays by IT");
+    }
+}
+
+fn _t_isotope_database_has_100_plus() {
+    test_group("isotope_database_has_100_plus");
+    assert(known_isotope_count() >= 100, "Expected 100+ isotopes");
+}
+
+fn _t_bateman_single_species_decay() {
+    test_group("bateman_single_species_decay");
+    var lam[256];
+    var out[256];
+    var ln2: f64 = _TM_LN2;
+    store64(&lam, ln2);
+    var cnt = bateman_chain(&lam, 1, 1000.0, 1.0, &out);
+    assert_eq(cnt, 1, "one population");
+    var p0: f64 = load64(&out);
+    assert(f64_abs(p0 - 500.0) < 1.0, "N = 500 after one half-life");
+}
+
+fn _t_bateman_two_species_chain() {
+    test_group("bateman_two_species_chain");
+    var lam[256];
+    var out[256];
+    var ln2: f64 = _TM_LN2;
+    var stable: f64 = 0.0;
+    store64(&lam, ln2);
+    store64(&lam + 8, stable);
+    var cnt = bateman_chain(&lam, 2, 1000.0, 1.0, &out);
+    assert_eq(cnt, 2, "two populations");
+    var p0: f64 = load64(&out);
+    var p1: f64 = load64(&out + 8);
+    assert(f64_abs(p0 - 500.0) < 1.0, "N_A = 500");
+    assert(f64_abs(p1 - 500.0) < 5.0, "N_B = 500");
+}
+
+fn _t_bateman_conservation() {
+    test_group("bateman_conservation");
+    var lam[256];
+    var out[256];
+    var l0: f64 = 0.1;
+    var l1: f64 = 0.05;
+    var l2: f64 = 0.0;
+    store64(&lam, l0);
+    store64(&lam + 8, l1);
+    store64(&lam + 16, l2);
+    var n0: f64 = 1000000.0;
+    var cnt = bateman_chain(&lam, 3, n0, 100.0, &out);
+    var total: f64 = 0.0;
+    var k = 0;
+    while (k < cnt) {
+        var p: f64 = load64(&out + k * 8);
+        total = total + p;
+        k = k + 1;
+    }
+    var rel_err: f64 = f64_abs(total - n0) / n0;
+    assert(rel_err < 0.01, "total atoms conserved");
+}
+
+fn _t_bateman_equal_decay_constants() {
+    test_group("bateman_equal_decay_constants");
+    var lam[256];
+    var out[256];
+    var l0: f64 = 0.1;
+    var l1: f64 = 0.1;
+    var l2: f64 = 0.0;
+    store64(&lam, l0);
+    store64(&lam + 8, l1);
+    store64(&lam + 16, l2);
+    var cnt = bateman_chain(&lam, 3, 1.0, 10.0, &out);
+    var e: f64 = f64_exp(-1.0);
+    var p0: f64 = load64(&out);
+    var p1: f64 = load64(&out + 8);
+    var p2: f64 = load64(&out + 16);
+    assert(f64_abs(p0 - e) < 0.000000000000001, "N_A = e^-1");
+    assert(f64_abs(p1 - e) < 0.00000000000001, "N_B = lambda t e^-lambda t");
+    assert(f64_abs(p2 - (1.0 - (2.0 * e))) < 0.00000000000001, "N_C = 1 - 2 e^-1");
+}
+
+fn _t_bateman_three_equal_constants() {
+    test_group("bateman_three_equal_constants");
+    var lam[256];
+    var out[256];
+    var l: f64 = 0.5;
+    store64(&lam, l);
+    store64(&lam + 8, l);
+    store64(&lam + 16, l);
+    var cnt = bateman_chain(&lam, 3, 1.0, 2.0, &out);
+    var e1: f64 = f64_exp(-1.0);
+    var expected: f64 = 0.5 * e1;
+    var p2: f64 = load64(&out + 16);
+    assert(f64_abs(p2 - expected) < 0.00000000000001, "N_3 = (lambda t)^2/2 e^-lambda t");
+}
+
+fn _t_bateman_independent_of_time_unit() {
+    test_group("bateman_independent_of_time_unit");
+    var lam[256];
+    var lam_y[256];
+    var a[256];
+    var b[256];
+    var yr: f64 = 31556926.0;
+    var i = 0;
+    while (i < 9) {
+        var fi: f64 = f64_from(i);
+        var l: f64 = 0.0000000000001 * (1.0 + fi);
+        var ly: f64 = l * yr;
+        store64(&lam + i * 8, l);
+        store64(&lam_y + i * 8, ly);
+        i = i + 1;
+    }
+    var t_s: f64 = 10000000000000.0;
+    var t_y: f64 = t_s / yr;
+    var na = bateman_chain(&lam, 9, 1.0, t_s, &a);
+    var nb = bateman_chain(&lam_y, 9, 1.0, t_y, &b);
+    var last: f64 = load64(&a + 64);
+    assert(f64_abs(last - 0.009377884) < 0.000000001, "last member 9.377884e-3");
+    # 1e-300 (0x01A56E1FC2F8F359): the floor of Rust's `x.abs().max(1e-300)`.
+    var floor: f64 = 0x01A56E1FC2F8F359;
+    var k = 0;
+    while (k < na && k < nb) {
+        var x: f64 = load64(&a + k * 8);
+        var y: f64 = load64(&b + k * 8);
+        var ax: f64 = f64_abs(x);
+        if (floor > ax) { ax = floor; }
+        assert(f64_abs(x - y) <= 0.000000000001 * ax, "seconds and years agree");
+        k = k + 1;
+    }
+}
+
+# The U-238 series member i's population after one year matches the 80-digit Bateman
+# reference r to 1e-5 relative: rust `(pops[i] - r).abs() / r < 1e-5`.
+#must_use
+fn _bateman_ref_ok(pops, i, r: f64): i64 {
+    var p: f64 = load64(pops + i * 8);
+    if (f64_abs(p - r) / r < 0.00001) { return 1; }
+    return 0;
+}
+
+fn _t_bateman_u238_series_trace_daughters() {
+    test_group("bateman_u238_series_trace_daughters");
+    var y: f64 = 365.2422 * 86400.0;
+    var d: f64 = 86400.0;
+    var m: f64 = 60.0;
+    var hl[256];
+    store64(&hl, 4468000000.0 * y);
+    store64(&hl + 8, 24.10 * d);
+    store64(&hl + 16, 1.159 * m);
+    store64(&hl + 24, 245500.0 * y);
+    store64(&hl + 32, 75400.0 * y);
+    store64(&hl + 40, 1600.0 * y);
+    store64(&hl + 48, 3.8235 * d);
+    store64(&hl + 56, 3.098 * m);
+    store64(&hl + 64, 27.06 * m);
+    store64(&hl + 72, 19.9 * m);
+    var po214: f64 = 0.0001643;
+    store64(&hl + 80, po214);
+    store64(&hl + 88, 22.2 * y);
+    store64(&hl + 96, 5.012 * d);
+    store64(&hl + 104, 138.376 * d);
+    var lam[256];
+    var k = 0;
+    while (k < 14) {
+        var h: f64 = load64(&hl + k * 8);
+        var l: f64 = _TM_LN2 / h;
+        store64(&lam + k * 8, l);
+        k = k + 1;
+    }
+    var stable: f64 = 0.0;
+    store64(&lam + 112, stable);
+    var pops[256];
+    var cnt = bateman_chain(&lam, 15, 1.0, y, &pops);
+    assert_eq(_bateman_ref_ok(&pops, 5, 0.0000000000000000000005124048), 1, "species 5 (Ra-226)");
+    assert_eq(_bateman_ref_ok(&pops, 6, 0.000000000000000000000000003193233), 1, "species 6 (Rn-222)");
+    assert_eq(_bateman_ref_ok(&pops, 11, 0.00000000000000000000000004804590), 1, "species 11 (Pb-210)");
+    assert_eq(_bateman_ref_ok(&pops, 13, 0.0000000000000000000000000001936077), 1, "species 13 (Po-210)");
+    assert_eq(_bateman_ref_ok(&pops, 14, 0.00000000000000000000000000005539648), 1, "species 14 (Pb-206)");
+}
+
+# How many isomeric-transition steps decay_chain(Nucleus::new(z, a), 30) takes.
+#must_use
+fn _it_step_count(z, a): i64 {
+    var nuclei[512];
+    var modes[512];
+    var cnt = decay_chain(_new_nucleus(z, a), 30, &nuclei, &modes, 64);
+    var it_steps = 0;
+    var k = 0;
+    while (k < cnt) {
+        if (load64(&modes + k * 8) == TM_DECAY_MODE_ISOMERIC_TRANSITION) { it_steps = it_steps + 1; }
+        k = k + 1;
+    }
+    return it_steps;
+}
+
+fn _t_decay_chain_stops_after_isomeric_transition() {
+    test_group("decay_chain_stops_after_isomeric_transition");
+    assert(_it_step_count(73, 180) <= 1, "Z=73 A=180: at most one IT step");
+    assert(_it_step_count(72, 178) <= 1, "Z=72 A=178: at most one IT step");
+    assert(_it_step_count(95, 242) <= 1, "Z=95 A=242: at most one IT step");
+}
+
+fn _t_bi212_follows_beta_branch() {
+    test_group("bi212_follows_beta_branch");
+    var nuclei[512];
+    var modes[512];
+    var cnt = decay_chain(_new_nucleus(90, 232), 20, &nuclei, &modes, 64);
+    var k = _chain_find(&nuclei, cnt, 83, 212);
+    assert(k >= 0, "Bi-212 in the Th-232 chain");
+    if (k >= 0) {
+        assert_eq(load64(&modes + k * 8), TM_DECAY_MODE_BETA_MINUS, "Bi-212 follows the beta- branch");
+    }
+    assert(_chain_find(&nuclei, cnt, 84, 212) >= 0, "Po-212 in the Th-232 chain");
+}
+
+fn _t_bateman_empty_chain() {
+    test_group("bateman_empty_chain");
+    var lam[256];
+    var out[256];
+    var cnt = bateman_chain(&lam, 0, 1000.0, 1.0, &out);
+    assert_eq(cnt, 0, "empty chain gives no populations");
+}
+
+# Runs every test and returns the failure count.
+fn main(): i64 {
+    _t_c14_half_life();
+    _t_u238_half_life();
+    _t_decay_constant_c14();
+    _t_remaining_fraction_one_half_life();
+    _t_remaining_fraction_two_half_lives();
+    _t_activity_bq_basic();
+    _t_u238_alpha_decay_to_th234();
+    _t_beta_minus_increases_z();
+    _t_alpha_decay_h1_fails();
+    _t_invalid_half_life();
+    _t_decay_chain_u238();
+    _t_full_u238_chain_to_pb206();
+    _t_tc99m_is_isomer();
+    _t_isotope_database_has_100_plus();
+    _t_bateman_single_species_decay();
+    _t_bateman_two_species_chain();
+    _t_bateman_conservation();
+    _t_bateman_equal_decay_constants();
+    _t_bateman_three_equal_constants();
+    _t_bateman_independent_of_time_unit();
+    _t_bateman_u238_series_trace_daughters();
+    _t_decay_chain_stops_after_isomeric_transition();
+    _t_bi212_follows_beta_branch();
+    _t_bateman_empty_chain();
+    return assert_summary();
+}
+
+var exit_code = main();
+if (exit_code > 0) { exit_code = 1; }
+sys_exit_group(exit_code);

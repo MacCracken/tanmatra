@@ -70,3 +70,45 @@ fn _tm_hypot(xa: f64, ya: f64): f64 {
     var r: f64 = z * f64_sqrt(sum);
     return r;
 }
+
+# ln 2 as Rust's core::f64::consts::LN_2 (0x3FE62E42FEFA39EF). The shortest round-trip decimal.
+const _TM_LN2 = 0.6931471805599453;
+
+# 1 if x is finite: neither ±∞ nor NaN (Rust f64::is_finite).
+#must_use
+fn _tm_is_finite(x: f64): i64 {
+    if ((_tm_bits(x) & 0x7FF0000000000000) == 0x7FF0000000000000) { return 0; }
+    return 1;
+}
+
+# x · 2^n as Rust libm 0.2.16's ldexp (its generic scalbn), operation for operation. Out of
+# range n prescales by 2^1023, or by 2^-969 (2^-1022 · 2^53), at most twice, so the final scale
+# 2^n is representable and the subnormal range rounds once. The final scale is built from bits.
+#must_use
+fn _tm_ldexp(x: f64, n): f64 {
+    var y: f64 = x;
+    var k = n;
+    var big: f64 = 0x7FE0000000000000;
+    var small: f64 = 0x0360000000000000;
+    if (k > 1023) {
+        y = y * big;
+        k = k - 1023;
+        if (k > 1023) {
+            y = y * big;
+            k = k - 1023;
+            if (k > 1023) { k = 1023; }
+        }
+    } elif (k < 0 - 1022) {
+        y = y * small;
+        k = k + 969;
+        if (k < 0 - 1022) {
+            y = y * small;
+            k = k + 969;
+            if (k < 0 - 1022) { k = 0 - 1022; }
+        }
+    }
+    var scale_bits = (1023 + k) << 52;
+    var scale: f64 = scale_bits;
+    var r: f64 = y * scale;
+    return r;
+}

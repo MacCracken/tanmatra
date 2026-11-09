@@ -28,6 +28,7 @@ MODULES = {
     "particle": {"values": {"Quark", "Lepton", "Boson", "FundamentalForce"}, "structs": set()},
     "relativity": {"values": set(), "structs": {"FourMomentum"}},
     "nucleus": {"values": {"Nucleus", "ShellLevel"}, "structs": {"SuperallowedDecay"}},
+    "decay": {"values": set(), "structs": set()},
 }
 
 # Rust item -> why it has no direct Cyrius name.
@@ -36,6 +37,7 @@ EXCEPTIONS = {
     "shell_model_levels": "a slice: shell_model_level_count + shell_model_level(k)",
     "superallowed_ft_values": "a Vec: superallowed_ft_value_count + superallowed_ft_value(k)",
     "corrected_ft_value": "deprecated in 1.3.0, not carried over (port plan §1)",
+    "known_isotopes": "a Vec: known_isotope_count + known_isotope(k), read from the baked table",
 }
 
 

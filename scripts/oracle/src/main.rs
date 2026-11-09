@@ -20,12 +20,14 @@
 mod cyr;
 mod grids;
 mod m_constants;
+mod m_decay;
 mod m_libm;
 mod m_nucleus;
 mod m_particle;
 mod m_relativity;
 mod rust_src;
 mod t_constants;
+mod t_decay;
 mod t_nucleus;
 mod t_particle;
 mod tsv;
@@ -39,6 +41,7 @@ use std::process::ExitCode;
 fn golden_modules() -> Vec<tsv::Module> {
     vec![
         m_constants::emit(),
+        m_decay::emit(),
         m_libm::emit(),
         m_nucleus::emit(),
         m_particle::emit(),
@@ -82,6 +85,7 @@ fn cyrius_outputs(root: &Path, prov: &str) -> Result<Vec<Output>, String> {
         "src/nucleus_data.cyr",
         t_nucleus::emit(&rust("nucleus")?, prov)?,
     );
+    push("src/decay_data.cyr", t_decay::emit(&rust("decay")?, prov)?);
     Ok(out)
 }
 

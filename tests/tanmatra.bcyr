@@ -14,6 +14,8 @@ include "src/relativity.cyr"
 include "src/nucleus_data.cyr"
 include "src/nucleus.cyr"
 include "src/shell_model.cyr"
+include "src/decay_data.cyr"
+include "src/decay.cyr"
 
 # A sink the timed loops write to, so their results are used.
 var _bench_sink = 0;
@@ -145,6 +147,73 @@ fn bench_shell_occupation_126() {
     }
 }
 
+# Buffers for the decay benches, built once.
+var _bench_chain_n = 0;
+var _bench_chain_m = 0;
+var _bench_lam3 = 0;
+var _bench_u238 = 0;
+var _bench_u238_n = 0;
+var _bench_pops = 0;
+
+# Builds the decay benches' inputs: the λ of rust bateman_chain_3, and the U-238 series λ from
+# decay_chain(U-238) and the isotope table (15 members with the stable Pb-206, as the Rust
+# bench's list), so no half-life is re-typed here.
+fn bench_build_decay() {
+    _bench_chain_n = alloc(64 * 8);
+    _bench_chain_m = alloc(64 * 8);
+    _bench_lam3 = alloc(3 * 8);
+    store64(_bench_lam3, 0.1);
+    store64(_bench_lam3 + 8, 0.05);
+    store64(_bench_lam3 + 16, 0.0);
+    _bench_pops = alloc(64 * 8);
+    _bench_u238 = alloc(64 * 8);
+    var cnt = decay_chain(nucleus_uranium_238(), 50, _bench_chain_n, _bench_chain_m, 64);
+    var k = 0;
+    while (k < cnt) {
+        var nk = load64(_bench_chain_n + k * 8);
+        var j = 0;
+        var hl: f64 = 0.0;
+        var done = 0;
+        while (j < known_isotope_count() && done == 0) {
+            var iso = known_isotope(j);
+            if (iso.nucleus == nk) { hl = iso.half_life_seconds; done = 1; }
+            j = j + 1;
+        }
+        var t, lam = decay_constant(hl);
+        store64(_bench_u238 + k * 8, lam);
+        k = k + 1;
+    }
+    store64(_bench_u238 + cnt * 8, 0.0);
+    _bench_u238_n = cnt + 1;
+}
+
+# decay/decay_chain_10: the U-238 chain, at most 10 steps.
+fn bench_decay_chain_10() {
+    _bench_sink = decay_chain(nucleus_uranium_238(), 10, _bench_chain_n, _bench_chain_m, 64);
+}
+
+# decay/bateman_chain_3: λ = (0.1, 0.05, 0) s⁻¹, N₀ = 10⁶, t = 100 s.
+fn bench_bateman_chain_3() {
+    _bench_sink = bateman_chain(_bench_lam3, 3, 1000000.0, 100.0, _bench_pops);
+}
+
+# decay/bateman_u238_series_15: the 15-member U-238 series at t = 1 y (365.2422 d).
+fn bench_bateman_u238_series_15() {
+    var y: f64 = 365.2422 * 86400.0;
+    _bench_sink = bateman_chain(_bench_u238, _bench_u238_n, 1.0, y, _bench_pops);
+}
+
+# decay/known_isotopes_all (Rust: decay/known_isotopes_alloc): every isotope record once.
+# Rust builds a Vec of 114 Isotopes with a String each; Cyrius reads the baked table by value.
+fn bench_known_isotopes_all() {
+    var k = 0;
+    while (k < known_isotope_count()) {
+        var iso = known_isotope(k);
+        _bench_sink = iso.nucleus;
+        k = k + 1;
+    }
+}
+
 # Times `rounds` calls of a body fn per batch, over `batches` batches.
 fn run(name, fp, rounds, batches) {
     var b = bench_new(name);
@@ -170,6 +239,11 @@ fn main(): i64 {
     run("nucleus/binding_energy_shell_corrected_1000", &bench_binding_energy_shell_corrected_1000, 5, 20);
     run("nucleus/ground_state_spin_parity_100", &bench_ground_state_spin_parity_100, 50, 20);
     run("nucleus/shell_occupation_126", &bench_shell_occupation_126, 50, 20);
+    bench_build_decay();
+    run("decay/decay_chain_10", &bench_decay_chain_10, 200, 20);
+    run("decay/bateman_chain_3", &bench_bateman_chain_3, 200, 20);
+    run("decay/bateman_u238_series_15", &bench_bateman_u238_series_15, 5, 20);
+    run("decay/known_isotopes_all", &bench_known_isotopes_all, 200, 20);
     return 0;
 }
 
