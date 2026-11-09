@@ -1,0 +1,190 @@
+# relativity.cyr — special relativity: four-momentum, Lorentz factor, velocity addition
+# (port of rust-old/src/relativity.rs).
+#
+# Every expression keeps Rust's operation order, so the golden rows are class B: bit-identical
+# expected, ≤ 2 ulp allowed. |p| goes through _tm_hypot, Rust libm's hypot reproduced
+# exactly. The four-momentum functions are ill-conditioned for p ≫ m, so an inexact hypot
+# would break them (docs/development/port-parity.md).
+
+# A four-momentum (E, px, py, pz) in MeV and MeV/c, natural units. A 32-byte value: it is
+# returned by value and passed by address.
+struct TmFourMomentum {
+    energy: f64;
+    px: f64;
+    py: f64;
+    pz: f64;
+}
+
+impl TmFourMomentum {
+    # A four-momentum from its components. Mirrors `FourMomentum::new`.
+    #must_use
+    fn new(energy: f64, px: f64, py: f64, pz: f64): TmFourMomentum {
+        var p: TmFourMomentum;
+        p.energy = energy;
+        p.px = px;
+        p.py = py;
+        p.pz = pz;
+        return p;
+    }
+
+    # A particle at rest: E = mc², p = 0. Mirrors `FourMomentum::at_rest`.
+    #must_use
+    fn at_rest(mass_mev: f64): TmFourMomentum {
+        var p: TmFourMomentum;
+        p.energy = mass_mev;
+        p.px = 0.0;
+        p.py = 0.0;
+        p.pz = 0.0;
+        return p;
+    }
+
+    # A particle of mass m moving along z with momentum p: E = √(m² + p²). Mirrors
+    # `FourMomentum::from_mass_and_momentum`.
+    #must_use
+    fn from_mass_and_momentum(mass_mev: f64, p_mev: f64): TmFourMomentum {
+        var r: TmFourMomentum;
+        r.energy = f64_sqrt((mass_mev * mass_mev) + (p_mev * p_mev));
+        r.px = 0.0;
+        r.py = 0.0;
+        r.pz = p_mev;
+        return r;
+    }
+
+    # |p| = hypot(hypot(px, py), pz). Mirrors `FourMomentum::momentum_magnitude`.
+    #must_use
+    fn momentum_magnitude(self): f64 {
+        var pxy: f64 = _tm_hypot(self.px, self.py);
+        var p: f64 = _tm_hypot(pxy, self.pz);
+        return p;
+    }
+
+    # The invariant mass m = √((E − p)(E + p)): the factored form avoids E² − p²
+    # cancelling when E ≫ m. 0 for a spacelike vector (numerical noise for a massless
+    # one). Mirrors `FourMomentum::invariant_mass`.
+    #must_use
+    fn invariant_mass(self): f64 {
+        var p: f64 = self.momentum_magnitude();
+        var e: f64 = self.energy;
+        var m_sq: f64 = (e - p) * (e + p);
+        if (m_sq < 0.0) { return 0.0; }
+        var m: f64 = f64_sqrt(m_sq);
+        return m;
+    }
+
+    # β = |p| / E; 0 when E ≤ 0. Mirrors `FourMomentum::beta`.
+    #must_use
+    fn beta(self): f64 {
+        if (self.energy <= 0.0) { return 0.0; }
+        var p: f64 = self.momentum_magnitude();
+        var b: f64 = p / self.energy;
+        return b;
+    }
+
+    # γ = E / m; +∞ for a massless particle. Mirrors `FourMomentum::gamma`.
+    #must_use
+    fn gamma(self): f64 {
+        var mass: f64 = self.invariant_mass();
+        if (mass <= 0.0) { return _TM_INF; }
+        var g: f64 = self.energy / mass;
+        return g;
+    }
+
+    # Kinetic energy T = E − m = p² / (E + m): the second form doesn't cancel at low
+    # momentum. 0 when E + m ≤ 0. Mirrors `FourMomentum::kinetic_energy`.
+    #must_use
+    fn kinetic_energy(self): f64 {
+        var m: f64 = self.invariant_mass();
+        var p: f64 = self.momentum_magnitude();
+        var den: f64 = self.energy + m;
+        if (den <= 0.0) { return 0.0; }
+        var t: f64 = (p * p) / den;
+        return t;
+    }
+
+    # Component-wise sum, so `a + b` adds two four-momenta. Mirrors `impl Add for
+    # FourMomentum`.
+    #must_use
+    fn add(self, rhs: TmFourMomentum): TmFourMomentum {
+        var s: TmFourMomentum;
+        s.energy = self.energy + rhs.energy;
+        s.px = self.px + rhs.px;
+        s.py = self.py + rhs.py;
+        s.pz = self.pz + rhs.pz;
+        return s;
+    }
+}
+
+# The Lorentz factor γ = 1/√(1 − β²), symmetric in β; +∞ for |β| ≥ 1. The factored form
+# (1 − |β|)(1 + |β|) keeps full precision as β → 1. Mirrors `lorentz_gamma`.
+#must_use
+fn lorentz_gamma(beta: f64): f64 {
+    var b: f64 = f64_abs(beta);
+    if (b >= 1.0) { return _TM_INF; }
+    var g: f64 = 1.0 / f64_sqrt((1.0 - b) * (1.0 + b));
+    return g;
+}
+
+# β from γ: √((γ − 1)(γ + 1)) / γ; 0 for γ ≤ 1, 1 for γ = +∞. Mirrors `gamma_to_beta`.
+#must_use
+fn gamma_to_beta(gamma: f64): f64 {
+    if (gamma <= 1.0) { return 0.0; }
+    if (_tm_is_inf(gamma) == 1) { return 1.0; }
+    var b: f64 = f64_sqrt((gamma - 1.0) * (gamma + 1.0)) / gamma;
+    return b;
+}
+
+# Relativistic velocity addition (β₁ + β₂) / (1 + β₁β₂). NaN when |β| > 1 or the
+# denominator is 0 (β₁ = −β₂ = ±1). Mirrors `velocity_addition`.
+#must_use
+fn velocity_addition(beta1: f64, beta2: f64): f64 {
+    var denom: f64 = 1.0 + (beta1 * beta2);
+    if (f64_abs(beta1) > 1.0 || f64_abs(beta2) > 1.0 || denom == 0.0) { return _tm_nan(); }
+    var v: f64 = (beta1 + beta2) / denom;
+    return v;
+}
+
+# Total energy E = √(m² + p²), MeV. Mirrors `relativistic_energy`.
+#must_use
+fn relativistic_energy(mass_mev: f64, momentum_mev: f64): f64 {
+    var e: f64 = f64_sqrt((mass_mev * mass_mev) + (momentum_mev * momentum_mev));
+    return e;
+}
+
+# Momentum from kinetic energy, p = √(T² + 2Tm), MeV/c. Mirrors `relativistic_momentum`.
+#must_use
+fn relativistic_momentum(mass_mev: f64, kinetic_energy_mev: f64): f64 {
+    var t: f64 = kinetic_energy_mev;
+    var p: f64 = f64_sqrt((t * t) + ((2.0 * t) * mass_mev));
+    return p;
+}
+
+# The de Broglie wavelength λ = 2πħc / (pc) in fm; +∞ for p ≤ 0. Mirrors
+# `de_broglie_wavelength_fm`.
+#must_use
+fn de_broglie_wavelength_fm(momentum_mev: f64): f64 {
+    if (momentum_mev <= 0.0) { return _TM_INF; }
+    var l: f64 = ((2.0 * _TM_PI) * TM_HBAR_C_MEV_FM) / momentum_mev;
+    return l;
+}
+
+# β = v / c, with v in m/s. Mirrors `velocity_to_beta`.
+#must_use
+fn velocity_to_beta(velocity_m_per_s: f64): f64 {
+    var b: f64 = velocity_m_per_s / TM_C;
+    return b;
+}
+
+# v = βc, in m/s. Mirrors `beta_to_velocity`.
+#must_use
+fn beta_to_velocity(beta: f64): f64 {
+    var v: f64 = beta * TM_C;
+    return v;
+}
+
+# The invariant mass of a two-particle system, |p1 + p2|. Mirrors `invariant_mass_two_body`.
+#must_use
+fn invariant_mass_two_body(p1: TmFourMomentum, p2: TmFourMomentum): f64 {
+    var total: TmFourMomentum = p1 + p2;
+    var m: f64 = total.invariant_mass();
+    return m;
+}

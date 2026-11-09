@@ -1,0 +1,196 @@
+# relativity.tcyr — the reference-value tests of rust-old/src/relativity.rs, ported one for
+# one (each test_group is the Rust test's name). serde_roundtrip_four_momentum doesn't port
+# (port plan §1). The golden corpus separately checks every function bit for bit on the M1
+# grid (tests/parity.tcyr).
+
+include "tests/ulp.cyr"
+include "src/error.cyr"
+include "src/numerics.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
+
+alloc_init();
+
+# 1 if |a - b| < eps.
+#must_use
+fn near(a: f64, b: f64, eps: f64): i64 {
+    if (f64_abs(a - b) < eps) { return 1; }
+    return 0;
+}
+
+fn _t_particle_at_rest() {
+    test_group("particle_at_rest");
+    var p = TmFourMomentum_at_rest(938.272);
+    assert(near(p.invariant_mass(), 938.272, 0.001), "m");
+    assert(f64_abs(p.beta()) < 0.0000000001, "beta 0");
+    assert(near(p.gamma(), 1.0, 0.0000000001), "gamma 1");
+    assert(f64_abs(p.kinetic_energy()) < 0.001, "T 0");
+}
+
+fn _t_massless_particle() {
+    test_group("massless_particle");
+    var photon = TmFourMomentum_new(1000.0, 0.0, 0.0, 1000.0);
+    assert(photon.invariant_mass() < 0.0000000001, "m 0");
+    assert(near(photon.beta(), 1.0, 0.0000000001), "beta 1");
+}
+
+fn _t_lorentz_gamma_at_rest() {
+    test_group("lorentz_gamma_at_rest");
+    assert(near(lorentz_gamma(0.0), 1.0, 0.0000000001), "gamma(0) = 1");
+}
+
+fn _t_lorentz_gamma_half_c() {
+    test_group("lorentz_gamma_half_c");
+    var expected: f64 = 1.0 / f64_sqrt(0.75);
+    assert(near(lorentz_gamma(0.5), expected, 0.0000000001), "gamma(0.5)");
+}
+
+fn _t_lorentz_gamma_at_c() {
+    test_group("lorentz_gamma_at_c");
+    assert_eq(_tm_is_inf(lorentz_gamma(1.0)), 1, "gamma(1) infinite");
+}
+
+fn _t_gamma_beta_roundtrip() {
+    test_group("gamma_beta_roundtrip");
+    var beta: f64 = 0.8;
+    var back: f64 = gamma_to_beta(lorentz_gamma(beta));
+    assert(near(beta, back, 0.0000000001), "beta -> gamma -> beta");
+}
+
+fn _t_velocity_addition_subluminal() {
+    test_group("velocity_addition_subluminal");
+    assert(near(velocity_addition(0.5, 0.5), 0.8, 0.0000000001), "0.5c + 0.5c = 0.8c");
+}
+
+fn _t_velocity_addition_with_c() {
+    test_group("velocity_addition_with_c");
+    assert(near(velocity_addition(0.9, 1.0), 1.0, 0.0000000001), "v + c = c");
+}
+
+fn _t_energy_momentum_relation() {
+    test_group("energy_momentum_relation");
+    var mass: f64 = 938.272;
+    var momentum: f64 = 500.0;
+    var check: f64 = f64_sqrt((mass * mass) + (momentum * momentum));
+    assert(near(relativistic_energy(mass, momentum), check, 0.000001), "E^2 = m^2 + p^2");
+}
+
+fn _t_momentum_from_kinetic_energy() {
+    test_group("momentum_from_kinetic_energy");
+    var expected: f64 = f64_sqrt((1.511 * 1.511) - (0.511 * 0.511));
+    assert(near(relativistic_momentum(0.511, 1.0), expected, 0.001), "1 MeV electron");
+}
+
+fn _t_de_broglie_proton() {
+    test_group("de_broglie_proton");
+    var lambda: f64 = de_broglie_wavelength_fm(1000.0);
+    assert(lambda > 1.0 && lambda < 2.0, "1 GeV/c proton ~1.24 fm");
+}
+
+fn _t_invariant_mass_two_body_at_rest() {
+    test_group("invariant_mass_two_body_at_rest");
+    var p1 = TmFourMomentum_at_rest(938.272);
+    var p2 = TmFourMomentum_at_rest(938.272);
+    assert(near(invariant_mass_two_body(p1, p2), 2.0 * 938.272, 0.01), "M = 2m");
+}
+
+fn _t_four_momentum_add() {
+    test_group("four_momentum_add");
+    var p1 = TmFourMomentum_new(100.0, 10.0, 0.0, 50.0);
+    var p2 = TmFourMomentum_new(200.0, -10.0, 5.0, 30.0);
+    var total: TmFourMomentum = p1 + p2;
+    var eps: f64 = 0.0000000001;
+    assert(near(total.energy, 300.0, eps), "E");
+    assert(f64_abs(total.px) < eps, "px");
+    assert(near(total.py, 5.0, eps), "py");
+    assert(near(total.pz, 80.0, eps), "pz");
+}
+
+fn _t_from_mass_and_momentum() {
+    test_group("from_mass_and_momentum");
+    var p = TmFourMomentum_from_mass_and_momentum(938.272, 500.0);
+    assert(p.energy > 938.272, "E > m");
+    assert(near(p.pz, 500.0, 0.0000000001), "pz");
+    assert(near(p.invariant_mass(), 938.272, 0.01), "m");
+}
+
+fn _t_massless_gamma_infinite() {
+    test_group("massless_gamma_infinite");
+    var photon = TmFourMomentum_new(100.0, 0.0, 0.0, 100.0);
+    assert_eq(_tm_is_inf(photon.gamma()), 1, "gamma infinite");
+}
+
+fn _t_gamma_to_beta_at_rest() {
+    test_group("gamma_to_beta_at_rest");
+    assert(f64_abs(gamma_to_beta(1.0)) < 0.0000000001, "beta(gamma = 1) = 0");
+}
+
+fn _t_velocity_conversions() {
+    test_group("velocity_conversions");
+    var v: f64 = 150000000.0;
+    var back: f64 = beta_to_velocity(velocity_to_beta(v));
+    assert(near(v, back, 1.0), "v -> beta -> v");
+}
+
+fn _t_de_broglie_zero_momentum() {
+    test_group("de_broglie_zero_momentum");
+    assert_eq(_tm_is_inf(de_broglie_wavelength_fm(0.0)), 1, "infinite");
+}
+
+fn _t_invariant_mass_ultra_relativistic_electron() {
+    test_group("invariant_mass_ultra_relativistic_electron");
+    var me: f64 = 0.51099895069;
+    var p = TmFourMomentum_from_mass_and_momentum(me, 10000.0);
+    var rel: f64 = f64_abs(p.invariant_mass() - me) / 0.511;
+    assert(rel < 0.000001, "m to 1e-6 at 10 GeV/c");
+    var t_direct: f64 = p.energy - me;
+    assert(near(p.kinetic_energy(), t_direct, 0.0000001), "T = E - m");
+}
+
+fn _t_gamma_symmetric_and_edge_cases() {
+    test_group("gamma_symmetric_and_edge_cases");
+    assert(near(lorentz_gamma(-0.6), 1.25, 0.000000000001), "gamma(-0.6) = 1.25");
+    assert_eq(_tm_is_inf(lorentz_gamma(-1.5)), 1, "gamma(-1.5) infinite");
+    var v: f64 = velocity_addition(1.0, -1.0);
+    assert(v != v, "c + (-c) is NaN");
+    var beta: f64 = 1.0 - 0.000000000001;
+    assert(near(gamma_to_beta(lorentz_gamma(beta)), beta, 0.000000000000001), "round trip near c");
+}
+
+fn _t_zero_energy_beta() {
+    test_group("zero_energy_beta");
+    var p = TmFourMomentum_new(0.0, 0.0, 0.0, 0.0);
+    assert(f64_abs(p.beta()) < 0.0000000001, "beta 0");
+}
+
+# Runs every test and returns the failure count.
+fn main(): i64 {
+    _t_particle_at_rest();
+    _t_massless_particle();
+    _t_lorentz_gamma_at_rest();
+    _t_lorentz_gamma_half_c();
+    _t_lorentz_gamma_at_c();
+    _t_gamma_beta_roundtrip();
+    _t_velocity_addition_subluminal();
+    _t_velocity_addition_with_c();
+    _t_energy_momentum_relation();
+    _t_momentum_from_kinetic_energy();
+    _t_de_broglie_proton();
+    _t_invariant_mass_two_body_at_rest();
+    _t_four_momentum_add();
+    _t_from_mass_and_momentum();
+    _t_massless_gamma_infinite();
+    _t_gamma_to_beta_at_rest();
+    _t_velocity_conversions();
+    _t_de_broglie_zero_momentum();
+    _t_invariant_mass_ultra_relativistic_electron();
+    _t_gamma_symmetric_and_edge_cases();
+    _t_zero_energy_beta();
+    return assert_summary();
+}
+
+var exit_code = main();
+if (exit_code > 0) { exit_code = 1; }
+sys_exit_group(exit_code);

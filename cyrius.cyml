@@ -22,9 +22,21 @@ stdlib = ["syscalls", "string", "alloc", "str", "fmt", "io", "vec", "math", "gan
 [test]
 stdlib = ["assert", "bench"]
 
-# [lib] arrives in M1 with its first module (an empty `modules = []` is invalid for distlib).
-# Dependency order, per the port plan §2 step 3:
-#   error → constants → particle_data → particle → relativity → nucleus_data → nucleus → shell_model →
-#   decay_data → decay → atomic_data → atomic_config → atomic_hydrogenic → atomic_qed →
-#   reaction_data → reaction → scattering → timekeeping
+# `[lib]` is the bundle `cyrius distlib` writes to dist/tanmatra.cyr. The list IS the
+# concatenation order, and it is load-bearing: no src/ file has an `include`, so each module
+# resolves at file scope against what precedes it. The full order (port plan §2 step 3):
+#   error → numerics → constants → particle_data → particle → relativity → nucleus_data →
+#   nucleus → shell_model → decay_data → decay → atomic_data → atomic_config →
+#   atomic_hydrogenic → atomic_qed → reaction_data → reaction → scattering → timekeeping
+# Modules are appended as their milestone lands. constants.cyr and *_data.cyr are generated
+# by scripts/oracle; never edit them.
 # [lib.optics], [features] optics and the optional [deps.prakash] (tag 2.15.1) arrive in M6.
+[lib]
+modules = [
+    "src/error.cyr",
+    "src/numerics.cyr",
+    "src/constants.cyr",
+    "src/particle_data.cyr",
+    "src/particle.cyr",
+    "src/relativity.cyr",
+]

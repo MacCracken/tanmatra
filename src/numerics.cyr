@@ -1,0 +1,72 @@
+# numerics.cyr — tanmatra's private floating-point helpers.
+#
+# Each helper reproduces exactly what the Rust oracle (rust-old/, libm 0.2.16) computes,
+# where no Cyrius builtin or ganita function does. Port plan §5 and
+# docs/development/port-parity.md.
+
+# π as Rust's core::f64::consts::PI (0x400921FB54442D18). The shortest round-trip decimal.
+const _TM_PI = 3.141592653589793;
+
+# +∞ (0x7FF0000000000000), a compile-time constant.
+const _TM_INF = 1.0 / 0.0;
+
+# The quiet NaN Rust's f64::NAN is (0x7FF8000000000000). The parity rules match any NaN.
+#must_use
+fn _tm_nan(): f64 {
+    var n: f64 = 0x7FF8000000000000;
+    return n;
+}
+
+# The bit pattern of an f64, as an integer. The untyped parameter carries the word, and the
+# `: i64` return types the caller's binding as an integer. A bare `var u = x;` copy of an
+# f64 is f64-typed (6.6.11), so its `<` would be a float compare.
+#must_use
+fn _tm_bits(x): i64 { return x; }
+
+# 1 if x is +∞ or -∞ (Rust f64::is_infinite).
+#must_use
+fn _tm_is_inf(x: f64): i64 {
+    if ((_tm_bits(x) & 0x7FFFFFFFFFFFFFFF) == 0x7FF0000000000000) { return 1; }
+    return 0;
+}
+
+# The low part of x², from a Dekker split at 2^27 + 1 (Rust libm hypot.rs `sq`).
+#must_use
+fn _tm_sq_lo(x: f64): f64 {
+    var split: f64 = 134217729.0;
+    var xc: f64 = x * split;
+    var xh: f64 = (x - xc) + xc;
+    var xl: f64 = x - xh;
+    var hi: f64 = x * x;
+    var lo: f64 = (((xh * xh) - hi) + ((2.0 * xh) * xl)) + (xl * xl);
+    return lo;
+}
+
+# hypot(x, y) as Rust libm 0.2.16 computes it (musl's algorithm), operation for operation,
+# so the result is bit-identical. ganita_f64_hypot is a different algorithm, up to 2 ulp
+# away, and `invariant_mass` amplifies that past any bound (port-parity.md).
+#must_use
+fn _tm_hypot(xa: f64, ya: f64): f64 {
+    var ux = _tm_bits(xa) & 0x7FFFFFFFFFFFFFFF;
+    var uy = _tm_bits(ya) & 0x7FFFFFFFFFFFFFFF;
+    if (ux < uy) { var t = ux; ux = uy; uy = t; }
+    var ex = ux >> 52;
+    var ey = uy >> 52;
+    var x: f64 = ux;
+    var y: f64 = uy;
+    if (ey == 0x7FF) { return y; }
+    if (ex == 0x7FF || uy == 0) { return x; }
+    if (ex - ey > 64) { var s: f64 = x + y; return s; }
+    var z: f64 = 1.0;
+    var up: f64 = 0x6BB0000000000000;
+    var dn: f64 = 0x1430000000000000;
+    if (ex > 0x3FF + 510) { z = up; x = x * dn; y = y * dn; }
+    elif (ey < 0x3FF - 450) { z = dn; x = x * up; y = y * up; }
+    var hx: f64 = x * x;
+    var lx: f64 = _tm_sq_lo(x);
+    var hy: f64 = y * y;
+    var ly: f64 = _tm_sq_lo(y);
+    var sum: f64 = ((ly + lx) + hy) + hx;
+    var r: f64 = z * f64_sqrt(sum);
+    return r;
+}

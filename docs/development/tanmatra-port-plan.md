@@ -516,12 +516,28 @@ compare. To work on the bits, take them through a helper with an untyped paramet
 - An untyped left operand silently does integer arithmetic. `var q = ganita_f64_pow(…); q * 2.0`
   gives 0 (*probed*).
 
+### Names (M1)
+
+- **Free functions** keep their Rust names (`lorentz_gamma`).
+- **A Rust enum's methods** become functions of the enum value, prefixed with snake(enum):
+  `Quark::mass_mev(q)` is `quark_mass_mev(q)`. Their values are read from the generated
+  `*_data.cyr` tables.
+  - Rust can't hold an out-of-range enum value, but a Cyrius caller can. It gets NaN from an f64
+    property, −1 from an integer one and 0 from a predicate, and never an abort.
+- **A Rust struct** becomes `struct Tm<Name>` with an `impl Tm<Name>` block, so the methods keep
+  their names.
+- **Globals and enum members** carry `TM_`, and private helpers `_tm_`.
+- **Return types.** Enum and `u8` returns are refused, so integer and predicate results are
+  `: i64` (0/1).
+- No M1 name collides with the 6.7.18 stdlib or prakash (scanned).
+- `scripts/surface_parity.py` checks every ported Rust item against these rules.
+
 ### Data model
 
 | Rust | Cyrius |
 |---|---|
-| `Nucleus { z: u32, a: u32 }` (Copy, validated) | `struct Nucleus { z: u32; a: u32; }` **by value**: 8 bytes in one register, no allocation (*probed*). `nucleus_new` validates and returns a `Result`. If M1's probe finds that a struct payload won't ride a value-form `Result`, fall back to a packed `(z << 16) \| a` i64 with `nuc_z`/`nuc_a` accessors |
-| `FourMomentum` (4 × f64, Copy, `impl Add`) | inline struct value with typed f64 fields and a `FourMomentum_add` overload for `+`. When returning by value, bind the literal to a local first, because `return S{…}` is refused |
+| `Nucleus { z: u32, a: u32 }` (Copy, validated) | **A packed `u64` word `z \| (a << 32)`**: the struct's own bytes, with `nucleus_z(n)` / `nucleus_a(n)` / `nucleus_n(n)` accessors. `nucleus_new` validates and returns a value-form `Result`. **Decided by M1's probe (2026-11-08):** `Ok(n)` of an 8-byte struct carries its bytes, but binding the payload back to a struct (`var n: S = f()?`) reads it as an address and segfaults, silently. That is filed as `cyrius/docs/development/issues/2026-11-08-small-struct-result-payload-read-as-address.md`. A plain word rides `Result` and `?` safely |
+| `FourMomentum` (4 × f64, Copy, `impl Add`) | **`struct TmFourMomentum`** with typed f64 fields and an `impl TmFourMomentum` block (M1). Constructors are `TmFourMomentum_new` / `_at_rest` / `_from_mass_and_momentum`, methods are called `p.invariant_mass()`, and `fn add(self, rhs)` is the `+` operator. Build it in a local and return the local, because `return S{…}` is refused |
 | `AtomicInstant { seconds: i64, nanos: u32 }` | value struct `{ seconds: i64; nanos: u32; }` with a normalizing constructor |
 | `#[non_exhaustive] enum` (DecayMode, OrbitalType, TimeScale, FrequencyStandard, …) | `enum` with explicit, append-only numeric values. Property functions use `match` with an `_ =>` arm, because `match` warns on a non-exhaustive enum. Case values may be any const expression |
 | `ElectronAffinity::{Bound(f64), Unbound, Unknown}` | `enum ElectronAffinity: stack { Bound(ev); Unbound(); Unknown(); }`, which allocates nothing (*probed*). Bind the payload with `var e: f64 = ev;`. A user enum can't be a function's return type, so leave the function's return unannotated. A plain enum without `: stack` that carries a payload allocates |
@@ -602,7 +618,7 @@ compare. To work on the bits, take them through a helper with an untyped paramet
 | Milestone | Status | Golden rows | Reference tests | Benches | Notes |
 |---|---|---|---|---|---|
 | M0 Initialize | ✅ done 2026-11-08 | 18,453; 10,617 ok, 0 failed, 1 accepted (ADR 0007), the rest pending until ported | — | — | Steps 0–8 done; the generators grow per milestone by design. Parity is green on x86_64 ELF, x86_64 PE and aarch64, with libm class C bounded at 2 ulp ([port-parity.md](port-parity.md)). Filed upstream: the `cyrius port` scaffold issue and the ganita pow issue. Next: M1, which starts by adding `_tm_hypot` and the dispatchers |
-| M1 Foundation | ☐ | | | | |
+| M1 Foundation | ✅ done 2026-11-08 | particle 102 + relativity 6,768 + constants 34: **all bit-identical (0 ulp)** on x86_64 ELF, x86_64 PE and aarch64 | 45 Rust tests ported (24 particle, 21 relativity; 5 serde ones don't port), plus 1 Cyrius-only: 114 assertions | 3 (`lorentz_gamma_1000` 2.4× Rust; `invariant_mass_1000` 6.8×; `particle/properties_all` 19×) | `numerics.cyr` (`_tm_hypot`), `error.cyr`, `particle.cyr`, `relativity.cyr`; `[lib]` and `dist/tanmatra.cyr`; surface parity 76/76. Probe: `Nucleus` becomes a packed word (cyrius issue filed) |
 | M2 Nuclear | ☐ | | | | |
 | M5 Timekeeping | ☐ | | | | |
 | M3 Atomic | ☐ | | | | |

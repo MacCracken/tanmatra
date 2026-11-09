@@ -66,7 +66,8 @@ cyrius build src/main.cyr build/tanmatra
 cyrius test                 # must be warning-free, not just passing
 cyrius test --bounds
 cyrius bench
-cyrius distlib --all && cyrius distlib --check    # once [lib] has modules
+cyrius distlib --all && cyrius distlib --check
+python3 -I scripts/surface_parity.py .           # every ported Rust pub item has its Cyrius name
 cyrius deps --locked
 cyrius audit
 ```
@@ -122,6 +123,12 @@ compiles that `test` and `build` drive, never from `cyrius lint`. Each one is a 
   edit them.
 - **Every public global carries the `TM_` prefix** (constants, enum members, tables); private
   helpers use `_tm_`. A bundle shares one namespace with its consumers.
+- **Function names follow the Rust API:**
+  - free functions keep their names;
+  - an enum's methods become `snake(enum)_method(v)`;
+  - a struct is `Tm<Name>` with an `impl` block.
+
+  The port plan §5 *Names* has the details, and `scripts/surface_parity.py` checks them.
 - Build with `cyrius build`, not raw `cat file | cc5` — the manifest auto-resolves deps.
 - Source files only need project includes — stdlib auto-resolves from `cyrius.cyml`.
 - `var buf[N]` = N **bytes**, not N entries.

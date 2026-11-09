@@ -39,7 +39,8 @@ Per Cyrius counterpart: rows, then the ulp histogram of each output against Rust
 | `log` | `f64_ln` | C | 874 | 864 × 0, 10 × 1 | 870 × 0, 4 × 1 |
 | `sinh` | `ganita_f64_sinh` | C | 510 | 495 × 0, 15 × 1 | 509 × 0, 1 × 1 |
 | `pow` | `ganita_f64_pow` | C | 1,220 | 1,206 × 0, 13 × 1, 1 accepted | same |
-| `hypot` | `ganita_f64_hypot` | C | 600 | 503 × 0, 96 × 1, 1 × 2 | same |
+| `hypot` | `ganita_f64_hypot` (measured in M0) | C | 600 | 503 × 0, 96 × 1, 1 × 2 | same |
+| `hypot` | **`_tm_hypot`** (from M1) | **A** | 600 | **all 0** | **all 0** (x86_64 PE too) |
 
 Readings:
 
@@ -153,9 +154,9 @@ fn _tm_hypot(xa: f64, ya: f64): f64 {
 }
 ```
 
-When M1 lands `_tm_hypot`, two more steps follow:
-- the harness's `libm::hypot` dispatch moves to it;
-- `libm::hypot` becomes class A in `m_libm.rs`, which is again a tightening.
+**Done in M1:** `src/numerics.cyr` has `_tm_hypot`. The harness's `libm::hypot` rows go to it and are class A,
+600/600 bit-identical on x86_64 ELF, x86_64 PE and aarch64. With it, every four-momentum golden row is 0 ulp on all
+three targets, including the 638 ill-conditioned `invariant_mass` rows.
 
 ## Rule for the class-C bounds of tanmatra's own functions
 

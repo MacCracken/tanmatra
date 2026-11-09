@@ -1,0 +1,178 @@
+# particle.cyr — Standard Model particles and forces (port of rust-old/src/particle.rs).
+#
+# Rust's enum methods become functions of the enum value, e.g. `Quark::mass_mev(q)` is
+# `quark_mass_mev(q)`. Every tabulated value is read from the generated particle_data.cyr
+# (PDG 2024), so none is typed here. Rust can't hold an out-of-range enum; a Cyrius caller
+# can, and gets NaN from an f64 property, -1 from an integer one and 0 from a predicate.
+
+# 1 if `v` is a valid value of an enum with `count` members.
+#must_use
+fn _tm_in_range(v, count): i64 {
+    if (v >= 0 && v < count) { return 1; }
+    return 0;
+}
+
+# ── Quark ───────────────────────────────────────────────────────────────────────────
+
+# Quark mass in MeV/c² (PDG 2024). Mirrors `Quark::mass_mev`.
+#must_use
+fn quark_mass_mev(q): f64 {
+    if (_tm_in_range(q, TM_QUARK_COUNT) != 1) { return _tm_nan(); }
+    var m: f64 = TM_QUARK_MASS_MEV[q];
+    return m;
+}
+
+# Electric charge in units of e. Mirrors `Quark::charge`.
+#must_use
+fn quark_charge(q): f64 {
+    if (_tm_in_range(q, TM_QUARK_COUNT) != 1) { return _tm_nan(); }
+    var c: f64 = TM_QUARK_CHARGE[q];
+    return c;
+}
+
+# Generation (1, 2 or 3). Mirrors `Quark::generation`.
+#must_use
+fn quark_generation(q): i64 {
+    if (_tm_in_range(q, TM_QUARK_COUNT) != 1) { return 0 - 1; }
+    return TM_QUARK_GENERATION[q];
+}
+
+# ── Lepton ──────────────────────────────────────────────────────────────────────────
+
+# Lepton mass in MeV/c². Mirrors `Lepton::mass_mev`.
+#must_use
+fn lepton_mass_mev(l): f64 {
+    if (_tm_in_range(l, TM_LEPTON_COUNT) != 1) { return _tm_nan(); }
+    var m: f64 = TM_LEPTON_MASS_MEV[l];
+    return m;
+}
+
+# Electric charge in units of e. Mirrors `Lepton::charge`.
+#must_use
+fn lepton_charge(l): f64 {
+    if (_tm_in_range(l, TM_LEPTON_COUNT) != 1) { return _tm_nan(); }
+    var c: f64 = TM_LEPTON_CHARGE[l];
+    return c;
+}
+
+# Generation (1, 2 or 3). Mirrors `Lepton::generation`.
+#must_use
+fn lepton_generation(l): i64 {
+    if (_tm_in_range(l, TM_LEPTON_COUNT) != 1) { return 0 - 1; }
+    return TM_LEPTON_GENERATION[l];
+}
+
+# Mean lifetime in seconds; +∞ for stable leptons (PDG 2024). Mirrors
+# `Lepton::lifetime_seconds`.
+#must_use
+fn lepton_lifetime_seconds(l): f64 {
+    if (_tm_in_range(l, TM_LEPTON_COUNT) != 1) { return _tm_nan(); }
+    var t: f64 = TM_LEPTON_LIFETIME_SECONDS[l];
+    return t;
+}
+
+# Decay width Γ = ħ/τ in MeV; 0 for stable leptons. Mirrors `Lepton::decay_width_mev`.
+#must_use
+fn lepton_decay_width_mev(l): f64 {
+    var tau: f64 = lepton_lifetime_seconds(l);
+    if (_tm_is_inf(tau) == 1) { return 0.0; }
+    var w: f64 = TM_HBAR_MEV_S / tau;
+    return w;
+}
+
+# 1 if the lepton is stable (the electron and the three neutrinos). Mirrors
+# `Lepton::is_stable`.
+#must_use
+fn lepton_is_stable(l): i64 {
+    if (_tm_in_range(l, TM_LEPTON_COUNT) != 1) { return 0; }
+    if (TM_LEPTON_IS_STABLE[l]) { return 1; }
+    return 0;
+}
+
+# ── Boson ───────────────────────────────────────────────────────────────────────────
+
+# Boson mass in MeV/c² (PDG 2024). Mirrors `Boson::mass_mev`.
+#must_use
+fn boson_mass_mev(b): f64 {
+    if (_tm_in_range(b, TM_BOSON_COUNT) != 1) { return _tm_nan(); }
+    var m: f64 = TM_BOSON_MASS_MEV[b];
+    return m;
+}
+
+# Spin in units of ħ. Mirrors `Boson::spin`.
+#must_use
+fn boson_spin(b): i64 {
+    if (_tm_in_range(b, TM_BOSON_COUNT) != 1) { return 0 - 1; }
+    return TM_BOSON_SPIN[b];
+}
+
+# Electric charge in units of e. Mirrors `Boson::charge`.
+#must_use
+fn boson_charge(b): f64 {
+    if (_tm_in_range(b, TM_BOSON_COUNT) != 1) { return _tm_nan(); }
+    var c: f64 = TM_BOSON_CHARGE[b];
+    return c;
+}
+
+# Total decay width in MeV; 0 for stable bosons (PDG 2024). Mirrors
+# `Boson::decay_width_mev`.
+#must_use
+fn boson_decay_width_mev(b): f64 {
+    if (_tm_in_range(b, TM_BOSON_COUNT) != 1) { return _tm_nan(); }
+    var w: f64 = TM_BOSON_DECAY_WIDTH_MEV[b];
+    return w;
+}
+
+# Mean lifetime τ = ħ/Γ in seconds; +∞ for stable bosons. Mirrors
+# `Boson::lifetime_seconds`.
+#must_use
+fn boson_lifetime_seconds(b): f64 {
+    var width: f64 = boson_decay_width_mev(b);
+    if (width <= 0.0) { return _TM_INF; }
+    var t: f64 = TM_HBAR_MEV_S / width;
+    return t;
+}
+
+# 1 if the boson is stable (the photon and the gluon). Mirrors `Boson::is_stable`.
+#must_use
+fn boson_is_stable(b): i64 {
+    if (_tm_in_range(b, TM_BOSON_COUNT) != 1) { return 0; }
+    if (TM_BOSON_IS_STABLE[b]) { return 1; }
+    return 0;
+}
+
+# ── FundamentalForce ────────────────────────────────────────────────────────────────
+
+# Coupling strength relative to the strong force. Mirrors
+# `FundamentalForce::relative_strength`.
+#must_use
+fn fundamental_force_relative_strength(f): f64 {
+    if (_tm_in_range(f, TM_FUNDAMENTAL_FORCE_COUNT) != 1) { return _tm_nan(); }
+    var s: f64 = TM_FUNDAMENTAL_FORCE_RELATIVE_STRENGTH[f];
+    return s;
+}
+
+# Effective range in meters; +∞ for the long-range forces. Mirrors
+# `FundamentalForce::range_meters`.
+#must_use
+fn fundamental_force_range_meters(f): f64 {
+    if (_tm_in_range(f, TM_FUNDAMENTAL_FORCE_COUNT) != 1) { return _tm_nan(); }
+    var r: f64 = TM_FUNDAMENTAL_FORCE_RANGE_METERS[f];
+    return r;
+}
+
+# How many gauge bosons mediate the force (0 for gravity: no Standard Model mediator).
+# With `fundamental_force_mediator`, this mirrors the slice `FundamentalForce::mediator`
+# returns.
+#must_use
+fn fundamental_force_mediator_count(f): i64 {
+    if (_tm_in_range(f, TM_FUNDAMENTAL_FORCE_COUNT) != 1) { return 0; }
+    return TM_FUNDAMENTAL_FORCE_MEDIATOR_COUNT[f];
+}
+
+# The force's k-th mediator as a TmBoson value, in Rust's order; -1 when k is out of range.
+#must_use
+fn fundamental_force_mediator(f, k): i64 {
+    if (k < 0 || k >= fundamental_force_mediator_count(f)) { return 0 - 1; }
+    return TM_FUNDAMENTAL_FORCE_MEDIATORS[TM_FUNDAMENTAL_FORCE_MEDIATOR_START[f] + k];
+}

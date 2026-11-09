@@ -17,8 +17,12 @@
 # the 8-bit exit status can't wrap.
 
 include "tests/ulp.cyr"
+include "src/error.cyr"
+include "src/numerics.cyr"
 include "src/constants.cyr"
 include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
 
 alloc_init();
 
@@ -135,6 +139,85 @@ fn _par_got_f(bits) {
     _par_got_n = _par_got_n + 1;
 }
 
+# Appends an integer result to the got list.
+fn _par_got_i(v) {
+    var at = _par_got_n * 8;
+    store64(_par_got_k + at, 105);
+    store64(_par_got_v + at, v);
+    store64(_par_got_l + at, 0);
+    _par_got_n = _par_got_n + 1;
+}
+
+# Appends a sequence length (`v:`) to the got list.
+fn _par_got_seq(n) {
+    var at = _par_got_n * 8;
+    store64(_par_got_k + at, 118);
+    store64(_par_got_v + at, n);
+    store64(_par_got_l + at, 0);
+    _par_got_n = _par_got_n + 1;
+}
+
+# Appends an enum result to the got list, as its golden text ("Boson.Photon").
+fn _par_got_e(name) {
+    var at = _par_got_n * 8;
+    store64(_par_got_k + at, 101);
+    store64(_par_got_v + at, name);
+    store64(_par_got_l + at, strlen(name));
+    _par_got_n = _par_got_n + 1;
+}
+
+# Appends a four-momentum's components to the got list.
+fn _par_got_fm(p: TmFourMomentum) {
+    _par_got_f(p.energy);
+    _par_got_f(p.px);
+    _par_got_f(p.py);
+    _par_got_f(p.pz);
+}
+
+# The TM_ value of input k's enum token (`e:Quark.Up` is TM_QUARK_UP), or -1. Each name maps
+# by the rule TM_ + snake(enum) + _ + snake(variant), spelled out here (scripts/oracle/README.md).
+fn _par_enum(k): i64 {
+    var at = k * 8;
+    if (load64(_par_in_k + at) != 101) { return 0 - 1; }
+    var p = load64(_par_in_v + at);
+    var l = load64(_par_in_l + at);
+    if (_par_eq(p, l, "Quark.Up") == 1) { return TM_QUARK_UP; }
+    if (_par_eq(p, l, "Quark.Down") == 1) { return TM_QUARK_DOWN; }
+    if (_par_eq(p, l, "Quark.Charm") == 1) { return TM_QUARK_CHARM; }
+    if (_par_eq(p, l, "Quark.Strange") == 1) { return TM_QUARK_STRANGE; }
+    if (_par_eq(p, l, "Quark.Top") == 1) { return TM_QUARK_TOP; }
+    if (_par_eq(p, l, "Quark.Bottom") == 1) { return TM_QUARK_BOTTOM; }
+    if (_par_eq(p, l, "Lepton.Electron") == 1) { return TM_LEPTON_ELECTRON; }
+    if (_par_eq(p, l, "Lepton.ElectronNeutrino") == 1) { return TM_LEPTON_ELECTRON_NEUTRINO; }
+    if (_par_eq(p, l, "Lepton.Muon") == 1) { return TM_LEPTON_MUON; }
+    if (_par_eq(p, l, "Lepton.MuonNeutrino") == 1) { return TM_LEPTON_MUON_NEUTRINO; }
+    if (_par_eq(p, l, "Lepton.Tau") == 1) { return TM_LEPTON_TAU; }
+    if (_par_eq(p, l, "Lepton.TauNeutrino") == 1) { return TM_LEPTON_TAU_NEUTRINO; }
+    if (_par_eq(p, l, "Boson.Photon") == 1) { return TM_BOSON_PHOTON; }
+    if (_par_eq(p, l, "Boson.Gluon") == 1) { return TM_BOSON_GLUON; }
+    if (_par_eq(p, l, "Boson.WPlus") == 1) { return TM_BOSON_W_PLUS; }
+    if (_par_eq(p, l, "Boson.WMinus") == 1) { return TM_BOSON_W_MINUS; }
+    if (_par_eq(p, l, "Boson.Z") == 1) { return TM_BOSON_Z; }
+    if (_par_eq(p, l, "Boson.Higgs") == 1) { return TM_BOSON_HIGGS; }
+    if (_par_eq(p, l, "FundamentalForce.Strong") == 1) { return TM_FUNDAMENTAL_FORCE_STRONG; }
+    if (_par_eq(p, l, "FundamentalForce.Electromagnetic") == 1) { return TM_FUNDAMENTAL_FORCE_ELECTROMAGNETIC; }
+    if (_par_eq(p, l, "FundamentalForce.Weak") == 1) { return TM_FUNDAMENTAL_FORCE_WEAK; }
+    if (_par_eq(p, l, "FundamentalForce.Gravity") == 1) { return TM_FUNDAMENTAL_FORCE_GRAVITY; }
+    return 0 - 1;
+}
+
+# A TmBoson value's golden name, the inverse of _par_enum for bosons.
+#must_use
+fn _par_boson_name(b): i64 {
+    if (b == TM_BOSON_PHOTON) { return "Boson.Photon"; }
+    if (b == TM_BOSON_GLUON) { return "Boson.Gluon"; }
+    if (b == TM_BOSON_W_PLUS) { return "Boson.WPlus"; }
+    if (b == TM_BOSON_W_MINUS) { return "Boson.WMinus"; }
+    if (b == TM_BOSON_Z) { return "Boson.Z"; }
+    if (b == TM_BOSON_HIGGS) { return "Boson.Higgs"; }
+    return "Boson.?";
+}
+
 # ── dispatch ────────────────────────────────────────────────────────────────────────
 # Each module's dispatcher fills the got list for one row. It returns 1 when it handled
 # the function, 0 when the function is pending (not ported), or -1 when the inputs are
@@ -203,7 +286,93 @@ fn _par_libm(fp, fl): i64 {
     if (_par_eq(fp, fl, "libm::sinh") == 1) { var r: f64 = ganita_f64_sinh(x); _par_got_f(r); return 1; }
     var y: f64 = _par_in(1);
     if (_par_eq(fp, fl, "libm::pow") == 1) { var r: f64 = ganita_f64_pow(x, y); _par_got_f(r); return 1; }
-    if (_par_eq(fp, fl, "libm::hypot") == 1) { var r: f64 = ganita_f64_hypot(x, y); _par_got_f(r); return 1; }
+    if (_par_eq(fp, fl, "libm::hypot") == 1) { var r: f64 = _tm_hypot(x, y); _par_got_f(r); return 1; }
+    return 0;
+}
+
+# `particle` rows: src/particle.cyr, one function per Rust enum method.
+fn _par_particle(fp, fl): i64 {
+    var v = _par_enum(0);
+    if (v < 0) { return 0 - 1; }
+    if (_par_eq(fp, fl, "Quark::mass_mev") == 1) { _par_got_f(quark_mass_mev(v)); return 1; }
+    if (_par_eq(fp, fl, "Quark::charge") == 1) { _par_got_f(quark_charge(v)); return 1; }
+    if (_par_eq(fp, fl, "Quark::generation") == 1) { _par_got_i(quark_generation(v)); return 1; }
+    if (_par_eq(fp, fl, "Lepton::mass_mev") == 1) { _par_got_f(lepton_mass_mev(v)); return 1; }
+    if (_par_eq(fp, fl, "Lepton::charge") == 1) { _par_got_f(lepton_charge(v)); return 1; }
+    if (_par_eq(fp, fl, "Lepton::generation") == 1) { _par_got_i(lepton_generation(v)); return 1; }
+    if (_par_eq(fp, fl, "Lepton::lifetime_seconds") == 1) { _par_got_f(lepton_lifetime_seconds(v)); return 1; }
+    if (_par_eq(fp, fl, "Lepton::decay_width_mev") == 1) { _par_got_f(lepton_decay_width_mev(v)); return 1; }
+    if (_par_eq(fp, fl, "Lepton::is_stable") == 1) { _par_got_i(lepton_is_stable(v)); return 1; }
+    if (_par_eq(fp, fl, "Boson::mass_mev") == 1) { _par_got_f(boson_mass_mev(v)); return 1; }
+    if (_par_eq(fp, fl, "Boson::spin") == 1) { _par_got_i(boson_spin(v)); return 1; }
+    if (_par_eq(fp, fl, "Boson::charge") == 1) { _par_got_f(boson_charge(v)); return 1; }
+    if (_par_eq(fp, fl, "Boson::decay_width_mev") == 1) { _par_got_f(boson_decay_width_mev(v)); return 1; }
+    if (_par_eq(fp, fl, "Boson::lifetime_seconds") == 1) { _par_got_f(boson_lifetime_seconds(v)); return 1; }
+    if (_par_eq(fp, fl, "Boson::is_stable") == 1) { _par_got_i(boson_is_stable(v)); return 1; }
+    if (_par_eq(fp, fl, "FundamentalForce::relative_strength") == 1) {
+        _par_got_f(fundamental_force_relative_strength(v));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "FundamentalForce::range_meters") == 1) {
+        _par_got_f(fundamental_force_range_meters(v));
+        return 1;
+    }
+    if (_par_eq(fp, fl, "FundamentalForce::mediator") == 1) {
+        var n = fundamental_force_mediator_count(v);
+        _par_got_seq(n);
+        var k = 0;
+        while (k < n) { _par_got_e(_par_boson_name(fundamental_force_mediator(v, k))); k = k + 1; }
+        return 1;
+    }
+    return 0;
+}
+
+# The four-momentum in inputs k .. k + 3.
+fn _par_fm(k): TmFourMomentum {
+    var e: f64 = _par_in(k);
+    var x: f64 = _par_in(k + 1);
+    var y: f64 = _par_in(k + 2);
+    var z: f64 = _par_in(k + 3);
+    var p: TmFourMomentum = TmFourMomentum_new(e, x, y, z);
+    return p;
+}
+
+# `relativity` rows: src/relativity.cyr.
+fn _par_relativity(fp, fl): i64 {
+    var a: f64 = _par_in(0);
+    var b: f64 = _par_in(1);
+    if (_par_eq(fp, fl, "lorentz_gamma") == 1) { _par_got_f(lorentz_gamma(a)); return 1; }
+    if (_par_eq(fp, fl, "gamma_to_beta") == 1) { _par_got_f(gamma_to_beta(a)); return 1; }
+    if (_par_eq(fp, fl, "beta_to_velocity") == 1) { _par_got_f(beta_to_velocity(a)); return 1; }
+    if (_par_eq(fp, fl, "velocity_to_beta") == 1) { _par_got_f(velocity_to_beta(a)); return 1; }
+    if (_par_eq(fp, fl, "de_broglie_wavelength_fm") == 1) { _par_got_f(de_broglie_wavelength_fm(a)); return 1; }
+    if (_par_eq(fp, fl, "velocity_addition") == 1) { _par_got_f(velocity_addition(a, b)); return 1; }
+    if (_par_eq(fp, fl, "relativistic_energy") == 1) { _par_got_f(relativistic_energy(a, b)); return 1; }
+    if (_par_eq(fp, fl, "relativistic_momentum") == 1) { _par_got_f(relativistic_momentum(a, b)); return 1; }
+    if (_par_eq(fp, fl, "FourMomentum::at_rest") == 1) {
+        var r = TmFourMomentum_at_rest(a);
+        _par_got_fm(r);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "FourMomentum::from_mass_and_momentum") == 1) {
+        var r = TmFourMomentum_from_mass_and_momentum(a, b);
+        _par_got_fm(r);
+        return 1;
+    }
+    var p = _par_fm(0);
+    if (_par_eq(fp, fl, "FourMomentum::new") == 1) { _par_got_fm(p); return 1; }
+    if (_par_eq(fp, fl, "FourMomentum::momentum_magnitude") == 1) { _par_got_f(p.momentum_magnitude()); return 1; }
+    if (_par_eq(fp, fl, "FourMomentum::invariant_mass") == 1) { _par_got_f(p.invariant_mass()); return 1; }
+    if (_par_eq(fp, fl, "FourMomentum::beta") == 1) { _par_got_f(p.beta()); return 1; }
+    if (_par_eq(fp, fl, "FourMomentum::gamma") == 1) { _par_got_f(p.gamma()); return 1; }
+    if (_par_eq(fp, fl, "FourMomentum::kinetic_energy") == 1) { _par_got_f(p.kinetic_energy()); return 1; }
+    var q = _par_fm(4);
+    if (_par_eq(fp, fl, "FourMomentum::add") == 1) {
+        var s: TmFourMomentum = p + q;
+        _par_got_fm(s);
+        return 1;
+    }
+    if (_par_eq(fp, fl, "invariant_mass_two_body") == 1) { _par_got_f(invariant_mass_two_body(p, q)); return 1; }
     return 0;
 }
 
@@ -212,6 +381,8 @@ fn _par_dispatch(mp, ml, fp, fl): i64 {
     _par_got_n = 0;
     if (_par_eq(mp, ml, "constants") == 1) { return _par_constants(fp, fl); }
     if (_par_eq(mp, ml, "libm") == 1) { return _par_libm(fp, fl); }
+    if (_par_eq(mp, ml, "particle") == 1) { return _par_particle(fp, fl); }
+    if (_par_eq(mp, ml, "relativity") == 1) { return _par_relativity(fp, fl); }
     return 0;
 }
 
@@ -221,8 +392,8 @@ fn _par_dispatch(mp, ml, fp, fl): i64 {
 #
 # The libm primitives get 2 ulp: each side documents < 1 ulp (Cyrius lib/math.cyr, ganita,
 # fdlibm in Rust libm), so two implementations can differ by up to 2. That holds on x86_64
-# ELF, x86_64 PE and aarch64, measured 2026-11-08 (max 1 ulp; hypot 2, which documents no
-# bound on either side).
+# ELF, x86_64 PE and aarch64, measured 2026-11-08 (max 1 ulp). hypot is no longer class C:
+# its rows go to the port's bit-exact _tm_hypot and are class A.
 #must_use
 fn _par_c_bound(fp, fl): i64 {
     if (_par_eq(fp, fl, "libm::sin") == 1) { return 2; }
@@ -232,7 +403,6 @@ fn _par_c_bound(fp, fl): i64 {
     if (_par_eq(fp, fl, "libm::log") == 1) { return 2; }
     if (_par_eq(fp, fl, "libm::sinh") == 1) { return 2; }
     if (_par_eq(fp, fl, "libm::pow") == 1) { return 2; }
-    if (_par_eq(fp, fl, "libm::hypot") == 1) { return 2; }
     return 0 - 1;
 }
 

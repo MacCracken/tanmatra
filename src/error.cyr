@@ -1,0 +1,42 @@
+# error.cyr — tanmatra's error codes (port of rust-old/src/error.rs).
+#
+# A fallible tanmatra function returns a value-form Result whose Err payload is one of
+# these codes. The golden token `E:InvalidAtomicNumber` is TM_ERR_INVALID_ATOMIC_NUMBER:
+# TM_ERR_ + snake(variant). The values are append-only. The Rust variants' payloads (Z, A,
+# a detail string) travel through an `err_out` pointer where a function documents one;
+# that arrives with the first fallible API (M2, Nucleus).
+
+enum TmError {
+    TM_ERR_NONE = 0;
+    TM_ERR_INVALID_ATOMIC_NUMBER = 1;
+    TM_ERR_INVALID_MASS_NUMBER = 2;
+    TM_ERR_INVALID_QUANTUM_NUMBERS = 3;
+    TM_ERR_INVALID_HALF_LIFE = 4;
+    TM_ERR_DECAY_NOT_POSSIBLE = 5;
+    TM_ERR_INVALID_REACTION = 6;
+}
+
+# The Rust variant name of an error code (`"InvalidAtomicNumber"`), or "Unknown".
+#must_use
+fn tm_error_name(code): i64 {
+    if (code == TM_ERR_NONE) { return "None"; }
+    if (code == TM_ERR_INVALID_ATOMIC_NUMBER) { return "InvalidAtomicNumber"; }
+    if (code == TM_ERR_INVALID_MASS_NUMBER) { return "InvalidMassNumber"; }
+    if (code == TM_ERR_INVALID_QUANTUM_NUMBERS) { return "InvalidQuantumNumbers"; }
+    if (code == TM_ERR_INVALID_HALF_LIFE) { return "InvalidHalfLife"; }
+    if (code == TM_ERR_DECAY_NOT_POSSIBLE) { return "DecayNotPossible"; }
+    if (code == TM_ERR_INVALID_REACTION) { return "InvalidReaction"; }
+    return "Unknown";
+}
+
+# The Rust error's message, without its payload (thiserror's text up to the first field).
+#must_use
+fn tm_error_message(code): i64 {
+    if (code == TM_ERR_INVALID_ATOMIC_NUMBER) { return "invalid atomic number: must be >= 1"; }
+    if (code == TM_ERR_INVALID_MASS_NUMBER) { return "invalid mass number: A must be >= Z"; }
+    if (code == TM_ERR_INVALID_QUANTUM_NUMBERS) { return "invalid quantum numbers"; }
+    if (code == TM_ERR_INVALID_HALF_LIFE) { return "invalid half-life"; }
+    if (code == TM_ERR_DECAY_NOT_POSSIBLE) { return "decay not possible"; }
+    if (code == TM_ERR_INVALID_REACTION) { return "invalid reaction"; }
+    return "no error";
+}

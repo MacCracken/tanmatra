@@ -6,7 +6,8 @@
 //!
 //! Classes:
 //! - **A**: correctly rounded or exact on both sides — sqrt, fabs, floor, trunc, round
-//!   (the port's half-away helper, not `f64_round`), cbrt (CORE-MATH vs ganita), ldexp.
+//!   (the port's half-away helper, not `f64_round`), cbrt (CORE-MATH vs ganita), ldexp, and
+//!   hypot (the port's `_tm_hypot` is Rust libm's algorithm operation for operation).
 //! - **C**: everything else.
 //!
 //! Inputs are the special values, the ranges tanmatra feeds each function, and wide
@@ -173,7 +174,7 @@ pub fn emit() -> Module {
         let y = rng.signed_log_uniform(-9.0, 8.0);
         m.row(
             "libm::hypot",
-            Class::C,
+            Class::A,
             &[f(x), f(y)],
             &[f(libm::hypot(x, y))],
         );
@@ -183,7 +184,7 @@ pub fn emit() -> Module {
         let y = rng.signed_log_uniform(-300.0, 300.0);
         m.row(
             "libm::hypot",
-            Class::C,
+            Class::A,
             &[f(x), f(y)],
             &[f(libm::hypot(x, y))],
         );
@@ -192,7 +193,7 @@ pub fn emit() -> Module {
         for &y in &specials() {
             m.row(
                 "libm::hypot",
-                Class::C,
+                Class::A,
                 &[f(x), f(y)],
                 &[f(libm::hypot(x, y))],
             );
