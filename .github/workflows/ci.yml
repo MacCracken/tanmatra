@@ -71,3 +71,6 @@ jobs:
 
       - name: Every Rust test is ported or accounted for
         run: python3 -I scripts/rust_test_ledger.py . --check
+
+      - name: Reference data matches its NIST snapshot
+        run: python3 -I scripts/reference/nist_levels.py . --check

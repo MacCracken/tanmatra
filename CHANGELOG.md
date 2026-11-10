@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.2] — 2026-11-09
+
+The roadmap's one unblocked 2.0.x item: the Z > 1 validation. No function changes, so the bundles differ from 2.0.1
+only in their version line, and no golden value moves.
+
+### Added
+- **The hydrogen-like functions checked against NIST at Z = 2 and 3.** `tests/hydrogenic_nist.tcyr` compares them at
+  ⁴He⁺ and ⁷Li²⁺ with the NIST ASD v5.12 He II and Li III energy levels (Yerokhin & Shabaev 2015 for n ≤ 2; Erickson
+  1977, scaled by NIST, for n ≥ 3). Each bound is twice the leading term the function leaves out. The new
+  `docs/development/reference-validation.md` gives the rule and every derivation, written before the first comparison.
+  - `spectral_line_vacuum_nm`, against all 10,026 level pairs with n₁ < n₂ ≤ 20 per ion, within twice the two levels'
+    first-order fine structure. The five named series divided by μ match it bit for bit. The worst residual is 0.5004
+    of the bound (He⁺) and 0.5005 (Li²⁺).
+  - `spectral_line_fine_nm`'s j = l ± ½ splittings for n = 2–11, 55 per ion, within twice the electron's
+    anomalous-moment term (α/π)ΔF. Worst: 0.498 and 0.547.
+  - `reduced_mass_factor(2, 4)`, against CODATA 2022 m_α/m_e, within 5.8 × 10⁻¹² (twice the dropped 79 eV electron
+    binding). Worst: 0.501.
+
+  No defect was found. The 61,948 assertions pass on x86_64 ELF, x86_64 PE and aarch64.
+- **The reference data is generated, not typed.** The NIST snapshot is kept byte for byte in `tests/reference/nist_asd/`,
+  with its query, citation and SHA-256s. `scripts/reference/nist_levels.py` checks every row (quantum numbers, term,
+  parity, completeness for n ≤ 11, the hashes) and writes `tests/nist_levels_data.cyr`. Its `--check` runs in CI.
+  Each f64 literal carries its bit pattern, and the test proves the compiler read every one exactly.
+
+### Changed
+- **The roadmap lists only open work**, pinned to the release that ships it: 2.0.x patches (two upstream follow-ups
+  remain), 2.1.0 atomic structure, 2.2.0 simulation support, the bridges as consumers land, and a 3.0.0 backlog. The
+  port plan now records that kimiya's Cyrius port is under way.
+
 ## [2.0.1] — 2026-11-09
 
 Two pieces of work that just missed 2.0.0, and finish it:

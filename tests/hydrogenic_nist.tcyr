@@ -1,0 +1,323 @@
+# hydrogenic_nist.tcyr — tanmatra's hydrogen-like functions at Z = 2 and 3 against the NIST ASD He II
+# (⁴He⁺) and Li III (⁷Li²⁺) energy levels. This is the Z > 1 validation, and the bounds and their derivations
+# are in docs/development/reference-validation.md ("He⁺ and Li²⁺"), set there before the first comparison:
+# - B1: spectral_line_vacuum_nm against every pair of NIST levels n1 < n2 <= 20, and the named series held to it
+#   bit for bit;
+# - B2: spectral_line_fine_nm's j = l ± 1/2 splittings, n = 2–11;
+# - B3: reduced_mass_factor(2, 4) against CODATA 2022 m_α/m_e.
+# The reference data is tests/nist_levels_data.cyr, generated from tests/reference/nist_asd/. Each tier prints
+# its worst residual as a fraction of its bound. There is no Rust counterpart: the golden corpus checks these
+# functions against Rust 1.3.0, and this file checks them against the evaluated data.
+
+include "src/error.cyr"
+include "src/numerics.cyr"
+include "src/constants.cyr"
+include "src/particle_data.cyr"
+include "src/particle.cyr"
+include "src/relativity.cyr"
+include "src/nucleus_data.cyr"
+include "src/nucleus.cyr"
+include "src/shell_model.cyr"
+include "src/decay_data.cyr"
+include "src/decay.cyr"
+include "src/atomic_data.cyr"
+include "src/atomic_config.cyr"
+include "src/atomic_hydrogenic.cyr"
+include "tests/nist_levels_data.cyr"
+
+alloc_init();
+
+# The reference's stated uncertainty is part of the second half's budget, so it must stay below a tenth of each
+# bound (reference-validation.md, "The rule for a bound").
+const _REF_UNC_FRACTION = 0.1;
+
+fn _say(msg) {
+    print(msg, strlen(msg));
+}
+
+# Prints "  <ion> <what>: worst residual <r> of B<k>".
+fn _report(ion, what, bound, worst: f64) {
+    _say("  ");
+    if (ion == 0) { _say("He II "); } else { _say("Li III "); }
+    _say(what);
+    _say(": worst residual ");
+    fmt_float(worst, 4);
+    _say(" of ");
+    _say(bound);
+    _say("\n");
+}
+
+# Prints a failing level pair, (n, l, 2j) twice, before its assert counts the failure.
+fn _report_pair(ion, k1, k2) {
+    _say("    at ");
+    if (ion == 0) { _say("He II"); } else { _say("Li III"); }
+    _say(" (n, l, 2j) = (");
+    fmt_int(_REF_LEVEL_N[k1]);
+    _say(", ");
+    fmt_int(_REF_LEVEL_L[k1]);
+    _say(", ");
+    fmt_int(_REF_LEVEL_TWO_J[k1]);
+    _say(") to (");
+    fmt_int(_REF_LEVEL_N[k2]);
+    _say(", ");
+    fmt_int(_REF_LEVEL_L[k2]);
+    _say(", ");
+    fmt_int(_REF_LEVEL_TWO_J[k2]);
+    _say(")\n");
+}
+
+# F(n, j) of reference-validation.md §1, m⁻¹: the first-order fine-structure shift of level (n, j), j passed as
+# 2j, R∞ Z² (αZ)² / n⁴ × (n / (j + 1/2) − 3/4).
+#must_use
+fn _fs_shift(z, n, two_j): f64 {
+    var zf: f64 = f64_from(z);
+    var nf: f64 = f64_from(n);
+    var tj: f64 = f64_from(two_j);
+    var jph: f64 = (tj + 1.0) / 2.0;
+    var az: f64 = TM_FINE_STRUCTURE * zf;
+    var n2: f64 = nf * nf;
+    var n4: f64 = n2 * n2;
+    var r: f64 = ((((TM_RYDBERG * zf) * zf) * (az * az)) / n4) * ((nf / jph) - 0.75);
+    return r;
+}
+
+# The index of level (n, l, 2j) of ion `ion` in the reference tables, or -1.
+#must_use
+fn _ref_find(ion, n, l, two_j): i64 {
+    var s = _REF_ION_START[ion];
+    var k = 0;
+    while (k < _REF_ION_LEVELS[ion]) {
+        if (_REF_LEVEL_N[s + k] == n && _REF_LEVEL_L[s + k] == l && _REF_LEVEL_TWO_J[s + k] == two_j) { return s + k; }
+        k = k + 1;
+    }
+    return -1;
+}
+
+# Every f64 literal of nist_levels_data.cyr reads back as the double the generator parsed from NIST's text.
+fn _t_reference_literals_exact() {
+    test_group("reference_literals_exact");
+    var k = 0;
+    while (k < _REF_LEVEL_COUNT) {
+        var e: f64 = _REF_LEVEL_CM[k];
+        assert_eq(_tm_bits(e), _REF_LEVEL_CM_BITS[k], "level literal reads back to its bits");
+        var u: f64 = _REF_LEVEL_UNC_CM[k];
+        assert_eq(_tm_bits(u), _REF_LEVEL_UNC_CM_BITS[k], "uncertainty literal reads back to its bits");
+        k = k + 1;
+    }
+    var i = 0;
+    while (i < _REF_ION_COUNT) {
+        var lim: f64 = _REF_ION_LIMIT_CM[i];
+        assert_eq(_tm_bits(lim), _REF_ION_LIMIT_CM_BITS[i], "limit literal reads back to its bits");
+        i = i + 1;
+    }
+}
+
+# §1: spectral_line_vacuum_nm(z, a, n1, n2) against every pair of NIST levels with n1 < n2, within
+# B1 = 2 [F(n1, j1) + F(n2, j2)].
+fn _t_bohr_lines_against_nist() {
+    test_group("bohr_lines_against_nist");
+    var ion = 0;
+    while (ion < _REF_ION_COUNT) {
+        var z = _REF_ION_Z[ion];
+        var a = _REF_ION_A[ion];
+        var s = _REF_ION_START[ion];
+        var cnt = _REF_ION_LEVELS[ion];
+        var worst: f64 = 0.0;
+        var pairs = 0;
+        var i = 0;
+        while (i < cnt) {
+            var k1 = s + i;
+            var n1 = _REF_LEVEL_N[k1];
+            var e1: f64 = _REF_LEVEL_CM[k1];
+            var u1: f64 = _REF_LEVEL_UNC_CM[k1];
+            var f1: f64 = _fs_shift(z, n1, _REF_LEVEL_TWO_J[k1]);
+            var j = 0;
+            while (j < cnt) {
+                var k2 = s + j;
+                var n2 = _REF_LEVEL_N[k2];
+                if (n1 < n2) {
+                    var t, v = spectral_line_vacuum_nm(z, a, n1, n2);
+                    assert_eq(is_ok(t), 1, "spectral_line_vacuum_nm Ok");
+                    var nm: f64 = v;
+                    var sigma: f64 = 1000000000.0 / nm;
+                    var e2: f64 = _REF_LEVEL_CM[k2];
+                    var u2: f64 = _REF_LEVEL_UNC_CM[k2];
+                    var de: f64 = e2 - e1;
+                    var nist: f64 = de * 100.0;
+                    var f2: f64 = _fs_shift(z, n2, _REF_LEVEL_TWO_J[k2]);
+                    var b: f64 = 2.0 * (f1 + f2);
+                    var du: f64 = u1 + u2;
+                    var unc: f64 = du * 100.0;
+                    assert(unc <= _REF_UNC_FRACTION * b, "NIST uncertainty small against B1");
+                    var diff: f64 = sigma - nist;
+                    var res: f64 = f64_abs(diff);
+                    if (res > b) { _report_pair(ion, k1, k2); }
+                    assert(res <= b, "Bohr line within B1 of NIST");
+                    var ratio: f64 = res / b;
+                    if (ratio > worst) { worst = ratio; }
+                    pairs = pairs + 1;
+                }
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        assert_eq(pairs, 10026, "10,026 level pairs per ion");
+        _report(ion, "Bohr lines", "B1", worst);
+        ion = ion + 1;
+    }
+}
+
+# The named series with lower level `lower` (1 Lyman … 5 Pfund) at Z = z, n up to 20, into ns[] / nm[].
+#must_use
+fn _named_series(lower, z, ns, nm): Result {
+    if (lower == 1) {
+        var t1, v1 = lyman_series(z, 20, ns, nm, 20);
+        if (is_err_result(t1) == 1) { return Err(v1); }
+        return Ok(v1);
+    }
+    if (lower == 2) {
+        var t2, v2 = balmer_series(z, 20, ns, nm, 20);
+        if (is_err_result(t2) == 1) { return Err(v2); }
+        return Ok(v2);
+    }
+    if (lower == 3) {
+        var t3, v3 = paschen_series(z, 20, ns, nm, 20);
+        if (is_err_result(t3) == 1) { return Err(v3); }
+        return Ok(v3);
+    }
+    if (lower == 4) {
+        var t4, v4 = brackett_series(z, 20, ns, nm, 20);
+        if (is_err_result(t4) == 1) { return Err(v4); }
+        return Ok(v4);
+    }
+    var t5, v5 = pfund_series(z, 20, ns, nm, 20);
+    if (is_err_result(t5) == 1) { return Err(v5); }
+    return Ok(v5);
+}
+
+# §1: the named series (infinitely heavy nucleus) divided by μ are spectral_line_vacuum_nm, bit for bit, for every
+# n <= 20, so the NIST comparison above holds them too.
+fn _t_named_series_match_vacuum_lines() {
+    test_group("named_series_match_vacuum_lines");
+    var ns[160];
+    var nm[160];
+    var ion = 0;
+    while (ion < _REF_ION_COUNT) {
+        var z = _REF_ION_Z[ion];
+        var a = _REF_ION_A[ion];
+        var tm, vm = reduced_mass_factor(z, a);
+        assert_eq(is_ok(tm), 1, "reduced_mass_factor Ok");
+        var mu: f64 = vm;
+        var lower = 1;
+        while (lower <= 5) {
+            var t, cnt = _named_series(lower, z, &ns, &nm);
+            assert_eq(is_ok(t), 1, "series Ok");
+            assert_eq(cnt, 20 - lower, "n = lower + 1 ..= 20");
+            var k = 0;
+            while (k < cnt) {
+                var n = load64(&ns + k * 8);
+                assert_eq(n, lower + 1 + k, "series n");
+                var inf: f64 = load64(&nm + k * 8);
+                var line: f64 = inf / mu;
+                var tv, vv = spectral_line_vacuum_nm(z, a, lower, n);
+                assert_eq(is_ok(tv), 1, "spectral_line_vacuum_nm Ok");
+                var vac: f64 = vv;
+                assert_eq(_tm_bits(line), _tm_bits(vac), "series / μ is spectral_line_vacuum_nm");
+                k = k + 1;
+            }
+            lower = lower + 1;
+        }
+        ion = ion + 1;
+    }
+}
+
+# §2: spectral_line_fine_nm's splitting j = l − 1/2 ↔ l + 1/2 for n = 2–11 and every l >= 1, within
+# B2 = 2 (α/π) ΔF, ΔF = R∞ Z² (αZ)² / (n³ l (l + 1)).
+fn _t_fine_splittings_against_nist() {
+    test_group("fine_splittings_against_nist");
+    var ion = 0;
+    while (ion < _REF_ION_COUNT) {
+        var z = _REF_ION_Z[ion];
+        var zf: f64 = f64_from(z);
+        var az: f64 = TM_FINE_STRUCTURE * zf;
+        var scale: f64 = ((TM_RYDBERG * zf) * zf) * (az * az);
+        var worst: f64 = 0.0;
+        var count = 0;
+        var n = 2;
+        while (n <= _REF_FULL_N_MAX) {
+            var l = 1;
+            while (l < n) {
+                var lo = _ref_find(ion, n, l, 2 * l - 1);
+                var hi = _ref_find(ion, n, l, 2 * l + 1);
+                assert(lo >= 0, "NIST has (n, l, j = l - 1/2)");
+                assert(hi >= 0, "NIST has (n, l, j = l + 1/2)");
+                if (lo >= 0 && hi >= 0) {
+                    var t, v = spectral_line_fine_nm(z, n, 2 * l - 1, n, 2 * l + 1);
+                    assert_eq(is_ok(t), 1, "spectral_line_fine_nm Ok");
+                    var nm: f64 = v;
+                    var sigma: f64 = 1000000000.0 / nm;
+                    var e_lo: f64 = _REF_LEVEL_CM[lo];
+                    var e_hi: f64 = _REF_LEVEL_CM[hi];
+                    var de: f64 = e_hi - e_lo;
+                    var nist: f64 = de * 100.0;
+                    assert(nist > 0.0, "j = l + 1/2 lies above j = l - 1/2");
+                    var nf: f64 = f64_from(n);
+                    var lf: f64 = f64_from(l);
+                    var lp: f64 = lf + 1.0;
+                    var dfs: f64 = scale / (((nf * nf) * nf) * (lf * lp));
+                    var b: f64 = (2.0 * (TM_FINE_STRUCTURE / _TM_PI)) * dfs;
+                    var u_lo: f64 = _REF_LEVEL_UNC_CM[lo];
+                    var u_hi: f64 = _REF_LEVEL_UNC_CM[hi];
+                    var du: f64 = u_lo + u_hi;
+                    var unc: f64 = du * 100.0;
+                    assert(unc <= _REF_UNC_FRACTION * b, "NIST uncertainty small against B2");
+                    var diff: f64 = sigma - nist;
+                    var res: f64 = f64_abs(diff);
+                    if (res > b) { _report_pair(ion, lo, hi); }
+                    assert(res <= b, "fine-structure splitting within B2 of NIST");
+                    var ratio: f64 = res / b;
+                    if (ratio > worst) { worst = ratio; }
+                    count = count + 1;
+                }
+                l = l + 1;
+            }
+            n = n + 1;
+        }
+        assert_eq(count, 55, "55 splittings per ion");
+        _report(ion, "fine-structure splittings", "B2", worst);
+        ion = ion + 1;
+    }
+}
+
+# §3: reduced_mass_factor(2, 4) against 1 / (1 + m_e/m_α), CODATA 2022 m_α/m_e = 7294.299 541 71(17), within
+# B3 = 5.8e-12 relative (the dropped 79.005 eV electron binding moves μ by 2.9e-12).
+fn _t_helium_reduced_mass_against_codata() {
+    test_group("helium_reduced_mass_against_codata");
+    var t, v = reduced_mass_factor(2, 4);
+    assert_eq(is_ok(t), 1, "reduced_mass_factor(2, 4) Ok");
+    var mu: f64 = v;
+    var ratio: f64 = 7294.29954171;
+    var inv: f64 = 1.0 / ratio;
+    var want: f64 = 1.0 / (1.0 + inv);
+    var diff: f64 = mu - want;
+    var ad: f64 = f64_abs(diff);
+    var rel: f64 = ad / want;
+    var b: f64 = 0.0000000000058;
+    assert(rel <= b, "⁴He⁺ μ within 5.8e-12 of CODATA 2022");
+    var frac: f64 = rel / b;
+    _report(0, "reduced mass", "B3", frac);
+}
+
+# Runs every test and returns the failure count.
+fn main(): i64 {
+    _t_reference_literals_exact();
+    _t_bohr_lines_against_nist();
+    _t_named_series_match_vacuum_lines();
+    _t_fine_splittings_against_nist();
+    _t_helium_reduced_mass_against_codata();
+    return assert_summary();
+}
+
+var exit_code = main();
+if (exit_code > 0) { exit_code = 1; }
+sys_exit_group(exit_code);

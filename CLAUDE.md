@@ -69,6 +69,7 @@ cyrius test --bounds
 cyrius bench
 cyrius distlib --all && cyrius distlib --check
 python3 -I scripts/surface_parity.py .           # every ported Rust pub item has its Cyrius name
+python3 -I scripts/reference/nist_levels.py . --check   # the reference data matches its NIST snapshot
 cyrius deps --locked && cyrius deps --locked --features optics
 cyrius audit
 ```
@@ -145,6 +146,8 @@ compiles that `test` and `build` drive, never from `cyrius lint`. Each one is a 
 - Do not hardcode toolchain versions in CI YAML — `cyrius = "X.Y.Z"` in `cyrius.cyml` is the source of truth
 - Do not widen a parity tolerance class to make a row pass. Class-C bounds are set by the
   rule in `docs/development/port-parity.md` before a function's first comparison
+- Do not fit a reference-test bound to a residual. Bounds against primary data are set by the rule in
+  `docs/development/reference-validation.md` before the first comparison
 - Do not add unnecessary dependencies
 - Do not break backward compatibility without a major version bump
 - Do not skip benchmarks before claiming performance improvements
@@ -156,6 +159,7 @@ compiles that `test` and `build` drive, never from `cyrius lint`. Each one is a 
 - [`docs/development/tanmatra-port-plan.md`](docs/development/tanmatra-port-plan.md) — the port plan of record
 - [`docs/development/state.md`](docs/development/state.md) — live state
 - [`docs/development/roadmap.md`](docs/development/roadmap.md) — milestones and backlog
+- [`docs/development/reference-validation.md`](docs/development/reference-validation.md) — tests against primary data, and how their bounds are set
 - [`docs/adr/`](docs/adr/) — Architecture Decision Records (*why X over Y?*)
 - [`docs/architecture/`](docs/architecture/) — non-obvious constraints
 - [`docs/guides/`](docs/guides/) — task-oriented how-tos

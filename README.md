@@ -5,13 +5,16 @@
 [![CI](https://github.com/MacCracken/tanmatra/actions/workflows/ci.yml/badge.svg)](https://github.com/MacCracken/tanmatra/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
 
-tanmatra **2.0.1** is a Cyrius library: a parity port of the Rust crate **1.3.0** (the crates.io and docs.rs
+tanmatra **2.0.2** is a Cyrius library: a parity port of the Rust crate **1.3.0** (the crates.io and docs.rs
 release), which stays frozen in [`rust-old/`](rust-old/) as the reference implementation. Every function is
 checked against it value by value:
 - **191,583 golden rows**, all within their tolerance class and almost all bit-identical, on x86_64 Linux,
   Windows PE and aarch64 ([port parity](docs/development/port-parity.md));
 - **the Rust tests**: every one of the 498 is ported or accounted for in the
   [Rust-test ledger](docs/development/rust-test-ledger.md).
+
+Beyond Rust, the hydrogen-like functions are also checked against the NIST He II and Li III energy levels at Z = 2
+and 3 ([reference validation](docs/development/reference-validation.md)).
 
 The [port plan](docs/development/tanmatra-port-plan.md) records the decisions, and [`state.md`](docs/development/state.md)
 the current state.
@@ -43,7 +46,7 @@ Declare it in your `cyrius.cyml` and vendor it with `cyrius deps`:
 ```toml
 [deps.tanmatra]
 git = "https://github.com/MacCracken/tanmatra.git"
-tag = "2.0.1"
+tag = "2.0.2"
 modules = ["dist/tanmatra.cyr"]
 ```
 
@@ -94,7 +97,7 @@ Cyrius (toolchain pinned in `cyrius.cyml`):
 ```bash
 cyrius deps --features optics             # vendor the stdlib and prakash into lib/
 cyrius build src/main.cyr build/tanmatra  # compile
-cyrius test                               # tests/*.tcyr: the parity harnesses and the ported Rust tests
+cyrius test                               # tests/*.tcyr: the parity harnesses, the ported Rust tests and the NIST checks
 cyrius bench                              # tests/*.bcyr
 cyrius audit                              # fmt + lint + test + bench
 cyrius distlib --all                      # dist/tanmatra.cyr and dist/tanmatra-optics.cyr

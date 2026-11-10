@@ -1,7 +1,7 @@
 # Development Roadmap
 
 **Forward-facing only.** This lists what is not done yet. Shipped work is in [`CHANGELOG.md`](../../CHANGELOG.md),
-the port's milestones (M0–M7, 2.0.0 and 2.0.1) are in the [port plan](tanmatra-port-plan.md)'s tracking table, and
+the port's milestones (M0–M7, 2.0.0, 2.0.1 and 2.0.2) are in the [port plan](tanmatra-port-plan.md)'s tracking table, and
 live status is in [`state.md`](state.md). A finished item is deleted from here, not checked off.
 
 ## How releases are picked
@@ -14,8 +14,9 @@ live status is in [`state.md`](state.md). A finished item is deleted from here, 
 
 Work that ports Rust code has its parity reference in `rust-old/` and gets golden rows from `scripts/oracle/`, as the
 port did. New physics has no Rust counterpart, so there are no golden rows to match. Instead, each new function is
-pinned by reference-value tests against a cited primary source (CODATA, NIST, PDG, NNDC). A fix that changes what Rust
-1.3.0 returned needs an ADR first.
+pinned by reference-value tests against a cited primary source (CODATA, NIST, PDG, NNDC). Their bounds follow the rule
+in [`reference-validation.md`](reference-validation.md), and are set before the first comparison. A fix that changes
+what Rust 1.3.0 returned needs an ADR first.
 
 ## 2.0.x — patches
 
@@ -23,7 +24,6 @@ None of these adds a function.
 
 | Item | Waits on | Change |
 |---|---|---|
-| **He⁺ and Li²⁺ lines (Z > 1 validation)** | nothing | Reference-value tests of `spectral_line_vacuum_nm(z, a, n1, n2)` at ⁴He⁺ and ⁷Li²⁺, against the NIST ASD He II and Li III lines. The bound is set beforehand from what the formula leaves out (fine structure, QED). A defect the tests find is fixed here, with an ADR, since the fix diverges from Rust |
 | **ganita `pow(−1, y)` for \|y\| > 2⁶⁴** | `ganita/docs/development/issues/2026-11-08-pow-minus-one-huge-even-exponent.md` | Once the cyrius pin moves to a stdlib with the fix, the one accepted libm row comes back ok. Then remove it from `_par_accepted` in `tests/parity.tcyr` and mark [ADR 0007](../adr/0007-accept-ganita-pow-minus-one-divergence.md) *Superseded* |
 | **chrono dates before 1970** | `cyrius/docs/development/issues/2026-11-09-chrono-dates-before-1970-silently-wrong.md` | Once `lib/chrono.cyr` is fixed, extend `tests/bridge.tcyr`'s chrono recipe back to 1958 and drop the "from 1970 on" caveat in `src/bridge.cyr`'s header. The bridge functions don't change |
 
