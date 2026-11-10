@@ -17,7 +17,7 @@
 | Cyrius toolchain | **6.7.18** (installed; `cyrius port` pins it) | `~/.cyrius/current` |
 | ganita | **1.2.15**, bundled in the 6.7.18 stdlib. There is no separate pin | `~/.cyrius/versions/6.7.18/lib/ganita.cyr:2` |
 | prakash | **2.15.2**, Cyrius, pinned to 6.7.18. `spd_new` and `wavelength_to_rgb` keep their 2.4.0 signatures | `/home/macro/Repos/prakash` |
-| Deferred consumers | Still in Rust and untouched since spring: kimiya 1.1.1, soorat 1.0.0, bhava 2.0.0. bijli, jyotish, falak, hisab-mimamsa, kiran and joshua have no local repo | respective repos |
+| Deferred consumers | kimiya is porting to Cyrius: its last Rust release, 1.2.0, is frozen as its oracle, and the port ships as kimiya 2.0.0 (M3 of M7 done 2026-11-09). soorat 1.0.0 and bhava 2.0.0 are still Rust and untouched since spring. bijli, jyotish, falak, hisab-mimamsa, kiran and joshua have no local repo | respective repos (`kimiya/docs/development/state.md`) |
 | Target | tanmatra **2.0.0**, Cyrius | this document |
 
 ## 0. What changed since the 6.6.5 draft
@@ -121,7 +121,7 @@ shows the feature wiring.
 | Rust surface | Why deferred | Unblocked when |
 |---|---|---|
 | `bridge.rs`: bijli bridges (`energy_to_wavelength_nm`, `nuclear_charge_field`) | bijli is not in Cyrius (no repo yet) | bijli ports |
-| `bridge.rs`: kimiya bridges (`atomic_number_to_valence`, `neutron_count`, `mass_to_binding_deficit_mev`, `half_life_to_decay_constant`) | kimiya is Rust (1.1.1) | kimiya ports |
+| `bridge.rs`: kimiya bridges (`atomic_number_to_valence`, `neutron_count`, `mass_to_binding_deficit_mev`, `half_life_to_decay_constant`) | kimiya's Cyrius port is under way (M3 of M7, 2026-11-09); its last release is Rust 1.2.0 | kimiya 2.0.0 ships |
 | `bridge.rs`: prakash-labelled helpers (`transitions_to_wavelengths`, `nuclear_spin_to_hyperfine_scale`) | kept with the bridge module for one coherent later port | bridge phase |
 | `bridge.rs`: hisab-mimamsa and falak bridges, and `SimulationClock` (kiran/joshua) | consumers not in Cyrius | each consumer ports |
 | `bridge.rs`: bhava `TimeContext` | bhava is Rust (2.0.0) | bhava ports |

@@ -1,160 +1,103 @@
 # Development Roadmap
 
-## ⭐ Priority — Cyrius port (tanmatra 2.0.0)
+**Forward-facing only.** This lists what is not done yet. Shipped work is in [`CHANGELOG.md`](../../CHANGELOG.md),
+the port's milestones (M0–M7, 2.0.0 and 2.0.1) are in the [port plan](tanmatra-port-plan.md)'s tracking table, and
+live status is in [`state.md`](state.md). A finished item is deleted from here, not checked off.
 
-**Plan of record: [`tanmatra-port-plan.md`](tanmatra-port-plan.md).**
+## How releases are picked
 
-▶ **Starts on Cyrius 6.7.18**, which bundles ganita 1.2.15 with a correctly rounded `f64_cbrt`. The plan was revised against 6.7.18 on 2026-11-08. **M0 is done (2026-11-08):**
-- the Rust oracle is frozen in `rust-old/`;
-- `scripts/oracle/` generates the golden corpus and the data modules;
-- `tests/parity.tcyr` replays the corpus on x86_64, Windows PE and aarch64;
-- the class-C bounds are measured and set ([`port-parity.md`](port-parity.md)).
+- **2.0.x, patches:** fixes, upstream follow-ups, new tests of existing functions, and work that just missed a
+  release.
+- **2.x, minors:** new public functions. Each keeps the whole 2.0 API, so a consumer upgrades without changes.
+- **3.0.0:** the only release that may break the 2.x API. No breaking change is planned. The backlog below holds the
+  research-scale items, which have no design yet.
 
-**M1 Foundation is done (2026-11-08).** error, particle and relativity are ported, and every golden row is bit-identical
-to Rust on x86_64, Windows PE and aarch64.
+Work that ports Rust code has its parity reference in `rust-old/` and gets golden rows from `scripts/oracle/`, as the
+port did. New physics has no Rust counterpart, so there are no golden rows to match. Instead, each new function is
+pinned by reference-value tests against a cited primary source (CODATA, NIST, PDG, NNDC). A fix that changes what Rust
+1.3.0 returned needs an ADR first.
 
-**M2 Nuclear is done (2026-11-08):** nucleus, shell model, decay and Bateman. Every class A/B golden row is
-bit-identical on all three targets. Bateman is within 9 ulp on x86_64 and bit-identical on aarch64.
+## 2.0.x — patches
 
-**M5 Timekeeping is done (2026-11-08):** exact integer-nanosecond `AtomicInstant`, leap seconds back to 1961, and
-TCG/TT and TCB/TDB. Every golden row is bit-identical on all three targets, and no golden row is pending any more.
+None of these adds a function.
 
-**M3 Atomic is done (2026-11-08):** configurations with the 20 NIST exceptions, ionization energies and electron
-affinities, Rydberg and fine-structure lines, radial wavefunctions to n = 60, Einstein A/B from the exact dipole
-integrals, the Lamb shift, Dirac, hyperfine and g-factors. Every class A/B row and every Einstein row is bit-identical on
-all three targets; the Lamb shift and radial functions are within 2 and 7 ulp on x86_64 and 1 and 0 on aarch64.
+| Item | Waits on | Change |
+|---|---|---|
+| **He⁺ and Li²⁺ lines (Z > 1 validation)** | nothing | Reference-value tests of `spectral_line_vacuum_nm(z, a, n1, n2)` at ⁴He⁺ and ⁷Li²⁺, against the NIST ASD He II and Li III lines. The bound is set beforehand from what the formula leaves out (fine structure, QED). A defect the tests find is fixed here, with an ADR, since the fix diverges from Rust |
+| **ganita `pow(−1, y)` for \|y\| > 2⁶⁴** | `ganita/docs/development/issues/2026-11-08-pow-minus-one-huge-even-exponent.md` | Once the cyrius pin moves to a stdlib with the fix, the one accepted libm row comes back ok. Then remove it from `_par_accepted` in `tests/parity.tcyr` and mark [ADR 0007](../adr/0007-accept-ganita-pow-minus-one-divergence.md) *Superseded* |
+| **chrono dates before 1970** | `cyrius/docs/development/issues/2026-11-09-chrono-dates-before-1970-silently-wrong.md` | Once `lib/chrono.cyr` is fixed, extend `tests/bridge.tcyr`'s chrono recipe back to 1958 and drop the "from 1970 on" caveat in `src/bridge.cyr`'s header. The bridge functions don't change |
 
-**M4 Reactions & scattering is done (2026-11-08):** presets, Q-values, cross sections, resonance integrals, moderation,
-yields and pathways; Rutherford, Mott, partial waves, Born, form factors, Klein–Nishina and pair production. The
-scattering formulas are ill-conditioned enough that the port reproduces Rust libm's sin, cos and log bit for bit, and
-every golden row is then bit-identical on all three targets.
+A cyrius or prakash pin bump ships as a patch once the full cleanliness check passes on x86_64 ELF, x86_64 PE and
+aarch64.
 
-**M6 Optics profile is done (2026-11-08):** spectral lines as prakash SPDs and colours, behind the optional `optics`
-feature and the `[lib.optics]` bundle. Every optics golden row passes against the Cyrius prakash 2.15.2 on all three
-targets, and the core bundle stays prakash-free.
+## 2.1.0 — atomic structure
 
-**M7 Release 2.0.0 is done (2026-11-08):** every Rust test is ported or accounted for in the
-[Rust-test ledger](rust-test-ledger.md), surface parity is the full diff, and `VERSION` is 2.0.0. **tanmatra 2.0.0 is
-the Cyrius library.**
+The Rust roadmap's v1.1 remainder, plus the two bridge helpers that wait on no consumer. Nothing blocks any of it.
 
-**2.0.1 (2026-11-09):** the chrono bridge, the first bridge (port plan §6), every golden row 0 ulp on all three
-targets; and prakash 2.15.2 for the optics profile, so every test file compiles warning-free again.
+- **Spherical harmonics Y_lm**, the angular part of the hydrogenic wavefunction. The radial part R_nl is already
+  ported, to n = 60.
+- **Oscillator strengths from first principles:** absorption f-values from the exact hydrogenic radial dipole
+  integrals that the Einstein A and B coefficients already use. Reference values come from the NIST ASD.
+- **Hartree screening:** effective nuclear charge for multi-electron atoms. Its reference data is chosen and cited
+  before the code is written.
+- **The prakash-labelled bridge helpers,** `transitions_to_wavelengths` and `nuclear_spin_to_hyperfine_scale`, added
+  to `src/bridge.cyr`. These are ports, so their 4 Rust tests and their golden rows come from `rust-old/`. prakash is
+  already in Cyrius. The port plan held them back for the bridge phase, which 2.0.1 opened.
 
-**Next: after 2.0.1** (port plan §6): the other bridges as their consumers land in Cyrius, the soorat integration, and
-the v1.x physics items below. Live status is in [`state.md`](state.md).
+## 2.2.0 — simulation support
 
-- **Rust 1.3.0 is the final Rust feature release** and the reference implementation: every finding of the [2026-09-16 audit](../audit/2026-09-16-math-audit.md) is repaired and pinned by reference-value tests.
-- **tanmatra 2.0.0 is the Cyrius port**, initialized with `cyrius port` (Rust moves to `rust-old/` as the parity oracle).
-- **In scope:** constants, particle, relativity, nucleus, decay, atomic, reaction, scattering, timekeeping, and the `optics` profile against prakash (already in Cyrius).
-- **Deferred until the consumers are in Cyrius:** the bridges to bijli, kimiya, bhava, hisab-mimamsa, falak and kiran/joshua, and the soorat integration. bijli, kimiya and soorat are still Rust. The chrono bridge shipped in 2.0.1, and jyotish's one bridge, `tai_to_tt`, is timekeeping's.
-- **Milestones:** M0 initialize → M1 foundation → M2 nuclear → M5 timekeeping → M3 atomic → M4 reactions & scattering → M6 optics → M7 release 2.0.0.
+The Rust roadmap's v1.6. All of it is new physics, tested against reference values.
 
-The v1.x items below continue in Cyrius after 2.0.0.
+- **Monte Carlo decay simulation:** stochastic chains over `decay_chain`, tested against Bateman's expectation.
+- **Particle transport:** energy loss, range and straggling, against the NIST stopping-power and range tables (PSTAR,
+  ASTAR, ESTAR).
+- **Detector response functions:** Gaussian smearing.
+- **Phase-space generators** for multi-body decays, on `TmFourMomentum`.
 
-## Future
+Monte Carlo needs a seeded, reproducible generator, and tanmatra has none. The stdlib's `lib/random.cyr` is the
+kernel CSPRNG, which can't be seeded, and hisab 3.4.1 exports no generator either. The release's first decision is which
+generator to use, recorded in an ADR, without adding a dependency just for it.
+
+## Later 2.x — as consumers land in Cyrius
+
+Each bridge waits for its consumer to be in Cyrius (port plan §6). When the consumer gets there, the bridge takes the
+next free minor. Like the chrono bridge in 2.0.1, it lands in `src/bridge.cyr` with a golden grid from
+`scripts/oracle/` and its Rust tests ported. Until then, `scripts/surface_parity.py` lists its items under
+`DEFERRED_ITEMS`.
+
+| Consumer | tanmatra surface | Rust tests | Blocked by |
+|---|---|---|---|
+| kimiya | `atomic_number_to_valence`, `neutron_count`, `mass_to_binding_deficit_mev`, `half_life_to_decay_constant` | 8 | kimiya 2.0.0. Its Cyrius port is under way (M3 of M7 done 2026-11-09) |
+| bijli | `energy_to_wavelength_nm`, `nuclear_charge_field` | 4 | bijli has no repository yet |
+| hisab-mimamsa | `gravitational_time_dilation`, `gravitational_time_offset_s` | 3 | not in Cyrius |
+| falak | `tai_seconds_to_jd_tt`, `jd_tt_to_tai_seconds`, `tai_seconds_to_mjd_tt` | 4 | not in Cyrius |
+| kiran / joshua | `SimulationClock` (7 functions) | 5, 1 of them serde | not in Cyrius |
+| bhava | `TimeContext` (7 functions), built from a `SimulationClock` | 6, 2 of them serde | bhava is Rust (2.0.0). It also needs `SimulationClock` first |
+| soorat | the `soorat-compat` integration as `src/soorat.cyr`, behind a feature as optics is: orbital density grids, nucleon positions, spectral lines and decay-chain graphs | 7 | soorat is Rust (1.0.0) |
+
+**JSON for the exchange types** waits on a Cyrius consumer that exchanges them. The types are `Nucleus`, `Isotope`,
+`FourMomentum`, `AtomicInstant` and `NuclearReaction`, with 7 Rust serde tests.
+- Use `#derive(Serialize)` only once `cyrius/docs/development/issues/2026-11-07-derive-serialize-key-scan-reads-past-nul.md`
+  is fixed. Until then, write the JSON by hand on bayan.
+- A bridge type's serde tests port only if that type becomes an exchange type.
+
+## Retiring `rust-old/`
+
+This changes no API, so it ships in whichever release meets the three conditions (port plan §6):
+- every deferred bridge and the soorat integration is ported or explicitly dropped;
+- the golden corpus and its generators are archived;
+- the [Rust-test ledger](rust-test-ledger.md) is closed. Today 48 tests are deferred: the 34 bridge tests, the 7 soorat
+  tests and the 7 serde tests above.
+
+If a consumer never reaches Cyrius, dropping its bridge is the way out. Dropping one diverges from Rust, so it takes
+an ADR.
+
+## 3.0.0 backlog
+
+These items are research-scale and unscheduled. None has a design or a primary source yet, and each needs a scope
+decision before it is pinned to a release. An item that fits the 2.x API moves up to a 2.x minor.
 
 - Nuclear density functional theory interface
 - Feynman diagram computation helpers
 - Lattice QCD observable interfaces
-- Integration with kiran for real-time physics rendering
-
-## Engineering Backlog
-
-### v1.1 — Expanded Wavefunctions and Spectroscopy
-
-- [x] Hydrogen wavefunctions for n > 3 (general Laguerre polynomial, n ≤ 60)
-- [ ] Angular wavefunctions (spherical harmonics Y_lm)
-- [x] Transition matrix elements (exact hydrogenic radial dipole integrals)
-- [ ] Oscillator strengths from first principles
-- [ ] Multi-electron atom approximations (Hartree screening)
-- [ ] All spectral series for He+ and Li2+ (Z > 1 validation)
-- [x] Reduced-mass (vacuum) spectral lines
-
-### v1.2 — Nuclear Data Tables (shipped in 1.2.0)
-
-- [x] AME2020 atomic mass evaluation integration
-- [x] ENDF cross-section data for more isotopes
-- [x] Nuclear charge radii from elastic electron scattering
-- [x] Magnetic dipole and electric quadrupole moments
-- [x] Beta-decay ft values
-
-### v1.3 — Advanced Scattering (shipped in 1.2.0)
-
-- [x] Partial-wave analysis (phase shifts)
-- [x] Born approximation for screened Coulomb
-- [x] Electron-atom elastic scattering (Mott with form factors)
-- [x] Compton scattering (Klein-Nishina)
-- [x] Pair production cross-sections
-
-### v1.4 — Relativistic Quantum (shipped in 1.2.0)
-
-- [x] Dirac equation solutions (hydrogen-like)
-- [x] Relativistic corrections beyond first order
-- [x] Hyperfine structure (magnetic dipole interaction)
-- [x] Anomalous magnetic moment corrections
-- [x] Breit interaction for two-electron atoms
-
-### v1.5 — Frequency Standards & Atomic Time (shipped in 1.2.0)
-
-Atomic transitions define the SI second. tanmatra already models transitions (Einstein A/B, selection rules, Rydberg) — this version adds the specific transitions and time scale conversions that define physical timekeeping.
-
-#### Frequency Standards
-
-- [x] `FrequencyStandard` enum: Cesium133, Rubidium87, HydrogenMaser, StrontiumOptical, YtterbiumOptical
-- [x] Cesium-133 hyperfine transition: 9,192,631,770 Hz (SI second definition, CGPM 1967)
-- [x] Strontium-87 optical lattice: 429,228,004,229,873.2 Hz (BIPM 2021 secondary representation)
-- [x] Ytterbium-171 optical lattice: 518,295,836,590,863.6 Hz (BIPM 2021)
-- [x] Rubidium-87 hyperfine: 6,834,682,610.904 Hz
-- [x] Hydrogen maser 1420.405 MHz (21 cm line)
-- [x] `transition_frequency()`, `transition_wavelength()`, `quality_factor()` for each standard
-- [x] Fractional stability (Allan deviation at 1 s) per standard type, sourced (2026-09-16)
-
-#### Atomic Time Scales
-
-- [x] `TimeScale` enum: TAI, UTC, TT, GPS, TCB, TCG
-- [x] TAI↔UTC conversion with leap second table (IERS Bulletin C, maintained as const data)
-- [x] TAI↔TT: fixed offset TT = TAI + 32.184s (IAU 1991)
-- [x] TAI↔GPS: fixed offset GPS = TAI − 19s
-- [x] TCG↔TT and TCB↔TDB conversions (IERS Conventions 2010 eqs. 10.1, 10.3) and secular TCB−TCG (eq. 10.5) — implemented 2026-09-16
-- [x] `AtomicInstant` type: TAI-referenced, exact nanosecond arithmetic (i64 seconds + u32 nanos)
-- [x] TAI−UTC for the 1961–1971 rubber-second era (USNO tai-utc.dat)
-- [ ] Conversions to/from `chrono::DateTime<Utc>` via leap second table
-
-#### Relativistic Clock Corrections
-
-- [x] Gravitational redshift at altitude: Δf/f = −gΔh/c² (first order)
-- [x] Satellite clock correction relative to the geoid (IERS eq. 10.9; GPS: +45.788 μs/day gravitational, −7.213 μs/day velocity)
-- [x] Second-order Doppler shift for moving clocks
-- [x] Sagnac correction: closed-loop interferometer and one-way time transfer
-- [x] Bridge to hisab-mimamsa: `gravitational_time_dilation()`
-
-#### Cross-Crate Integration (Bridges)
-
-- [x] **jyotish bridge**: `tai_to_tt()` replaces jyotish's polynomial Delta T approximation with exact TAI↔TT for modern epochs (post-1958)
-- [x] **chrono bridge**: `utc_date_to_tai_offset()`, `tai_to_utc_seconds()`, `utc_to_tai_seconds()` — leap-second-aware TAI↔UTC conversion for chrono consumers
-- [x] **hisab-mimamsa bridge**: `gravitational_time_dilation()`, `gravitational_time_offset_s()` — Schwarzschild clock corrections (GPS +38.6 μs/day net)
-- [x] **falak bridge**: `tai_seconds_to_jd_tt()`, `jd_tt_to_tai_seconds()`, `tai_seconds_to_mjd_tt()` — atomic time ↔ Julian Date conversion for ephemeris
-- [x] **kiran/joshua bridge**: `SimulationClock` type with time-scale multiplier, pause/resume/fast-forward — game world time anchored to physical TAI
-- [x] **bhava bridge**: `TimeContext` enum (RealTime/Simulated/Paused) consuming `SimulationClock` — circadian/rhythm/growth modules distinguish wall-clock from simulation time
-
-### v1.6 — Simulation Support
-
-- [ ] Monte Carlo decay simulation (stochastic chains)
-- [ ] Particle transport (energy loss, range, straggling)
-- [ ] Detector response functions (Gaussian smearing)
-- [ ] Phase space generators for multi-body decays
-
-## Cross-Crate Bridges (shipped in 1.1.0)
-
-- [x] `bridge.rs` module — primitive-value conversions for cross-crate atomic/nuclear physics
-- [x] **bijli bridge**: electron orbital energy (eV) → photon emission wavelength (nm); nuclear charge → Coulomb field strength
-- [x] **kimiya bridge**: atomic number, electron configuration → valence electrons, electronegativity; isotope mass → molecular weight
-- [x] **prakash bridge**: energy level transitions → spectral line wavelengths and intensities; nuclear spin → hyperfine splitting
-
-## Soorat Integration (shipped in 1.1.0)
-
-- [x] `integration/soorat.rs` module — feature-gated `soorat-compat`
-- [x] **Atomic orbital visualization**: orbital type (s/p/d/f), quantum numbers, probability density grid for volumetric rendering
-- [x] **Nuclear structure**: nucleon positions (protons/neutrons) for particle rendering
-- [x] **Spectral line data**: wavelength, intensity, element ID for spectral plot rendering
-- [x] **Decay chain**: parent/daughter nuclide graph with half-lives for node-link rendering
+- Real-time physics rendering with kiran, beyond the `SimulationClock` bridge
